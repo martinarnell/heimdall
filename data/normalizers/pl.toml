@@ -1,0 +1,78 @@
+# Polish place name normalizer
+# Covers Polish diacritics (ą→a, ć→c, ę→e, ł→l, etc.), street abbreviations,
+# English city name variants, and admin stopwords.
+
+[phonetic]
+engine = "none"  # No phonetic encoding for Polish (diacritic stripping is sufficient)
+
+[abbreviations]
+# Street type abbreviations
+"ul." = "ulica"
+"ul" = "ulica"
+"al." = "aleja"
+"al" = "aleja"
+"pl." = "plac"
+"pl" = "plac"
+"skw." = "skwer"
+"skw" = "skwer"
+"os." = "osiedle"
+"os" = "osiedle"
+"rondo" = "rondo"
+
+# Administrative
+"św." = "święty"
+"św" = "święty"
+
+[stopwords]
+words = [
+    "polska",
+    "poland",
+    "pl",
+    "rzeczpospolita",
+    "województwo",
+    "powiat",
+    "gmina",
+]
+
+[diacritics]
+# Polish diacritics → ASCII equivalents
+"ą" = "a"
+"ć" = "c"
+"ę" = "e"
+"ł" = "l"
+"ń" = "n"
+"ó" = "o"
+"ś" = "s"
+"ź" = "z"
+"ż" = "z"
+
+[known_variants]
+# English names for Polish cities
+"warsaw" = "warszawa"
+"cracow" = "kraków"
+"krakow" = "kraków"
+"gdansk" = "gdańsk"
+"danzig" = "gdańsk"
+"wroclaw" = "wrocław"
+"breslau" = "wrocław"
+"lodz" = "łódź"
+"poznan" = "poznań"
+"posen" = "poznań"
+"szczecin" = "szczecin"
+"stettin" = "szczecin"
+"katowice" = "katowice"
+"kattowitz" = "katowice"
+"bydgoszcz" = "bydgoszcz"
+"bromberg" = "bydgoszcz"
+"lublin" = "lublin"
+"bialystok" = "białystok"
+"czestochowa" = "częstochowa"
+"torun" = "toruń"
+"thorn" = "toruń"
+"rzeszow" = "rzeszów"
+"olsztyn" = "olsztyn"
+"allenstein" = "olsztyn"
+"gorzow wielkopolski" = "gorzów wielkopolski"
+"zielona gora" = "zielona góra"
+"opole" = "opole"
+"oppeln" = "opole"

@@ -1,0 +1,67 @@
+# Brazilian Portuguese place name normalizer
+# Street type abbreviations, title abbreviations, diacritics.
+# No phonetic encoding — Portuguese doesn't benefit from Nordic/German phonetic schemes.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Street type abbreviations
+"rua" = "r"
+"avenida" = "av"
+"travessa" = "tv"
+"alameda" = "al"
+"praça" = "pca"
+"estrada" = "est"
+"rodovia" = "rod"
+"largo" = "lgo"
+"beco" = "bc"
+"viela" = "vla"
+"via" = "v"
+# Title abbreviations
+"doutor" = "dr"
+"doutora" = "dra"
+"presidente" = "pres"
+"coronel" = "cel"
+"general" = "gen"
+"marechal" = "mal"
+"professor" = "prof"
+"professora" = "profa"
+"santo" = "sto"
+"santa" = "sta"
+"são" = "s"
+"sao" = "s"
+
+[stopwords]
+words = ["brasil", "brazil", "br"]
+
+[known_variants]
+"sao paulo" = "são paulo"
+"rio" = "rio de janeiro"
+"brasilia" = "brasília"
+"belem" = "belém"
+"goiania" = "goiânia"
+"cuiaba" = "cuiabá"
+"maceio" = "maceió"
+"maraba" = "marabá"
+"floripa" = "florianópolis"
+"sampa" = "são paulo"
+"bh" = "belo horizonte"
+"poa" = "porto alegre"
+"cwb" = "curitiba"
+"rj" = "rio de janeiro"
+"sp" = "são paulo"
+
+[diacritics]
+"ã" = "a"
+"õ" = "o"
+"á" = "a"
+"é" = "e"
+"í" = "i"
+"ó" = "o"
+"ú" = "u"
+"â" = "a"
+"ê" = "e"
+"ô" = "o"
+"ç" = "c"
+"à" = "a"

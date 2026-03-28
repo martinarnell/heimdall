@@ -1,0 +1,82 @@
+# Dhivehi/Maldivian place name normalizer
+# Maldives (MV).
+# Dhivehi uses Thaana script (related to Arabic). Photon data is primarily Latin-script.
+# Small island nation — simple normalizer with atoll/island name variants.
+# No phonetic encoding.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Maldivian atoll codes are already short
+"atoll" = "atoll"
+"island" = "isl"
+
+[stopwords]
+words = [
+    "maldives",
+    "mv",
+    "republic of maldives",
+    "ދިވެހިރާއްޖެ",
+]
+
+[known_variants]
+# Major Maldivian places — alternate spellings
+"male" = "މާލެ"
+"male'" = "މާލެ"
+"malé" = "މާލެ"
+"hulhumale" = "ހުޅުމާލެ"
+"hulhulé" = "ހުޅުލެ"
+"hulhule" = "ހުޅުލެ"
+"addu city" = "އައްޑޫ ސިޓީ"
+"addu atoll" = "އައްޑޫ ސިޓީ"
+"hithadhoo" = "ހިތަދޫ"
+"fuvahmulah" = "ފުވައްމުލައް"
+"kulhudhuffushi" = "ކުޅުދުއްފުށި"
+"thinadhoo" = "ތިނަދޫ"
+"naifaru" = "ނައިފަރު"
+"eydhafushi" = "އޭދަފުށި"
+"villingili" = "ވިލިނގިލި"
+"maafushi" = "މާފުށި"
+"dhigurah" = "ދިގުރަށް"
+
+[diacritics]
+# Thaana script → Latin transliteration
+"ހ" = "h"
+"ށ" = "sh"
+"ނ" = "n"
+"ރ" = "r"
+"ބ" = "b"
+"ޅ" = "lh"
+"ކ" = "k"
+"އ" = "a"
+"ވ" = "v"
+"މ" = "m"
+"ފ" = "f"
+"ދ" = "dh"
+"ތ" = "th"
+"ލ" = "l"
+"ގ" = "g"
+"ޏ" = "gn"
+"ސ" = "s"
+"ޑ" = "d"
+"ޒ" = "z"
+"ޓ" = "t"
+"ޔ" = "y"
+"ޕ" = "p"
+"ޖ" = "j"
+"ޗ" = "ch"
+# Thaana vowel marks
+"ަ" = "a"
+"ާ" = "aa"
+"ި" = "i"
+"ީ" = "ee"
+"ު" = "u"
+"ޫ" = "oo"
+"ެ" = "e"
+"ޭ" = "ey"
+"ޮ" = "o"
+"ޯ" = "oa"
+# Accented Latin → plain
+"é" = "e"
+"'" = ""

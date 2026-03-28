@@ -1,0 +1,140 @@
+# Persian/Farsi place name normalizer
+# Iran (IR), partly Afghanistan (AF).
+# Arabic script base with four additional Persian letters: پ چ ژ گ.
+# No phonetic encoding — no suitable scheme implemented.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Persian street types
+"خیابان" = "خ"
+"کوچه" = "ک"
+"بلوار" = "بل"
+"بزرگراه" = "بزر"
+"میدان" = "م"
+"جاده" = "ج"
+
+# Latin-script transliterations
+"khiaban" = "kh"
+"kheyaban" = "kh"
+"kuche" = "k"
+"kucheh" = "k"
+"bulvar" = "bl"
+"boulevard" = "bl"
+"meydan" = "m"
+"meidan" = "m"
+
+[stopwords]
+words = [
+    "ایران",
+    "iran",
+    "ir",
+    "جمهوری اسلامی ایران",
+    "islamic republic of iran",
+    "افغانستان",
+    "afghanistan",
+    "af",
+]
+
+[known_variants]
+# Major Iranian cities — Latin → Persian
+"tehran" = "تهران"
+"teheran" = "تهران"
+"isfahan" = "اصفهان"
+"esfahan" = "اصفهان"
+"shiraz" = "شیراز"
+"tabriz" = "تبریز"
+"mashhad" = "مشهد"
+"mashad" = "مشهد"
+"karaj" = "کرج"
+"ahvaz" = "اهواز"
+"ahwaz" = "اهواز"
+"qom" = "قم"
+"ghom" = "قم"
+"kermanshah" = "کرمانشاه"
+"kerman" = "کرمان"
+"rasht" = "رشت"
+"yazd" = "یزد"
+"hamadan" = "همدان"
+"hamedan" = "همدان"
+"arak" = "اراک"
+"zanjan" = "زنجان"
+"sanandaj" = "سنندج"
+"bandar abbas" = "بندر عباس"
+"gorgan" = "گرگان"
+"birjand" = "بیرجند"
+"sari" = "ساری"
+"urmia" = "ارومیه"
+"orumiyeh" = "ارومیه"
+
+# Major Afghan cities
+"kabul" = "کابل"
+"herat" = "هرات"
+"kandahar" = "قندهار"
+"mazar-i-sharif" = "مزار شریف"
+"mazar e sharif" = "مزار شریف"
+"jalalabad" = "جلال‌آباد"
+"kunduz" = "قندوز"
+"balkh" = "بلخ"
+"ghazni" = "غزنی"
+"bamiyan" = "بامیان"
+"bamyan" = "بامیان"
+
+[diacritics]
+# Persian-specific letters (not in Arabic) → Latin
+"پ" = "p"
+"چ" = "ch"
+"ژ" = "zh"
+"گ" = "g"
+
+# Shared Arabic letters → Latin (same as ar.toml)
+"ا" = "a"
+"أ" = "a"
+"إ" = "i"
+"آ" = "a"
+"ب" = "b"
+"ت" = "t"
+"ث" = "s"
+"ج" = "j"
+"ح" = "h"
+"خ" = "kh"
+"د" = "d"
+"ذ" = "z"
+"ر" = "r"
+"ز" = "z"
+"س" = "s"
+"ش" = "sh"
+"ص" = "s"
+"ض" = "z"
+"ط" = "t"
+"ظ" = "z"
+"ع" = "a"
+"غ" = "gh"
+"ف" = "f"
+"ق" = "gh"
+"ک" = "k"
+"ل" = "l"
+"م" = "m"
+"ن" = "n"
+"ه" = "h"
+"و" = "v"
+"ی" = "y"
+# Persian-specific forms
+"ة" = "e"
+"ى" = "a"
+"ؤ" = "v"
+"ئ" = "y"
+# Persian ye vs Arabic ye (Unicode difference)
+"ي" = "y"
+"ك" = "k"
+
+# Tashkeel → strip
+"َ" = ""
+"ُ" = ""
+"ِ" = ""
+"ّ" = ""
+"ً" = ""
+"ٌ" = ""
+"ٍ" = ""
+"ْ" = ""

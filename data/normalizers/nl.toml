@@ -1,0 +1,83 @@
+# Dutch place name normalizer (Netherlands)
+# Covers Dutch street type abbreviations, diacritics, and common name variants.
+# No phonetic encoding — Dutch spelling is regular enough for exact + Levenshtein.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Street type suffixes
+"str" = "straat"
+"str." = "straat"
+"ln" = "laan"
+"ln." = "laan"
+"wg" = "weg"
+"wg." = "weg"
+"pl" = "plein"
+"pl." = "plein"
+"gr" = "gracht"
+"gr." = "gracht"
+"kd" = "kade"
+"kd." = "kade"
+"sg" = "singel"
+"sg." = "singel"
+"blvd" = "boulevard"
+"blvd." = "boulevard"
+"dw" = "dwarsstraat"
+"sgl" = "singel"
+"mk" = "markt"
+"mk." = "markt"
+"st." = "steeg"
+
+# Directional
+"n." = "noord"
+"z." = "zuid"
+"o." = "oost"
+"w." = "west"
+
+[stopwords]
+words = [
+    "nederland",
+    "nl",
+    "netherlands",
+    "the netherlands",
+    "holland",
+    "gemeente",
+    "provincie",
+]
+
+[diacritics]
+"ë" = "e"
+"ï" = "i"
+"é" = "e"
+"è" = "e"
+"ü" = "u"
+"ö" = "o"
+"ä" = "a"
+
+[known_variants]
+# Official names vs common usage
+"den haag" = "'s-gravenhage"
+"the hague" = "'s-gravenhage"
+"la haye" = "'s-gravenhage"
+"den bosch" = "'s-hertogenbosch"
+"the hague" = "'s-gravenhage"
+
+# Frisian variants
+"leeuwarden" = "leeuwarden"
+"ljouwert" = "leeuwarden"
+
+# Common English/international variants
+"amsterdam" = "amsterdam"
+"rotterdam" = "rotterdam"
+"utrecht" = "utrecht"
+"eindhoven" = "eindhoven"
+"groningen" = "groningen"
+"maastricht" = "maastricht"
+"maestricht" = "maastricht"
+"nimegen" = "nijmegen"
+"nimwegen" = "nijmegen"
+"flushing" = "vlissingen"
+"the hague" = "'s-gravenhage"
+"hook of holland" = "hoek van holland"
+"breda" = "breda"

@@ -1,0 +1,259 @@
+# Arabic place name normalizer
+# Shared by Arabic-speaking countries: SA, AE, QA, KW, BH, OM, YE, IQ, SY, JO, LB, PS, EG, LY, TN, DZ, MA.
+# Photon data is primarily Latin-script, but Arabic script names appear in name:ar tags.
+# No phonetic encoding — Arabic has no suitable European phonetic scheme,
+# and a dedicated Arabic one (e.g., Soundex-AR) is not yet implemented.
+#
+# Pipeline: strip_combining_marks removes tashkeel (fatha, damma, kasra, shadda, sukun,
+# tanwin) via NFD decomposition BEFORE [diacritics] transliteration runs.
+# Then [diacritics] maps Arabic base letters to Latin equivalents (longest-first).
+
+[phonetic]
+engine = "none"
+strip_combining_marks = true  # strips tashkeel before transliteration
+
+[abbreviations]
+# Arabic street types (Arabic script -> abbreviated)
+"شارع" = "ش"
+"طريق" = "ط"
+"ميدان" = "م"
+"حارة" = "ح"
+"زقاق" = "ز"
+"جادة" = "ج"
+
+# Latin-script transliterations of Arabic street types
+"sharia" = "sh"
+"shari" = "sh"
+"tariq" = "t"
+"midan" = "m"
+"hara" = "h"
+
+# Common Arabic address prefixes
+"حي" = "حي"
+"منطقة" = "منطقة"
+
+[stopwords]
+words = [
+    "المملكة العربية السعودية",
+    "saudi arabia",
+    "sa",
+    "الإمارات العربية المتحدة",
+    "united arab emirates",
+    "uae",
+    "ae",
+    "قطر",
+    "qatar",
+    "qa",
+    "الكويت",
+    "kuwait",
+    "kw",
+    "البحرين",
+    "bahrain",
+    "bh",
+    "عمان",
+    "oman",
+    "om",
+    "اليمن",
+    "yemen",
+    "ye",
+    "العراق",
+    "iraq",
+    "iq",
+    "سوريا",
+    "syria",
+    "sy",
+    "الأردن",
+    "jordan",
+    "jo",
+    "لبنان",
+    "lebanon",
+    "lb",
+    "فلسطين",
+    "palestine",
+    "ps",
+    "مصر",
+    "egypt",
+    "eg",
+    "ليبيا",
+    "libya",
+    "ly",
+    "تونس",
+    "tunisia",
+    "tn",
+    "الجزائر",
+    "algeria",
+    "dz",
+    "المغرب",
+    "morocco",
+    "ma",
+]
+
+[known_variants]
+# Major Saudi cities
+"riyadh" = "الرياض"
+"riyad" = "الرياض"
+"jeddah" = "جدة"
+"jidda" = "جدة"
+"mecca" = "مكة المكرمة"
+"makkah" = "مكة المكرمة"
+"medina" = "المدينة المنورة"
+"madinah" = "المدينة المنورة"
+"dammam" = "الدمام"
+"khobar" = "الخبر"
+"dhahran" = "الظهران"
+"tabuk" = "تبوك"
+"abha" = "أبها"
+
+# Major UAE cities
+"dubai" = "دبي"
+"abu dhabi" = "أبو ظبي"
+"sharjah" = "الشارقة"
+"ajman" = "عجمان"
+"ras al khaimah" = "رأس الخيمة"
+"fujairah" = "الفجيرة"
+"al ain" = "العين"
+
+# Qatar
+"doha" = "الدوحة"
+"al wakrah" = "الوكرة"
+
+# Kuwait
+"kuwait city" = "مدينة الكويت"
+
+# Bahrain
+"manama" = "المنامة"
+"muharraq" = "المحرق"
+
+# Oman
+"muscat" = "مسقط"
+"masqat" = "مسقط"
+"salalah" = "صلالة"
+"sohar" = "صحار"
+
+# Yemen
+"sanaa" = "صنعاء"
+"sana'a" = "صنعاء"
+"aden" = "عدن"
+"taiz" = "تعز"
+
+# Iraq
+"baghdad" = "بغداد"
+"basra" = "البصرة"
+"mosul" = "الموصل"
+"erbil" = "أربيل"
+"arbil" = "أربيل"
+"irbil" = "أربيل"
+"sulaymaniyah" = "السليمانية"
+"kirkuk" = "كركوك"
+"najaf" = "النجف"
+"karbala" = "كربلاء"
+
+# Syria
+"damascus" = "دمشق"
+"dimashq" = "دمشق"
+"aleppo" = "حلب"
+"homs" = "حمص"
+"latakia" = "اللاذقية"
+"hama" = "حماة"
+"deir ez-zor" = "دير الزور"
+
+# Jordan
+"amman" = "عمّان"
+"zarqa" = "الزرقاء"
+"irbid" = "إربد"
+"aqaba" = "العقبة"
+"petra" = "البتراء"
+
+# Lebanon
+"beirut" = "بيروت"
+"tripoli" = "طرابلس"
+"tarabulus" = "طرابلس"
+"sidon" = "صيدا"
+"tyre" = "صور"
+"byblos" = "جبيل"
+"baalbek" = "بعلبك"
+
+# Palestine
+"gaza" = "غزة"
+"ramallah" = "رام الله"
+"nablus" = "نابلس"
+"hebron" = "الخليل"
+"bethlehem" = "بيت لحم"
+"jenin" = "جنين"
+"jericho" = "أريحا"
+
+# Egypt
+"cairo" = "القاهرة"
+"al-qahira" = "القاهرة"
+"alexandria" = "الإسكندرية"
+"giza" = "الجيزة"
+"luxor" = "الأقصر"
+"aswan" = "أسوان"
+"port said" = "بورسعيد"
+"suez" = "السويس"
+"sharm el sheikh" = "شرم الشيخ"
+
+# North Africa
+"tunis" = "تونس"
+"algiers" = "الجزائر"
+"al-jazair" = "الجزائر"
+"casablanca" = "الدار البيضاء"
+"dar-al-bayda" = "الدار البيضاء"
+"rabat" = "الرباط"
+"marrakech" = "مراكش"
+"fes" = "فاس"
+"fez" = "فاس"
+"tangier" = "طنجة"
+"tripoli libya" = "طرابلس"
+"tarabulus libya" = "طرابلس"
+"benghazi" = "بنغازي"
+"misrata" = "مصراتة"
+
+[diacritics]
+# Arabic definite article (multi-char, matched first due to longest-first sorting)
+"ال" = "al"
+
+# 28 Arabic base consonants -> Latin transliteration
+# Tashkeel (fatha, damma, kasra, shadda, sukun, tanwin) is stripped automatically
+# by strip_combining_marks = true BEFORE these mappings run.
+"ا" = "a"
+"ب" = "b"
+"ت" = "t"
+"ث" = "th"
+"ج" = "j"
+"ح" = "h"
+"خ" = "kh"
+"د" = "d"
+"ذ" = "dh"
+"ر" = "r"
+"ز" = "z"
+"س" = "s"
+"ش" = "sh"
+"ص" = "s"
+"ض" = "d"
+"ط" = "t"
+"ظ" = "z"
+"ع" = "a"
+"غ" = "gh"
+"ف" = "f"
+"ق" = "q"
+"ك" = "k"
+"ل" = "l"
+"م" = "m"
+"ن" = "n"
+"ه" = "h"
+"و" = "w"
+"ي" = "y"
+
+# Hamza variants -> "a" (simplified)
+"أ" = "a"
+"إ" = "a"
+"آ" = "a"
+
+# Ta marbuta, alef maqsura -> "a"
+"ة" = "a"
+"ى" = "a"
+
+# Hamza carriers -> strip (hamza on waw, hamza on ya)
+"ؤ" = ""
+"ئ" = ""

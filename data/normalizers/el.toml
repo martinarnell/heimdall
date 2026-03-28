@@ -1,0 +1,110 @@
+# Greek place name normalizer
+# Covers Greece (GR), Cyprus (CY)
+# Maps common Latin transliterations to canonical forms, Greek diacritics.
+# NOTE: Photon data includes Latin-script names — this normalizer handles those.
+
+[phonetic]
+engine = "none"  # No phonetic encoding for Greek
+
+[abbreviations]
+# Greek street types (Latin transliteration)
+"odos" = "od"
+"od." = "od"
+"leoforos" = "leof"
+"leof." = "leof"
+"plateia" = "pl"
+"pl." = "pl"
+"eparchiaki" = "ep"
+
+# Abbreviated input
+"av." = "av"
+"st." = "st"
+
+[stopwords]
+words = [
+    "greece",
+    "ellada",
+    "ελλάδα",
+    "hellas",
+    "gr",
+    "cyprus",
+    "kypros",
+    "κύπρος",
+    "cy",
+    "nomos",
+    "dimos",
+    "perifereia",
+]
+
+[diacritics]
+# Greek polytonic/monotonic diacritics on Latin-transliterated names
+"á" = "a"
+"à" = "a"
+"â" = "a"
+"ä" = "a"
+"é" = "e"
+"è" = "e"
+"ê" = "e"
+"ë" = "e"
+"í" = "i"
+"ì" = "i"
+"î" = "i"
+"ï" = "i"
+"ó" = "o"
+"ò" = "o"
+"ô" = "o"
+"ö" = "o"
+"ú" = "u"
+"ù" = "u"
+"û" = "u"
+"ü" = "u"
+"ý" = "y"
+
+# Greek-specific transliteration diacritics (common in place names)
+"ά" = "α"
+"έ" = "ε"
+"ή" = "η"
+"ί" = "ι"
+"ΐ" = "ι"
+"ό" = "ο"
+"ύ" = "υ"
+"ΰ" = "υ"
+"ώ" = "ω"
+
+[char_equivalences]
+# Common Greek→Latin transliteration equivalences
+"ι" = "i"
+"η" = "i"
+
+[known_variants]
+# English/international names for Greek/Cypriot cities
+"athens" = "athina"
+"athinai" = "athina"
+"thessaloniki" = "thessaloniki"
+"salonica" = "thessaloniki"
+"salonika" = "thessaloniki"
+"thessalonica" = "thessaloniki"
+"piraeus" = "pireas"
+"pireaus" = "pireas"
+"patras" = "patra"
+"heraklion" = "irakleio"
+"heraklio" = "irakleio"
+"iraklion" = "irakleio"
+"candia" = "irakleio"
+"corfu" = "kerkyra"
+"crete" = "kriti"
+"rhodes" = "rodos"
+"mykonos" = "mykonos"
+"santorini" = "thira"
+"cephalonia" = "kefalonia"
+"zante" = "zakynthos"
+"ithaca" = "ithaki"
+"thessaly" = "thessalia"
+"peloponnese" = "peloponnisos"
+"peloponnesus" = "peloponnisos"
+# Cyprus
+"nicosia" = "lefkosia"
+"limassol" = "lemesos"
+"larnaca" = "larnaka"
+"paphos" = "pafos"
+"famagusta" = "ammochostos"

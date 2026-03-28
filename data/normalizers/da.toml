@@ -1,0 +1,54 @@
+# Danish place name normalizer
+# Covers Danish, common English approximations, and Greenland/Faroe variants
+
+[abbreviations]
+# Street types
+"v." = "vej"
+"vej" = "vej"
+"gade" = "gade"
+"pl." = "plads"
+"alle" = "allé"
+"bv." = "boulevard"
+"str." = "stræde"
+
+# Directional
+"n." = "nordre"
+"s." = "søndre"
+"ø." = "østre"
+"ndr." = "nordre"
+"sdr." = "søndre"
+
+# Size
+"st." = "store"
+"l." = "lille"
+
+[stopwords]
+words = [
+    "kommune",
+    "region",
+    "denmark",
+    "danmark",
+]
+
+[known_variants]
+# English/ASCII approximations of Danish cities
+"copenhagen" = "københavn"
+"kobenhavn" = "københavn"
+"copenhague" = "københavn"
+"aarhus" = "århus"
+"arhus" = "århus"
+"aalborg" = "ålborg"
+"alborg" = "ålborg"
+"helsingor" = "helsingør"
+"elsinore" = "helsingør"
+"roskilde" = "roskilde"
+"hoje taastrup" = "høje-taastrup"
+"hoje-taastrup" = "høje-taastrup"
+
+# Greenland
+"godthab" = "nuuk"
+"godthåb" = "nuuk"
+
+# Faroe Islands
+"torshavn" = "tórshavn"
+"thorshavn" = "tórshavn"

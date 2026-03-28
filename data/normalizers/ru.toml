@@ -1,0 +1,152 @@
+# Russian place name normalizer
+# Cyrillic → Latin transliteration in [diacritics], Russian street abbreviations,
+# English city name variants. Also used for Belarus (BY) which shares Cyrillic.
+# No phonetic encoding — Cyrillic transliteration provides sufficient fuzzy matching.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Street type abbreviations (long → short)
+"улица" = "ул"
+"проспект" = "пр"
+"переулок" = "пер"
+"бульвар" = "бул"
+"площадь" = "пл"
+"шоссе" = "ш"
+"набережная" = "наб"
+"проезд" = "пр-д"
+"тупик" = "туп"
+"аллея" = "ал"
+"микрорайон" = "мкр"
+"квартал" = "кв"
+
+# Abbreviated input with dots
+"ул." = "ул"
+"пр." = "пр"
+"пер." = "пер"
+"бул." = "бул"
+"пл." = "пл"
+"наб." = "наб"
+
+# Latin equivalents for transliterated queries
+"ulitsa" = "ул"
+"prospekt" = "пр"
+"pereulok" = "пер"
+"bulvar" = "бул"
+"ploshchad" = "пл"
+"shosse" = "ш"
+"naberezhnaya" = "наб"
+"alleya" = "ал"
+"proezd" = "пр-д"
+"tupik" = "туп"
+
+[stopwords]
+words = [
+    "россия",
+    "russia",
+    "ru",
+    "российская федерация",
+    "russian federation",
+    "область",
+    "край",
+    "округ",
+    "район",
+    "республика",
+    "oblast",
+    "krai",
+    "raion",
+]
+
+[known_variants]
+# English → Russian canonical names
+"moscow" = "москва"
+"st petersburg" = "санкт-петербург"
+"saint petersburg" = "санкт-петербург"
+"st. petersburg" = "санкт-петербург"
+"petersburg" = "санкт-петербург"
+"petrograd" = "санкт-петербург"
+"leningrad" = "санкт-петербург"
+"novosibirsk" = "новосибирск"
+"yekaterinburg" = "екатеринбург"
+"ekaterinburg" = "екатеринбург"
+"nizhny novgorod" = "нижний новгород"
+"nizhniy novgorod" = "нижний новгород"
+"gorky" = "нижний новгород"
+"kazan" = "казань"
+"chelyabinsk" = "челябинск"
+"samara" = "самара"
+"kuibyshev" = "самара"
+"omsk" = "омск"
+"rostov-on-don" = "ростов-на-дону"
+"rostov on don" = "ростов-на-дону"
+"ufa" = "уфа"
+"krasnoyarsk" = "красноярск"
+"voronezh" = "воронеж"
+"perm" = "пермь"
+"volgograd" = "волгоград"
+"stalingrad" = "волгоград"
+"krasnodar" = "краснодар"
+"saratov" = "саратов"
+"tyumen" = "тюмень"
+"vladivostok" = "владивосток"
+"irkutsk" = "иркутск"
+"kaliningrad" = "калининград"
+"konigsberg" = "калининград"
+"murmansk" = "мурманск"
+"arkhangelsk" = "архангельск"
+"sochi" = "сочи"
+
+# Common abbreviation
+"spb" = "санкт-петербург"
+"msk" = "москва"
+"nsk" = "новосибирск"
+"ekb" = "екатеринбург"
+
+# Belarus cities (BY shares this normalizer)
+"minsk" = "минск"
+"gomel" = "гомель"
+"mogilev" = "могилёв"
+"vitebsk" = "витебск"
+"grodno" = "гродно"
+"brest" = "брест"
+
+[diacritics]
+# Cyrillic → Latin transliteration (lowercase)
+"а" = "a"
+"б" = "b"
+"в" = "v"
+"г" = "g"
+"д" = "d"
+"е" = "e"
+"ё" = "yo"
+"ж" = "zh"
+"з" = "z"
+"и" = "i"
+"й" = "y"
+"к" = "k"
+"л" = "l"
+"м" = "m"
+"н" = "n"
+"о" = "o"
+"п" = "p"
+"р" = "r"
+"с" = "s"
+"т" = "t"
+"у" = "u"
+"ф" = "f"
+"х" = "kh"
+"ц" = "ts"
+"ч" = "ch"
+"ш" = "sh"
+"щ" = "shch"
+"ъ" = ""
+"ы" = "y"
+"ь" = ""
+"э" = "e"
+"ю" = "yu"
+"я" = "ya"
+
+[char_equivalences]
+# ё ↔ е: commonly interchanged in Russian text
+"ё" = "е"

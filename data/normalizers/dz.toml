@@ -1,0 +1,54 @@
+# Dzongkha place name normalizer
+# Bhutan (BT).
+# Dzongkha uses Tibetan script. Photon data is primarily Latin-script transliterations.
+# Small country (~30 cities/towns) — simple normalizer with key city variants.
+# No phonetic encoding.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# No standard abbreviations — Bhutanese addresses use descriptive place names
+
+[stopwords]
+words = [
+    "bhutan",
+    "bt",
+    "kingdom of bhutan",
+    "འབྲུག",
+]
+
+[known_variants]
+# Major Bhutanese cities/towns — alternate spellings
+"thimphu" = "thimphu"
+"thimbu" = "thimphu"
+"thimpu" = "thimphu"
+"paro" = "paro"
+"punakha" = "punakha"
+"phuntsholing" = "phuentsholing"
+"phuentsholing" = "phuentsholing"
+"jakar" = "jakar"
+"bumthang" = "bumthang"
+"wangdue phodrang" = "wangdue phodrang"
+"wangdi" = "wangdue phodrang"
+"trongsa" = "trongsa"
+"mongar" = "mongar"
+"trashigang" = "trashigang"
+"samdrup jongkhar" = "samdrup jongkhar"
+"gelephu" = "gelephu"
+"haa" = "haa"
+"zhemgang" = "zhemgang"
+"lhuentse" = "lhuentse"
+"lhuntse" = "lhuentse"
+"dagana" = "dagana"
+"tsirang" = "tsirang"
+"sarpang" = "sarpang"
+"samtse" = "samtse"
+"chhukha" = "chhukha"
+"chukha" = "chhukha"
+
+[diacritics]
+# Tibetan script is rare in search — Latin transliterations dominate
+# Common romanization variants
+"ö" = "o"
+"ü" = "u"

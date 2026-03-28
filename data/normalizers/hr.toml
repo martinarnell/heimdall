@@ -1,0 +1,196 @@
+# Croatian/South Slavic (Latin script) place name normalizer
+# Covers Croatia (HR), Bosnia and Herzegovina (BA), Montenegro (ME),
+# Serbia (RS), Kosovo (XK), North Macedonia (MK), Albania (AL), Slovenia (SI)
+# Shared normalizer for South Slavic languages using Latin script.
+# NOTE: Serbian Cyrillic handled via char_equivalences for common letters.
+
+[phonetic]
+engine = "none"  # No phonetic encoding
+
+[abbreviations]
+# Croatian/Serbian/Bosnian street types
+"ulica" = "ul"
+"ul." = "ul"
+"trg" = "trg"
+"avenija" = "av"
+"av." = "av"
+"cesta" = "c"
+"c." = "c"
+"put" = "put"
+"obala" = "ob"
+"ob." = "ob"
+"prilaz" = "prl"
+"stube" = "stb"
+"prolaz" = "prol"
+"bulevar" = "bul"
+"bul." = "bul"
+"šetalište" = "šet"
+
+# Slovenian additions (ulica, cesta, trg shared with Croatian above)
+"pot" = "pot"
+"nabrežje" = "nbr"
+
+# Albanian street types
+"rruga" = "rr"
+"rr." = "rr"
+"bulevardi" = "blvd"
+"blvd." = "blvd"
+"sheshi" = "sh"
+
+# Religious/honorific
+"sveti" = "sv"
+"sv." = "sv"
+"sveta" = "sv"
+"święty" = "sw"
+
+[stopwords]
+words = [
+    "croatia",
+    "hrvatska",
+    "hr",
+    "bosnia and herzegovina",
+    "bosna i hercegovina",
+    "ba",
+    "montenegro",
+    "crna gora",
+    "me",
+    "serbia",
+    "srbija",
+    "rs",
+    "kosovo",
+    "kosova",
+    "xk",
+    "north macedonia",
+    "severna makedonija",
+    "северна македонија",
+    "mk",
+    "albania",
+    "shqipëria",
+    "al",
+    "slovenia",
+    "slovenija",
+    "si",
+    "županija",
+    "općina",
+    "opština",
+    "občina",
+    "bashkia",
+]
+
+[diacritics]
+# South Slavic Latin diacritics → ASCII
+"č" = "c"
+"ć" = "c"
+"đ" = "d"
+"š" = "s"
+"ž" = "z"
+# Slovenian specific
+"à" = "a"
+"é" = "e"
+"è" = "e"
+"ó" = "o"
+"ô" = "o"
+"ú" = "u"
+# Albanian specific
+"ë" = "e"
+"ç" = "c"
+# Macedonian Latin transliteration
+"ǵ" = "g"
+"ḱ" = "k"
+# Hungarian minority names (Vojvodina, etc.)
+"á" = "a"
+"í" = "i"
+"ö" = "o"
+"ő" = "o"
+"ü" = "u"
+"ű" = "u"
+
+[char_equivalences]
+# Serbian Cyrillic ↔ Latin equivalences (most common letters)
+"а" = "a"
+"б" = "b"
+"в" = "v"
+"г" = "g"
+"д" = "d"
+"е" = "e"
+"ж" = "z"
+"з" = "z"
+"и" = "i"
+"к" = "k"
+"л" = "l"
+"м" = "m"
+"н" = "n"
+"о" = "o"
+"п" = "p"
+"р" = "r"
+"с" = "s"
+"т" = "t"
+"у" = "u"
+"ф" = "f"
+"х" = "h"
+"ц" = "c"
+"ч" = "c"
+"ш" = "s"
+"ј" = "j"
+"љ" = "l"
+"њ" = "n"
+"ђ" = "d"
+"ћ" = "c"
+
+[known_variants]
+# English/international names for cities
+# Croatia
+"zagreb" = "zagreb"
+"dubrovnik" = "dubrovnik"
+"ragusa" = "dubrovnik"
+"spalato" = "split"
+"zara" = "zadar"
+"fiume" = "rijeka"
+"pola" = "pula"
+"agram" = "zagreb"
+# Bosnia
+"sarajevo" = "sarajevo"
+"mostar" = "mostar"
+"banja luka" = "banja luka"
+# Montenegro
+"podgorica" = "podgorica"
+"titograd" = "podgorica"
+"cetinje" = "cetinje"
+"cattaro" = "kotor"
+# Serbia
+"belgrade" = "beograd"
+"beograd" = "beograd"
+"novi sad" = "novi sad"
+"neusatz" = "novi sad"
+"nish" = "niš"
+"nis" = "niš"
+# Kosovo
+"pristina" = "prishtina"
+"prishtine" = "prishtina"
+"prizren" = "prizren"
+# North Macedonia
+"skopje" = "skopje"
+"skopie" = "skopje"
+"bitola" = "bitola"
+"monastir" = "bitola"
+"ohrid" = "ohrid"
+# Albania
+"tirana" = "tiranë"
+"tirane" = "tiranë"
+"durres" = "durrës"
+"durazzo" = "durrës"
+"vlore" = "vlorë"
+"valona" = "vlorë"
+"shkoder" = "shkodër"
+"scutari" = "shkodër"
+"elbasan" = "elbasan"
+"korce" = "korçë"
+# Slovenia
+"ljubljana" = "ljubljana"
+"laibach" = "ljubljana"
+"maribor" = "maribor"
+"marburg" = "maribor"
+"koper" = "koper"
+"capodistria" = "koper"
+"celje" = "celje"
+"cilli" = "celje"

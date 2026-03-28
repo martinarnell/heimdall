@@ -1,0 +1,84 @@
+# Haitian Creole/French place name normalizer
+# Covers: HT (Haiti)
+# Photon-only country. Based on French diacritics since Haitian Creole and French
+# are both official languages. Street names largely follow French conventions.
+# No phonetic encoding.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# French-derived street type abbreviations
+"rue" = "r"
+"avenue" = "av"
+"av." = "av"
+"boulevard" = "bd"
+"blvd." = "bd"
+"route" = "rte"
+"rte." = "rte"
+"impasse" = "imp"
+"imp." = "imp"
+"place" = "pl"
+"pl." = "pl"
+"chemin" = "ch"
+"ch." = "ch"
+"allée" = "all"
+"passage" = "pass"
+
+# Religious/honorific
+"saint" = "st"
+"sainte" = "ste"
+
+[stopwords]
+words = [
+    "haiti",
+    "haïti",
+    "ht",
+    "république d'haïti",
+    "repiblik dayiti",
+    "département",
+    "arrondissement",
+    "commune",
+    "section communale",
+]
+
+[known_variants]
+# Capital and major cities
+"port-au-prince" = "port-au-prince"
+"port au prince" = "port-au-prince"
+"pap" = "port-au-prince"
+"cap-haitien" = "cap-haïtien"
+"cap-haïtien" = "cap-haïtien"
+"cap haitien" = "cap-haïtien"
+"le cap" = "cap-haïtien"
+"gonaives" = "gonaïves"
+"gonaïves" = "gonaïves"
+"les cayes" = "les cayes"
+"jacmel" = "jacmel"
+"jeremie" = "jérémie"
+"jérémie" = "jérémie"
+"petion-ville" = "pétion-ville"
+"pétion-ville" = "pétion-ville"
+"petionville" = "pétion-ville"
+"delmas" = "delmas"
+"carrefour" = "carrefour"
+"hinche" = "hinche"
+"port-de-paix" = "port-de-paix"
+
+[diacritics]
+# French diacritics — common in Haitian place names
+"é" = "e"
+"è" = "e"
+"ê" = "e"
+"ë" = "e"
+"à" = "a"
+"â" = "a"
+"ç" = "c"
+"î" = "i"
+"ï" = "i"
+"ô" = "o"
+"ù" = "u"
+"û" = "u"
+"ü" = "u"
+"œ" = "oe"
+"æ" = "ae"

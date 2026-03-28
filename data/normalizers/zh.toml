@@ -1,0 +1,145 @@
+# Chinese place name normalizer
+# Used for China (CN) and Taiwan (TW). Handles pinyin diacritics (tone marks),
+# full-width → half-width conversion, and romanized ↔ Chinese character city variants.
+#
+# No phonetic encoding — CJK character matching and pinyin normalization suffice.
+# Chinese has no word boundaries (no spaces), so [abbreviations] cannot work for
+# CJK street/admin suffixes (路/街/市/省). Photon data provides romanized forms
+# in name:en / name:la fields, which are matched via pinyin diacritic normalization.
+
+[phonetic]
+engine = "none"
+# CRITICAL for Chinese text: addresses often use full-width digits/letters
+# (０１２３, Ａ-Ｚ) — this converts them to standard ASCII (0123, A-Z).
+fullwidth_to_halfwidth = true
+
+[abbreviations]
+# Chinese street/admin suffixes are NOT here — they cannot be matched at word
+# boundaries since Chinese text has no spaces. Instead we rely on:
+# 1. Exact CJK character matching in the FST
+# 2. Photon's romanized name:en / name:la fields for Latin-script queries
+# 3. Known variants below for major city names
+
+# Romanized abbreviations that appear in English-language queries
+"rd" = "road"
+"st" = "street"
+"ave" = "avenue"
+"blvd" = "boulevard"
+
+[stopwords]
+words = [
+    "china",
+    "cn",
+    "中国",
+    "中华人民共和国",
+    "peoples republic of china",
+    "prc",
+    "taiwan",
+    "tw",
+    "台湾",
+    "臺灣",
+    "中华民国",
+    "republic of china",
+]
+
+[known_variants]
+# Major cities — romanized (pinyin) → Chinese characters
+"beijing" = "北京"
+"shanghai" = "上海"
+"guangzhou" = "广州"
+"shenzhen" = "深圳"
+"chengdu" = "成都"
+"hong kong" = "香港"
+"hongkong" = "香港"
+"taipei" = "台北"
+"chongqing" = "重庆"
+"tianjin" = "天津"
+"wuhan" = "武汉"
+"hangzhou" = "杭州"
+"nanjing" = "南京"
+"xian" = "西安"
+"xi'an" = "西安"
+"suzhou" = "苏州"
+"harbin" = "哈尔滨"
+"dalian" = "大连"
+"qingdao" = "青岛"
+"xiamen" = "厦门"
+"kunming" = "昆明"
+"changsha" = "长沙"
+"zhengzhou" = "郑州"
+"fuzhou" = "福州"
+"jinan" = "济南"
+"urumqi" = "乌鲁木齐"
+"lhasa" = "拉萨"
+"guilin" = "桂林"
+"macau" = "澳门"
+"macao" = "澳门"
+"kaohsiung" = "高雄"
+"taichung" = "台中"
+"tainan" = "台南"
+"hefei" = "合肥"
+"guiyang" = "贵阳"
+"nanning" = "南宁"
+"lanzhou" = "兰州"
+"xining" = "西宁"
+"yinchuan" = "银川"
+"hohhot" = "呼和浩特"
+"shijiazhuang" = "石家庄"
+"taiyuan" = "太原"
+"nanchang" = "南昌"
+"haikou" = "海口"
+"sanya" = "三亚"
+"ningbo" = "宁波"
+"wenzhou" = "温州"
+"changchun" = "长春"
+"shenyang" = "沈阳"
+
+# Historical and alternate romanizations (postal, Wade-Giles, etc.)
+"peking" = "北京"
+"canton" = "广州"
+"nanking" = "南京"
+"chungking" = "重庆"
+"tientsin" = "天津"
+"sian" = "西安"
+"amoy" = "厦门"
+"tsingtao" = "青岛"
+"foochow" = "福州"
+"tsinan" = "济南"
+"mukden" = "沈阳"
+"changchow" = "常州"
+"swatow" = "汕头"
+"formosa" = "台湾"
+
+[diacritics]
+# Pinyin tone marks → plain vowels (all four tones + neutral)
+# ā á ǎ à → a
+"ā" = "a"
+"á" = "a"
+"ǎ" = "a"
+"à" = "a"
+# ē é ě è → e
+"ē" = "e"
+"é" = "e"
+"ě" = "e"
+"è" = "e"
+# ī í ǐ ì → i
+"ī" = "i"
+"í" = "i"
+"ǐ" = "i"
+"ì" = "i"
+# ō ó ǒ ò → o
+"ō" = "o"
+"ó" = "o"
+"ǒ" = "o"
+"ò" = "o"
+# ū ú ǔ ù → u
+"ū" = "u"
+"ú" = "u"
+"ǔ" = "u"
+"ù" = "u"
+# ǖ ǘ ǚ ǜ ü → v (standard pinyin convention: ü romanized as v)
+"ǖ" = "v"
+"ǘ" = "v"
+"ǚ" = "v"
+"ǜ" = "v"
+"ü" = "v"

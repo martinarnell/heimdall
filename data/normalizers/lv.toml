@@ -1,0 +1,76 @@
+# Latvian place name normalizer
+# Covers Latvian diacritics (ā, č, ē, ģ, ī, ķ, ļ, ņ, š, ū, ž),
+# street type abbreviations, and city name variants.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Street types
+"iel." = "iela"
+"iela" = "iela"
+"bulv." = "bulvāris"
+"bulvāris" = "bulvāris"
+"pr." = "prospekts"
+"prospekts" = "prospekts"
+"laukums" = "laukums"
+"l." = "laukums"
+"šos." = "šoseja"
+"šoseja" = "šoseja"
+"ceļš" = "ceļš"
+"gatve" = "gatve"
+"aleja" = "aleja"
+
+# Directional
+"z." = "ziemeļu"
+"d." = "dienvidu"
+"a." = "austrumu"
+"r." = "rietumu"
+
+[stopwords]
+words = [
+    "latvija",
+    "lv",
+    "republika",
+    "pilsēta",
+    "novads",
+    "pagasts",
+]
+
+[diacritics]
+"ā" = "a"
+"č" = "c"
+"ē" = "e"
+"ģ" = "g"
+"ī" = "i"
+"ķ" = "k"
+"ļ" = "l"
+"ņ" = "n"
+"š" = "s"
+"ū" = "u"
+"ž" = "z"
+
+[known_variants]
+# Common ASCII and alternative spellings
+"riga" = "rīga"
+"daugavpils" = "daugavpils"
+"liepaja" = "liepāja"
+"jelgava" = "jelgava"
+"jurmala" = "jūrmala"
+"ventspils" = "ventspils"
+"rezekne" = "rēzekne"
+"valmiera" = "valmiera"
+"jekabpils" = "jēkabpils"
+"ogre" = "ogre"
+"tukums" = "tukums"
+"cesis" = "cēsis"
+"kuldiga" = "kuldīga"
+"saldus" = "saldus"
+"talsi" = "talsi"
+"sigulda" = "sigulda"
+# Historical German names
+"mitau" = "jelgava"
+"libau" = "liepāja"
+"windau" = "ventspils"
+"dünaburg" = "daugavpils"
+"dunaburg" = "daugavpils"

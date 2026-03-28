@@ -1,0 +1,54 @@
+# Norwegian place name normalizer
+# Covers Bokmål, Nynorsk, and common English approximations
+
+[abbreviations]
+# Street types
+"gt." = "gate"
+"gt" = "gate"
+"v." = "vei"
+"vn." = "veien"
+"vn" = "veien"
+"pl." = "plass"
+"pl" = "plass"
+"alle" = "allé"
+"bv." = "byvei"
+
+# Directional
+"n." = "nordre"
+"s." = "søndre"
+"ø." = "østre"
+"vestr." = "vestre"
+"st." = "store"
+"l." = "lille"
+"ndr." = "nordre"
+"sdr." = "søndre"
+
+[stopwords]
+words = [
+    "kommune",
+    "fylke",
+    "norway",
+    "norge",
+    "noreg",
+]
+
+[known_variants]
+# English/ASCII approximations of Norwegian cities
+"tromso" = "tromsø"
+"tromsoe" = "tromsø"
+"bodo" = "bodø"
+"bodoe" = "bodø"
+"alesund" = "ålesund"
+"aalesund" = "ålesund"
+"gjovik" = "gjøvik"
+"gjoevik" = "gjøvik"
+
+# Historical names
+"christiania" = "oslo"
+"kristiania" = "oslo"
+"nidaros" = "trondheim"
+"trondhjem" = "trondheim"
+
+# Bokmål ↔ Nynorsk common pairs
+"bjorgvin" = "bergen"
+"bjørgvin" = "bergen"

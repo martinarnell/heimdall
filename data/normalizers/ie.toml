@@ -1,0 +1,106 @@
+# Irish English + Gaeilge place name normalizer
+# Covers Ireland (IE)
+# Street type abbreviations, Irish language diacritics, city name variants.
+
+[phonetic]
+engine = "none"  # No phonetic encoding
+
+[abbreviations]
+# English street type abbreviations
+"street" = "st"
+"avenue" = "ave"
+"road" = "rd"
+"drive" = "dr"
+"lane" = "ln"
+"court" = "ct"
+"close" = "cl"
+"place" = "pl"
+"crescent" = "cres"
+"terrace" = "ter"
+"square" = "sq"
+"park" = "pk"
+"grove" = "gr"
+"gardens" = "gdns"
+"boulevard" = "blvd"
+"quay" = "qy"
+# Abbreviated input → canonical short
+"st." = "st"
+"ave." = "ave"
+"rd." = "rd"
+"dr." = "dr"
+"ln." = "ln"
+"ct." = "ct"
+"pl." = "pl"
+"cres." = "cres"
+"ter." = "ter"
+
+# Irish language street types
+"bóthar" = "btr"
+"sráid" = "sr"
+"plás" = "plas"
+"cúirt" = "crt"
+"páirc" = "prc"
+"ascaill" = "asc"
+"lána" = "ln"
+"cé" = "ce"
+
+# Directional
+"north" = "n"
+"south" = "s"
+"east" = "e"
+"west" = "w"
+"upper" = "upr"
+"lower" = "lwr"
+"n." = "n"
+"s." = "s"
+"e." = "e"
+"w." = "w"
+
+# Common Irish abbreviations
+"saint" = "st"
+"mount" = "mt"
+"mt." = "mt"
+
+[stopwords]
+words = [
+    "ireland",
+    "éire",
+    "eire",
+    "ie",
+    "republic of ireland",
+    "county",
+    "co.",
+]
+
+[diacritics]
+# Irish (Gaeilge) uses síneadh fada (acute accent)
+"á" = "a"
+"é" = "e"
+"í" = "i"
+"ó" = "o"
+"ú" = "u"
+
+[known_variants]
+# Irish/English bilingual city names
+"baile átha cliath" = "dublin"
+"baile atha cliath" = "dublin"
+"corcaigh" = "cork"
+"gaillimh" = "galway"
+"luimneach" = "limerick"
+"port láirge" = "waterford"
+"port lairge" = "waterford"
+"cill chainnigh" = "kilkenny"
+"cill airne" = "killarney"
+"droichead átha" = "drogheda"
+"droichead atha" = "drogheda"
+"dún laoghaire" = "dun laoghaire"
+"dun laoghaire" = "dún laoghaire"
+"sligeach" = "sligo"
+"trá lí" = "tralee"
+"tra li" = "tralee"
+"inis" = "ennis"
+"loch garman" = "wexford"
+"cill dara" = "kildare"
+"na cealla beaga" = "killybegs"
+# Common short forms
+"dub" = "dublin"

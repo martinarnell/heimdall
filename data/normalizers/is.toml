@@ -1,0 +1,73 @@
+# Icelandic place name normalizer
+# Covers Iceland (IS)
+# Street type abbreviations, Icelandic diacritics, English name variants.
+
+[phonetic]
+engine = "none"  # No phonetic encoding for Icelandic
+
+[abbreviations]
+# Icelandic street types
+"vegur" = "veg"
+"veg." = "veg"
+"gata" = "g"
+"g." = "g"
+"stræti" = "str"
+"str." = "str"
+"braut" = "br"
+"br." = "br"
+"torg" = "torg"
+"hverfi" = "hv"
+
+[stopwords]
+words = [
+    "ísland",
+    "island",
+    "iceland",
+    "is",
+    "sýsla",
+    "sveitarfélag",
+    "hreppur",
+    "kaupstaður",
+]
+
+[diacritics]
+# Icelandic special characters → ASCII equivalents
+"á" = "a"
+"é" = "e"
+"í" = "i"
+"ó" = "o"
+"ú" = "u"
+"ý" = "y"
+"ð" = "d"
+"þ" = "th"
+"æ" = "ae"
+"ö" = "o"
+
+[char_equivalences]
+# ð/d and þ/th are truly interchangeable in searches
+"ð" = "d"
+"þ" = "th"
+
+[known_variants]
+# English/ASCII approximations of Icelandic places
+"reykjavik" = "reykjavík"
+"akureyri" = "akureyri"
+"kopavogur" = "kópavogur"
+"hafnarfjordur" = "hafnarfjörður"
+"hafnarfjorður" = "hafnarfjörður"
+"isafjordur" = "ísafjörður"
+"isafjoerdur" = "ísafjörður"
+"selfoss" = "selfoss"
+"husavik" = "húsavík"
+"vik" = "vík"
+"egilsstadir" = "egilsstaðir"
+"seydisfjordur" = "seyðisfjörður"
+"vestmannaeyjar" = "vestmannaeyjar"
+"siglufjordur" = "siglufjörður"
+"dalvik" = "dalvík"
+"olafsvik" = "ólafsvík"
+"borgarnes" = "borgarnes"
+"blonduos" = "blönduós"
+"saudarkrokur" = "sauðárkrókur"
+"thingvellir" = "þingvellir"
+"geysir" = "geysir"

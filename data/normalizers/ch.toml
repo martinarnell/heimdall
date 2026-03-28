@@ -1,0 +1,135 @@
+# Swiss place name normalizer
+# Multilingual: German, French, Italian, Romansh
+# No phonetic encoding — four languages with different phonologies
+# make a single phonetic encoder counterproductive.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# German street suffixes
+"str." = "strasse"
+"str" = "strasse"
+"strasse" = "strasse"
+"gasse" = "gasse"
+"g." = "gasse"
+"weg" = "weg"
+"w." = "weg"
+"platz" = "platz"
+"pl." = "platz"
+"ring" = "ring"
+"allee" = "allee"
+"brücke" = "brücke"
+"graben" = "graben"
+"matte" = "matte"
+
+# French street types
+"rue" = "rue"
+"r." = "rue"
+"avenue" = "avenue"
+"av." = "avenue"
+"av" = "avenue"
+"chemin" = "chemin"
+"ch." = "chemin"
+"place" = "place"
+"boulevard" = "boulevard"
+"blvd" = "boulevard"
+"route" = "route"
+"rte" = "route"
+"passage" = "passage"
+"impasse" = "impasse"
+
+# Italian street types
+"via" = "via"
+"v." = "via"
+"piazza" = "piazza"
+"pza" = "piazza"
+"viale" = "viale"
+"vicolo" = "vicolo"
+"corso" = "corso"
+"contrada" = "contrada"
+
+# Directional (German)
+"n." = "nord"
+"s." = "süd"
+"o." = "ost"
+"w." = "west"
+
+[stopwords]
+words = [
+    "schweiz",
+    "suisse",
+    "svizzera",
+    "switzerland",
+    "ch",
+    "kanton",
+    "canton",
+    "cantone",
+    "gemeinde",
+    "commune",
+    "bezirk",
+    "district",
+]
+
+[diacritics]
+# German umlauts
+"ä" = "ae"
+"ö" = "oe"
+"ü" = "ue"
+# French accents
+"é" = "e"
+"è" = "e"
+"ê" = "e"
+"ë" = "e"
+"à" = "a"
+"â" = "a"
+"ç" = "c"
+"î" = "i"
+"ï" = "i"
+"ô" = "o"
+"û" = "u"
+"ù" = "u"
+# Italian accents (beyond what French already covers)
+"ì" = "i"
+"ò" = "o"
+
+[char_equivalences]
+# German umlaut ↔ digraph equivalence
+"ae" = "ä"
+"oe" = "ö"
+"ue" = "ü"
+
+[known_variants]
+# French/English → German canonical
+"genf" = "genève"
+"geneve" = "genève"
+"geneva" = "genève"
+"zurich" = "zürich"
+"zuerich" = "zürich"
+"basle" = "basel"
+"bale" = "basel"
+"bâle" = "basel"
+"lucerne" = "luzern"
+"luzerne" = "luzern"
+"berne" = "bern"
+"berna" = "bern"
+"lausanne" = "lausanne"
+"fribourg" = "fribourg"
+"freiburg" = "fribourg"
+"neuchatel" = "neuchâtel"
+"neuenburg" = "neuchâtel"
+"solothurn" = "solothurn"
+"soleure" = "solothurn"
+"winterthour" = "winterthur"
+"lugano" = "lugano"
+"locarno" = "locarno"
+"bellinzona" = "bellinzona"
+"sion" = "sion"
+"sitten" = "sion"
+"thun" = "thun"
+"thoune" = "thun"
+"biel" = "biel/bienne"
+"bienne" = "biel/bienne"
+"st. gallen" = "st. gallen"
+"saint-gall" = "st. gallen"
+"san gallo" = "st. gallen"

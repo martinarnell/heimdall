@@ -1,0 +1,70 @@
+# Khmer place name normalizer
+# Used for Cambodia (KH). Khmer script has no simple Latin transliteration —
+# romanization varies between UNGEGN, BGN/PCGN, and colloquial forms.
+# Known variants map common romanized city names to Khmer script.
+# No phonetic encoding — Khmer doesn't map to European phonetic schemes.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Khmer administrative suffixes
+"ខេត្ត" = "ខេត្ត"    # khet — province
+"ក្រុង" = "ក្រុង"    # krong — city
+"ស្រុក" = "ស្រុក"    # srok — district
+"ឃុំ" = "ឃុំ"         # khum — commune
+"ភូមិ" = "ភូមិ"      # phum — village
+"ផ្លូវ" = "ផ្លូវ"    # phlauv — road/street
+
+# Romanized road types
+"street" = "st"
+"road" = "rd"
+"boulevard" = "blvd"
+"st." = "st"
+"rd." = "rd"
+"blvd." = "blvd"
+
+[stopwords]
+words = [
+    "cambodia",
+    "kh",
+    "កម្ពុជា",
+    "ព្រះរាជាណាចក្រកម្ពុជា",
+    "kingdom of cambodia",
+    "kampuchea",
+]
+
+[known_variants]
+# Major cities — romanized → Khmer script
+"phnom penh" = "ភ្នំពេញ"
+"pnom penh" = "ភ្នំពេញ"
+"siem reap" = "សៀមរាប"
+"siemreap" = "សៀមរាប"
+"battambang" = "បាត់ដំបង"
+"sihanoukville" = "ក្រុងព្រះសីហនុ"
+"preah sihanouk" = "ក្រុងព្រះសីហនុ"
+"kampong cham" = "កំពង់ចាម"
+"kampong speu" = "កំពង់ស្ពឺ"
+"kampong thom" = "កំពង់ធំ"
+"kampot" = "កំពត"
+"kep" = "កែប"
+"kratie" = "ក្រចេះ"
+"pursat" = "ពោធិ៍សាត់"
+"prey veng" = "ព្រៃវែង"
+"svay rieng" = "ស្វាយរៀង"
+"takeo" = "តាកែវ"
+"kandal" = "កណ្ដាល"
+"banlung" = "បានលុង"
+"sen monorom" = "សែនមនោរម្យ"
+"stung treng" = "ស្ទឹងត្រែង"
+
+# Historical names
+"angkor" = "អង្គរ"
+
+[diacritics]
+# Khmer script has no Latin diacritics. Handle occasional romanization artifacts.
+"é" = "e"
+"è" = "e"
+"ā" = "a"
+"ī" = "i"
+"ū" = "u"

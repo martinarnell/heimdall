@@ -1,0 +1,96 @@
+# Finnish place name normalizer
+# Covers Finnish, Swedish (bilingual), Sami names, and case suffix stripping
+
+[abbreviations]
+# Street types
+"k." = "katu"
+"t." = "tie"
+"kj." = "kuja"
+"p." = "polku"
+
+# Directional
+"pohj." = "pohjoinen"
+"et." = "etelä"
+"it." = "itä"
+"länt." = "länsi"
+
+[stopwords]
+words = [
+    "kunta",
+    "kaupunki",
+    "kommun",
+    "stad",
+    "finland",
+    "suomi",
+]
+
+[known_variants]
+# Finnish ↔ Swedish city name pairs (CRITICAL for bilingual support)
+"helsingfors" = "helsinki"
+"tammerfors" = "tampere"
+"abo" = "turku"
+"uleaborg" = "oulu"
+"uleåborg" = "oulu"
+"esbo" = "espoo"
+"vasa" = "vaasa"
+"bjorneborg" = "pori"
+"björneborg" = "pori"
+"karleby" = "kokkola"
+"jakobstad" = "pietarsaari"
+"nyslott" = "savonlinna"
+"nykarleby" = "uusikaarlepyy"
+"kristinestad" = "kristiinankaupunki"
+
+# Åland Islands
+"mariehamn" = "maarianhamina"
+"maarianhamina" = "mariehamn"
+"aland" = "ahvenanmaa"
+"ahvenanmaa" = "åland"
+
+# Sami names (northern Finland)
+"aanaar" = "inari"
+"ohcejohka" = "utsjoki"
+"eanodat" = "enontekiö"
+"enontekio" = "enontekiö"
+"anár" = "inari"
+
+# English
+"lapland" = "lappi"
+"jyvaskyla" = "jyväskylä"
+"hameenlinna" = "hämeenlinna"
+
+# Common case-inflected forms of major cities
+"helsingissa" = "helsinki"
+"helsingistä" = "helsinki"
+"helsingissä" = "helsinki"
+"tampereella" = "tampere"
+"tampereelta" = "tampere"
+"tampereelle" = "tampere"
+"turussa" = "turku"
+"turusta" = "turku"
+"turkuun" = "turku"
+"oulussa" = "oulu"
+"oulusta" = "oulu"
+"ouluun" = "oulu"
+"espoossa" = "espoo"
+"espoosta" = "espoo"
+"espooseen" = "espoo"
+"vantaalla" = "vantaa"
+"vantaalta" = "vantaa"
+
+[case_suffixes]
+# Finnish grammatical case suffixes — ordered longest-first
+# Stripping these from single-word queries helps match inflected place names
+suffixes = [
+    "ssä", "ssa",       # inessive: Helsingissä
+    "stä", "sta",       # elative: Helsingistä
+    "ltä", "lta",       # ablative: Tampereelta
+    "llä", "lla",       # adessive: Tampereella
+    "ään", "aan",       # illative: Helsinkiin (irregular)
+    "lle",              # allative: Tampereelle
+    "iin", "hun", "hen", "hin",  # illative variants
+    "jen", "ien",       # genitive plural
+    "in",               # genitive
+    "un", "on", "en",   # genitive variants
+    "n",                # genitive singular
+]

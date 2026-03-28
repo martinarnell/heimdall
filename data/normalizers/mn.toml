@@ -1,0 +1,106 @@
+# Mongolian place name normalizer
+# Used for Mongolia (MN). Mongolian uses Cyrillic script (same alphabet as Russian
+# with two extra vowels: ө and ү). Romanization follows a mix of systems.
+# Extends the Russian Cyrillic diacritics table with Mongolian-specific characters.
+# No phonetic encoding — Cyrillic transliteration provides sufficient fuzzy matching.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Mongolian administrative suffixes
+"аймаг" = "аймаг"     # aimag — province
+"сум" = "сум"          # sum — district
+"хот" = "хот"          # khot — city
+"дүүрэг" = "дүүрэг"   # duureg — urban district
+"хороо" = "хороо"      # khoroo — sub-district
+"гудамж" = "гуд"       # gudamj — street
+"өргөн чөлөө" = "өч"  # orgon choloo — avenue/boulevard
+"зам" = "зам"          # zam — road
+
+# Romanized equivalents
+"street" = "st"
+"road" = "rd"
+"avenue" = "ave"
+"st." = "st"
+"rd." = "rd"
+"ave." = "ave"
+
+[stopwords]
+words = [
+    "mongolia",
+    "mn",
+    "монгол",
+    "монгол улс",
+]
+
+[known_variants]
+# Major cities — romanized → Mongolian Cyrillic
+"ulaanbaatar" = "улаанбаатар"
+"ulan bator" = "улаанбаатар"
+"ulan-bator" = "улаанбаатар"
+"darkhan" = "дархан"
+"erdenet" = "эрдэнэт"
+"choibalsan" = "чойбалсан"
+"khovd" = "ховд"
+"olgii" = "өлгий"
+"dalanzadgad" = "даланзадгад"
+"bayankhongor" = "баянхонгор"
+"arvaikheer" = "арвайхээр"
+"zuunmod" = "зуунмод"
+"murun" = "мөрөн"
+"bulgan" = "булган"
+"tsetserleg" = "цэцэрлэг"
+"sukhbaatar" = "сүхбаатар"
+"ondorkhaan" = "өндөрхаан"
+"sainshand" = "сайншанд"
+"mandalgovi" = "мандалговь"
+"altai" = "алтай"
+"uliastai" = "улиастай"
+"kharkhorin" = "хархорин"
+"karakorum" = "хархорин"
+"terelj" = "тэрэлж"
+"gobi" = "говь"
+
+# Historical names
+"urga" = "улаанбаатар"
+"karakorum" = "хархорин"
+
+[diacritics]
+# Cyrillic → Latin transliteration (standard Russian set)
+"а" = "a"
+"б" = "b"
+"в" = "v"
+"г" = "g"
+"д" = "d"
+"е" = "e"
+"ё" = "yo"
+"ж" = "zh"
+"з" = "z"
+"и" = "i"
+"й" = "y"
+"к" = "k"
+"л" = "l"
+"м" = "m"
+"н" = "n"
+"о" = "o"
+"п" = "p"
+"р" = "r"
+"с" = "s"
+"т" = "t"
+"у" = "u"
+"ф" = "f"
+"х" = "kh"
+"ц" = "ts"
+"ч" = "ch"
+"ш" = "sh"
+"щ" = "shch"
+"ъ" = ""
+"ы" = "y"
+"ь" = ""
+"э" = "e"
+"ю" = "yu"
+"я" = "ya"
+# Mongolian-specific Cyrillic letters
+"ө" = "o"
+"ү" = "u"

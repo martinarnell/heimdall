@@ -1,0 +1,162 @@
+# English place name normalizer for Sub-Saharan Africa
+# Covers: BW (Botswana), GH (Ghana), GM (Gambia), KE (Kenya), LR (Liberia),
+#         LS (Lesotho), MW (Malawi), MU (Mauritius), NA (Namibia), NG (Nigeria),
+#         RW (Rwanda), SC (Seychelles), SL (Sierra Leone), SZ (Eswatini),
+#         TZ (Tanzania), UG (Uganda), ZA (South Africa), ZM (Zambia), ZW (Zimbabwe)
+# Standard English street abbreviations + known variants for major African cities.
+# No phonetic encoding.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Street type abbreviations (normalize long -> short canonical form)
+"street" = "st"
+"avenue" = "ave"
+"road" = "rd"
+"drive" = "dr"
+"boulevard" = "blvd"
+"lane" = "ln"
+"court" = "ct"
+"place" = "pl"
+"crescent" = "cres"
+"close" = "cl"
+"terrace" = "tce"
+"highway" = "hwy"
+"way" = "way"
+"circle" = "cir"
+"square" = "sq"
+# Also handle abbreviated input -> canonical short
+"st." = "st"
+"ave." = "ave"
+"rd." = "rd"
+"dr." = "dr"
+"blvd." = "blvd"
+"ln." = "ln"
+"ct." = "ct"
+"pl." = "pl"
+"cres." = "cres"
+"cl." = "cl"
+"hwy." = "hwy"
+
+# Directional abbreviations
+"north" = "n"
+"south" = "s"
+"east" = "e"
+"west" = "w"
+"n." = "n"
+"s." = "s"
+"e." = "e"
+"w." = "w"
+
+# Common abbreviations
+"mount" = "mt"
+"saint" = "st"
+"mt." = "mt"
+
+[stopwords]
+words = [
+    "republic",
+    "republic of",
+    "kingdom",
+    "kingdom of",
+    "state",
+    "state of",
+    "district",
+    "province",
+    "region",
+    "county",
+    "ward",
+    "municipality",
+]
+
+[known_variants]
+# South Africa
+"joburg" = "johannesburg"
+"jozi" = "johannesburg"
+"jhb" = "johannesburg"
+"pretoria" = "tshwane"
+"cape town" = "cape town"
+"cpt" = "cape town"
+"durbs" = "durban"
+"dbn" = "durban"
+"pe" = "port elizabeth"
+"gqeberha" = "gqeberha"
+"port elizabeth" = "gqeberha"
+"bloemfontein" = "bloemfontein"
+"bloem" = "bloemfontein"
+"pietermaritzburg" = "pietermaritzburg"
+"pmb" = "pietermaritzburg"
+"soweto" = "soweto"
+# Kenya
+"nbi" = "nairobi"
+"msa" = "mombasa"
+# Nigeria
+"lag" = "lagos"
+"abj" = "abuja"
+"ph" = "port harcourt"
+# Ghana
+"acc" = "accra"
+"kumasi" = "kumasi"
+# Tanzania
+"dar" = "dar es salaam"
+"dsm" = "dar es salaam"
+"zanzibar city" = "zanzibar"
+# Uganda
+"kla" = "kampala"
+# Zimbabwe
+"hre" = "harare"
+"harare" = "harare"
+"salisbury" = "harare"
+"bulawayo" = "bulawayo"
+# Zambia
+"lusaka" = "lusaka"
+# Malawi
+"lilongwe" = "lilongwe"
+"blantyre" = "blantyre"
+# Botswana
+"gabs" = "gaborone"
+# Namibia
+"windhoek" = "windhoek"
+# Lesotho
+"maseru" = "maseru"
+# Eswatini
+"mbabane" = "mbabane"
+"swaziland" = "eswatini"
+# Sierra Leone
+"freetown" = "freetown"
+# Liberia
+"monrovia" = "monrovia"
+# Gambia
+"banjul" = "banjul"
+# Mauritius
+"port louis" = "port louis"
+# Seychelles
+"victoria" = "victoria"
+# Rwanda
+"kigali" = "kigali"
+
+[diacritics]
+# English is ASCII — handle occasional accented imports
+"é" = "e"
+"è" = "e"
+"ê" = "e"
+"ë" = "e"
+"á" = "a"
+"à" = "a"
+"â" = "a"
+"ä" = "a"
+"í" = "i"
+"ì" = "i"
+"î" = "i"
+"ï" = "i"
+"ó" = "o"
+"ò" = "o"
+"ô" = "o"
+"ö" = "o"
+"ú" = "u"
+"ù" = "u"
+"û" = "u"
+"ü" = "u"
+"ñ" = "n"
+"ç" = "c"

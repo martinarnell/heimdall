@@ -1,0 +1,15 @@
+[Unit]
+Description=Heimdall geocoder
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/heimdall serve --bind 0.0.0.0:2399
+Restart=on-failure
+RestartSec=5
+DynamicUser=yes
+StateDirectory=heimdall
+ReadOnlyPaths=/
+
+[Install]
+WantedBy=multi-user.target

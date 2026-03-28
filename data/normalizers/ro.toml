@@ -1,0 +1,102 @@
+# Romanian place name normalizer
+# Covers Romania (RO) and Moldova (MD)
+# Street type abbreviations, diacritics, English city name variants.
+
+[phonetic]
+engine = "none"  # No phonetic encoding for Romanian
+
+[abbreviations]
+# Street type abbreviations
+"strada" = "str"
+"str." = "str"
+"bulevardul" = "bd"
+"bd." = "bd"
+"b-dul" = "bd"
+"calea" = "cal"
+"cal." = "cal"
+"aleea" = "al"
+"al." = "al"
+"piata" = "pta"
+"piața" = "pta"
+"p-ța" = "pta"
+"splaiul" = "spl"
+"spl." = "spl"
+"intrarea" = "intr"
+"intr." = "intr"
+"fundătura" = "fund"
+"fund." = "fund"
+"drumul" = "dr"
+"dr." = "dr"
+"șoseaua" = "sos"
+"sos." = "sos"
+
+# Religious/honorific
+"sfântul" = "sf"
+"sf." = "sf"
+"sfânta" = "sf"
+
+[stopwords]
+words = [
+    "românia",
+    "romania",
+    "ro",
+    "republica moldova",
+    "moldova",
+    "md",
+    "județ",
+    "municipiu",
+    "oraș",
+    "comună",
+    "sector",
+]
+
+[diacritics]
+# Romanian diacritics → ASCII equivalents
+"ă" = "a"
+"â" = "a"
+"î" = "i"
+"ș" = "s"
+"ş" = "s"
+"ț" = "t"
+"ţ" = "t"
+# Also handle occasional other diacritics in minority names
+"á" = "a"
+"é" = "e"
+"ö" = "o"
+"ü" = "u"
+
+[known_variants]
+# English/German/Hungarian names for Romanian cities
+"bucharest" = "bucurești"
+"bucuresti" = "bucurești"
+"bukarest" = "bucurești"
+"cluj" = "cluj-napoca"
+"klausenburg" = "cluj-napoca"
+"kolozsvar" = "cluj-napoca"
+"timisoara" = "timișoara"
+"temeschburg" = "timișoara"
+"temesvar" = "timișoara"
+"iasi" = "iași"
+"jassy" = "iași"
+"constanta" = "constanța"
+"konstantza" = "constanța"
+"craiova" = "craiova"
+"brasov" = "brașov"
+"kronstadt" = "brașov"
+"galati" = "galați"
+"ploiesti" = "ploiești"
+"oradea" = "oradea"
+"grosswardein" = "oradea"
+"nagyvarad" = "oradea"
+"sibiu" = "sibiu"
+"hermannstadt" = "sibiu"
+"targu mures" = "târgu mureș"
+"neumarkt" = "târgu mureș"
+"arad" = "arad"
+"suceava" = "suceava"
+"piatra neamt" = "piatra neamț"
+"bacau" = "bacău"
+# Moldova
+"chisinau" = "chișinău"
+"kishinev" = "chișinău"
+"kishinau" = "chișinău"

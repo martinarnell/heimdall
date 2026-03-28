@@ -1,0 +1,53 @@
+# French place name normalizer
+# Street type abbreviations, diacritics stripping, no phonetic encoding.
+# French street names use fixed vocabulary (Rue, Avenue, Boulevard, etc.)
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Street type abbreviations (normalize long → short canonical form)
+"rue" = "r"
+"avenue" = "av"
+"boulevard" = "bd"
+"allée" = "all"
+"chemin" = "ch"
+"impasse" = "imp"
+"place" = "pl"
+"route" = "rte"
+"passage" = "pass"
+"voie" = "v"
+
+# Religious/honorific
+"saint" = "st"
+"sainte" = "ste"
+
+[stopwords]
+words = [
+    "france",
+    "fr",
+]
+
+[known_variants]
+# Major cities — map common spellings to canonical
+"paris" = "paris"
+"marseille" = "marseille"
+"lyon" = "lyon"
+
+[diacritics]
+# French accented characters → ASCII equivalents
+"é" = "e"
+"è" = "e"
+"ê" = "e"
+"ë" = "e"
+"à" = "a"
+"â" = "a"
+"ç" = "c"
+"î" = "i"
+"ï" = "i"
+"ô" = "o"
+"ù" = "u"
+"û" = "u"
+"ü" = "u"
+"œ" = "oe"
+"æ" = "ae"

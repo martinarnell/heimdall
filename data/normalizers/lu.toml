@@ -1,0 +1,108 @@
+# Luxembourgish place name normalizer
+# Covers Luxembourg (LU)
+# Trilingual: Luxembourgish, French, German
+# Street type abbreviations from all three languages, diacritics.
+
+[phonetic]
+engine = "none"  # No phonetic encoding
+
+[abbreviations]
+# French street types (official administrative language)
+"rue" = "r"
+"r." = "r"
+"avenue" = "av"
+"av." = "av"
+"boulevard" = "bd"
+"bd." = "bd"
+"allée" = "all"
+"all." = "all"
+"chemin" = "ch"
+"ch." = "ch"
+"impasse" = "imp"
+"place" = "pl"
+"pl." = "pl"
+"route" = "rte"
+"rte." = "rte"
+
+# German street types
+"straße" = "str"
+"strasse" = "str"
+"str." = "str"
+"weg" = "weg"
+"platz" = "platz"
+"gasse" = "gasse"
+"ring" = "ring"
+
+# Luxembourgish street types
+"strooss" = "str"
+"gaass" = "gasse"
+"wee" = "weg"
+"plaz" = "platz"
+
+# Religious/honorific
+"saint" = "st"
+"sainte" = "ste"
+"st." = "st"
+"ste." = "ste"
+"sankt" = "st"
+
+[stopwords]
+words = [
+    "luxembourg",
+    "luxemburg",
+    "lëtzebuerg",
+    "lu",
+    "grand-duché",
+    "grossherzogtum",
+    "canton",
+    "commune",
+    "gemeinde",
+]
+
+[diacritics]
+# French + German diacritics → ASCII
+"à" = "a"
+"â" = "a"
+"ä" = "ae"
+"é" = "e"
+"è" = "e"
+"ê" = "e"
+"ë" = "e"
+"î" = "i"
+"ï" = "i"
+"ô" = "o"
+"ö" = "oe"
+"ù" = "u"
+"û" = "u"
+"ü" = "ue"
+"ç" = "c"
+"œ" = "oe"
+"æ" = "ae"
+
+[char_equivalences]
+# German ß
+"ß" = "ss"
+
+[known_variants]
+# Trilingual city name variants
+"luxembourg city" = "luxembourg"
+"luxemburg stadt" = "luxembourg"
+"letzebuerg" = "luxembourg"
+"esch-sur-alzette" = "esch-sur-alzette"
+"esch an der alzette" = "esch-sur-alzette"
+"esch" = "esch-sur-alzette"
+"differdange" = "differdange"
+"differdingen" = "differdange"
+"dudelange" = "dudelange"
+"düdelingen" = "dudelange"
+"dudelingen" = "dudelange"
+"ettelbruck" = "ettelbruck"
+"ettelbrück" = "ettelbruck"
+"diekirch" = "diekirch"
+"echternach" = "echternach"
+"grevenmacher" = "grevenmacher"
+"remich" = "remich"
+"wiltz" = "wiltz"
+"vianden" = "vianden"
+"clervaux" = "clervaux"
+"clerf" = "clervaux"

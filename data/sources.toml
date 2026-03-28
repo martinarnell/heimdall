@@ -1,0 +1,2164 @@
+# Heimdall rebuild sources configuration
+# Used by: heimdall-build rebuild --config data/sources.toml
+
+[defaults]
+download_dir = "data/downloads"
+index_dir = "data"
+
+# ── Denmark ────────────────────────────────────────────────────────────────
+
+[country.dk]
+name = "Denmark"
+index_name = "index-dk"
+normalizer = "data/normalizers/da.toml"
+ram_gb = 2
+
+[country.dk.osm]
+url = "https://download.geofabrik.de/europe/denmark-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/denmark-updates/state.txt"
+
+[country.dk.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/dk/photon-db-dk-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/dk/photon-db-dk-250720.tar.bz2.md5"
+
+[country.dk.national]
+type = "dawa"
+url = "https://api.dataforsyningen.dk/adgangsadresser?format=csv&srid=4326"
+sequence_url = "https://api.dataforsyningen.dk/replikering/senestesekvensnummer"
+
+# ── Sweden ─────────────────────────────────────────────────────────────────
+
+[country.se]
+name = "Sweden"
+index_name = "index-se"
+normalizer = "data/normalizers/sv.toml"
+ram_gb = 3
+
+[country.se.osm]
+url = "https://download.geofabrik.de/europe/sweden-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/sweden-updates/state.txt"
+
+[country.se.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/se/photon-db-se-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/se/photon-db-se-250720.tar.bz2.md5"
+
+# Note: Lantmäteriet requires credentials — run manually with `heimdall-build lantmateriet`
+
+# ── Norway ─────────────────────────────────────────────────────────────────
+
+[country.no]
+name = "Norway"
+index_name = "index-no"
+normalizer = "data/normalizers/no.toml"
+ram_gb = 3
+
+[country.no.osm]
+url = "https://download.geofabrik.de/europe/norway-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/norway-updates/state.txt"
+
+[country.no.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/no/photon-db-no-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/no/photon-db-no-250720.tar.bz2.md5"
+
+[country.no.national]
+type = "kartverket"
+url = "https://nedlasting.geonorge.no/geonorge/Basisdata/MatrikkelenAdresse/CSV/Basisdata_0000_Norge_25833_MatrikkelenAdresse_CSV.zip"
+
+[country.no.places_source]
+type = "ssr"
+url = "https://nedlasting.geonorge.no/geonorge/Basisdata/Stedsnavn/GML/Basisdata_0000_Norge_4258_Stedsnavn_GML.zip"
+
+# ── Finland ────────────────────────────────────────────────────────────────
+
+[country.fi]
+name = "Finland"
+index_name = "index-fi"
+normalizer = "data/normalizers/fi.toml"
+ram_gb = 2
+
+[country.fi.osm]
+url = "https://download.geofabrik.de/europe/finland-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/finland-updates/state.txt"
+
+[country.fi.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/fi/photon-db-fi-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/fi/photon-db-fi-250720.tar.bz2.md5"
+
+[country.fi.national]
+type = "dvv"
+# DVV downloads via OGC API at build time — no URL needed
+
+# ── Germany ────────────────────────────────────────────────────────────────
+
+[country.de]
+name = "Germany"
+index_name = "index-de"
+normalizer = "data/normalizers/de.toml"
+ram_gb = 9
+
+[country.de.osm]
+url = "https://download.geofabrik.de/europe/germany-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/germany-updates/state.txt"
+
+[country.de.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/de/photon-db-de-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/de/photon-db-de-250720.tar.bz2.md5"
+
+# ── Great Britain ──────────────────────────────────────────────────────────
+
+[country.gb]
+name = "Great Britain"
+index_name = "index-gb"
+normalizer = "data/normalizers/en-gb.toml"
+ram_gb = 2
+
+# GB is photon-only — no OSM PBF extraction
+[country.gb.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/gb/photon-db-gb-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/gb/photon-db-gb-250720.tar.bz2.md5"
+
+# ── United States ─────────────────────────────────────────────────────────
+
+[country.us]
+name = "United States"
+index_name = "index-us"
+normalizer = "data/normalizers/en-us.toml"
+ram_gb = 16
+
+# US OSM PBF from Geofabrik (~10GB)
+[country.us.osm]
+url = "https://download.geofabrik.de/north-america/us-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/north-america/us-updates/state.txt"
+
+# Photon extract for enrichment
+[country.us.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/us/photon-db-us-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/us/photon-db-us-250720.tar.bz2.md5"
+
+# TIGER/Line 2025 for admin boundaries + ZIP codes (downloaded by tiger-import)
+# OpenAddresses for address data (downloaded by oa-import)
+[country.us.national]
+type = "tiger_oa"
+tiger_base_url = "https://www2.census.gov/geo/tiger/TIGER2025"
+oa_base_url = "https://data.openaddresses.io/openaddr-collected-us_northeast.zip"
+
+# ── Australia ────────────────────────────────────────────────────────────
+
+[country.au]
+name = "Australia"
+index_name = "index-au"
+normalizer = "data/normalizers/en-au.toml"
+ram_gb = 3
+
+[country.au.osm]
+url = "https://download.geofabrik.de/australia-oceania/australia-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/australia-oceania/australia-oceania-updates/state.txt"
+
+[country.au.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/au/photon-db-au-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/au/photon-db-au-250720.tar.bz2.md5"
+
+# G-NAF quarterly release — update URL from https://data.gov.au/dataset/geocoded-national-address-file-g-naf
+# Download the "G-NAF - GDA2020" PSV format ZIP (~2GB download, ~5GB unpacked)
+[country.au.national]
+type = "gnaf"
+url = "https://data.gov.au/data/dataset/19432f89-dc3a-4ef3-b943-5326ef1dbecc/resource/5be5278c-fe66-459e-845a-bea553f46b4b/download/g-naf_feb26_allstates_gda2020_psv_1022.zip"
+
+# ── Canada ───────────────────────────────────────────────────────────────
+
+[country.ca]
+name = "Canada"
+index_name = "index-ca"
+normalizer = "data/normalizers/en-ca.toml"
+ram_gb = 6
+
+[country.ca.osm]
+url = "https://download.geofabrik.de/north-america/canada-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/north-america/canada-updates/state.txt"
+
+[country.ca.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ca/photon-db-ca-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ca/photon-db-ca-250720.tar.bz2.md5"
+
+# Statistics Canada NAR (National Address Register) — updated June + December
+# Download from: https://open.canada.ca/data/en/dataset/a587c941-261d-4e00-bda2-bdd92cd76e8a
+[country.ca.national]
+type = "nar"
+url = "https://www150.statcan.gc.ca/n1/pub/46-26-0002/2022001/202512.zip"
+
+# ── New Zealand ─────────────────────────────────────────────────────────
+
+[country.nz]
+name = "New Zealand"
+index_name = "index-nz"
+normalizer = "data/normalizers/en-nz.toml"
+ram_gb = 2
+
+[country.nz.osm]
+url = "https://download.geofabrik.de/australia-oceania/new-zealand-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/australia-oceania/australia-oceania-updates/state.txt"
+
+[country.nz.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/nz/photon-db-nz-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/nz/photon-db-nz-250720.tar.bz2.md5"
+
+# LINZ NZ Addresses (2.3M) — requires LINZ API token (set LINZ_API_KEY env var)
+# Download GeoPackage from: https://data.linz.govt.nz/layer/105689/
+# Manual: heimdall-build linz-import --index data/index-nz --linz-gpkg <path.gpkg>
+[country.nz.national]
+type = "linz"
+
+# ── Netherlands ─────────────────────────────────────────────────────────
+
+[country.nl]
+name = "Netherlands"
+index_name = "index-nl"
+normalizer = "data/normalizers/nl.toml"
+ram_gb = 3
+
+[country.nl.osm]
+url = "https://download.geofabrik.de/europe/netherlands-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/netherlands-updates/state.txt"
+
+[country.nl.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/nl/photon-db-nl-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/nl/photon-db-nl-250720.tar.bz2.md5"
+
+# BAG via NLExtract CSV — download from http://data.nlextract.nl/bag/csv/
+[country.nl.national]
+type = "bag"
+
+# ── France ──────────────────────────────────────────────────────────────
+
+[country.fr]
+name = "France"
+index_name = "index-fr"
+normalizer = "data/normalizers/fr.toml"
+ram_gb = 6
+
+[country.fr.osm]
+url = "https://download.geofabrik.de/europe/france-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/france-updates/state.txt"
+
+[country.fr.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/fr/photon-db-fr-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/fr/photon-db-fr-250720.tar.bz2.md5"
+
+# BAN per-département CSVs — auto-downloaded by ban-import
+[country.fr.national]
+type = "ban"
+
+# ── Switzerland ─────────────────────────────────────────────────────────
+
+[country.ch]
+name = "Switzerland"
+index_name = "index-ch"
+normalizer = "data/normalizers/ch.toml"
+ram_gb = 1
+
+[country.ch.osm]
+url = "https://download.geofabrik.de/europe/switzerland-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/switzerland-updates/state.txt"
+
+[country.ch.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ch/photon-db-ch-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ch/photon-db-ch-250720.tar.bz2.md5"
+
+# swisstopo Gebäudeadressen — download via STAC API
+[country.ch.national]
+type = "swisstopo"
+
+# ── Austria ─────────────────────────────────────────────────────────────
+
+[country.at]
+name = "Austria"
+index_name = "index-at"
+normalizer = "data/normalizers/at.toml"
+ram_gb = 2
+
+[country.at.osm]
+url = "https://download.geofabrik.de/europe/austria-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/austria-updates/state.txt"
+
+[country.at.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/at/photon-db-at-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/at/photon-db-at-250720.tar.bz2.md5"
+
+# BEV Adressregister — download from data.gv.at
+[country.at.national]
+type = "bev"
+
+# ── Belgium ─────────────────────────────────────────────────────────────
+
+[country.be]
+name = "Belgium"
+index_name = "index-be"
+normalizer = "data/normalizers/be.toml"
+ram_gb = 2
+
+[country.be.osm]
+url = "https://download.geofabrik.de/europe/belgium-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/belgium-updates/state.txt"
+
+[country.be.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/be/photon-db-be-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/be/photon-db-be-250720.tar.bz2.md5"
+
+# BeST regional CSVs — stable "latest" download URLs
+[country.be.national]
+type = "best"
+url = "https://opendata.bosa.be/download/best/openaddress-bevlg.zip"
+
+# ── Czech Republic ──────────────────────────────────────────────────────
+
+[country.cz]
+name = "Czech Republic"
+index_name = "index-cz"
+normalizer = "data/normalizers/cz.toml"
+ram_gb = 3
+
+[country.cz.osm]
+url = "https://download.geofabrik.de/europe/czech-republic-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/czech-republic-updates/state.txt"
+
+[country.cz.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/cz/photon-db-cz-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/cz/photon-db-cz-250720.tar.bz2.md5"
+
+# RÚIAN CSV from ČÚZK geoportal
+[country.cz.national]
+type = "ruian"
+
+# ── Poland ──────────────────────────────────────────────────────────────
+
+[country.pl]
+name = "Poland"
+index_name = "index-pl"
+normalizer = "data/normalizers/pl.toml"
+ram_gb = 4
+
+[country.pl.osm]
+url = "https://download.geofabrik.de/europe/poland-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/poland-updates/state.txt"
+
+[country.pl.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/pl/photon-db-pl-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/pl/photon-db-pl-250720.tar.bz2.md5"
+
+# PRG address points from GUGiK
+[country.pl.national]
+type = "prg"
+url = "https://opendata.geoportal.gov.pl/prg/adresy/PRG-punkty_adresowe.zip"
+
+# ── Estonia ─────────────────────────────────────────────────────────────
+
+[country.ee]
+name = "Estonia"
+index_name = "index-ee"
+normalizer = "data/normalizers/ee.toml"
+ram_gb = 1
+
+[country.ee.osm]
+url = "https://download.geofabrik.de/europe/estonia-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/estonia-updates/state.txt"
+
+[country.ee.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ee/photon-db-ee-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ee/photon-db-ee-250720.tar.bz2.md5"
+
+# ADS from Estonian Land Board
+[country.ee.national]
+type = "ads"
+
+# ── Latvia ──────────────────────────────────────────────────────────────
+
+[country.lv]
+name = "Latvia"
+index_name = "index-lv"
+normalizer = "data/normalizers/lv.toml"
+ram_gb = 1
+
+[country.lv.osm]
+url = "https://download.geofabrik.de/europe/latvia-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/latvia-updates/state.txt"
+
+[country.lv.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/lv/photon-db-lv-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/lv/photon-db-lv-250720.tar.bz2.md5"
+
+# VZD from data.gov.lv
+[country.lv.national]
+type = "vzd"
+
+# ── Lithuania ───────────────────────────────────────────────────────────
+
+[country.lt]
+name = "Lithuania"
+index_name = "index-lt"
+normalizer = "data/normalizers/lt.toml"
+ram_gb = 1
+
+[country.lt.osm]
+url = "https://download.geofabrik.de/europe/lithuania-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/lithuania-updates/state.txt"
+
+[country.lt.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/lt/photon-db-lt-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/lt/photon-db-lt-250720.tar.bz2.md5"
+
+# govlt SQLite — download from GitHub releases
+[country.lt.national]
+type = "lt"
+url = "https://github.com/govlt/national-boundaries-api/releases/latest/download/boundaries.sqlite"
+
+# ── Japan ───────────────────────────────────────────────────────────────
+
+[country.jp]
+name = "Japan"
+index_name = "index-jp"
+normalizer = "data/normalizers/jp.toml"
+ram_gb = 8
+
+[country.jp.osm]
+url = "https://download.geofabrik.de/asia/japan-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/japan-updates/state.txt"
+
+[country.jp.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/jp/photon-db-jp-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/jp/photon-db-jp-250720.tar.bz2.md5"
+
+# ABR via abr-geocoder SQLite — run `npx @digital-go-jp/abr-geocoder download` first
+[country.jp.national]
+type = "abr"
+
+# ── South Korea ─────────────────────────────────────────────────────────
+
+[country.kr]
+name = "South Korea"
+index_name = "index-kr"
+normalizer = "data/normalizers/kr.toml"
+ram_gb = 4
+
+[country.kr.osm]
+url = "https://download.geofabrik.de/asia/south-korea-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/south-korea-updates/state.txt"
+
+[country.kr.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/kr/photon-db-kr-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/kr/photon-db-kr-250720.tar.bz2.md5"
+
+# juso.go.kr road-name addresses — requires free registration at business.juso.go.kr
+[country.kr.national]
+type = "juso"
+
+# ── Brazil ──────────────────────────────────────────────────────────────
+
+[country.br]
+name = "Brazil"
+index_name = "index-br"
+normalizer = "data/normalizers/br.toml"
+ram_gb = 6
+
+[country.br.osm]
+url = "https://download.geofabrik.de/south-america/brazil-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/south-america/brazil-updates/state.txt"
+
+[country.br.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/br/photon-db-br-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/br/photon-db-br-250720.tar.bz2.md5"
+
+# CNEFE 2022 — download state ZIPs from IBGE FTP
+[country.br.national]
+type = "cnefe"
+
+[country.ad]
+name = "Andorra"
+index_name = "index-ad"
+normalizer = "data/normalizers/es.toml"
+ram_gb = 2
+
+[country.ad.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ad/photon-db-ad-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ad/photon-db-ad-250720.tar.bz2.md5"
+
+[country.ae]
+name = "UAE"
+index_name = "index-ae"
+normalizer = "data/normalizers/ar.toml"
+ram_gb = 2
+
+[country.ae.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ae/photon-db-ae-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ae/photon-db-ae-250720.tar.bz2.md5"
+
+[country.af]
+name = "Afghanistan"
+index_name = "index-af"
+normalizer = "data/normalizers/fa.toml"
+ram_gb = 2
+
+[country.af.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/af/photon-db-af-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/af/photon-db-af-250720.tar.bz2.md5"
+
+[country.ag]
+name = "Antigua and Barbuda"
+index_name = "index-ag"
+normalizer = "data/normalizers/en-caribbean.toml"
+ram_gb = 2
+
+[country.ag.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ag/photon-db-ag-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ag/photon-db-ag-250720.tar.bz2.md5"
+
+[country.al]
+name = "Albania"
+index_name = "index-al"
+normalizer = "data/normalizers/hr.toml"
+ram_gb = 2
+
+[country.al.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/al/photon-db-al-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/al/photon-db-al-250720.tar.bz2.md5"
+
+[country.am]
+name = "Armenia"
+index_name = "index-am"
+normalizer = "data/normalizers/hy.toml"
+ram_gb = 2
+
+[country.am.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/am/photon-db-am-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/am/photon-db-am-250720.tar.bz2.md5"
+
+[country.ao]
+name = "Angola"
+index_name = "index-ao"
+normalizer = "data/normalizers/pt-africa.toml"
+ram_gb = 2
+
+[country.ao.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ao/photon-db-ao-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ao/photon-db-ao-250720.tar.bz2.md5"
+
+[country.ar]
+name = "Argentina"
+index_name = "index-ar"
+normalizer = "data/normalizers/es-latam.toml"
+ram_gb = 4
+
+[country.ar.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ar/photon-db-ar-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ar/photon-db-ar-250720.tar.bz2.md5"
+
+[country.az]
+name = "Azerbaijan"
+index_name = "index-az"
+normalizer = "data/normalizers/tr.toml"
+ram_gb = 2
+
+[country.az.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/az/photon-db-az-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/az/photon-db-az-250720.tar.bz2.md5"
+
+[country.ba]
+name = "Bosnia and Herzegovina"
+index_name = "index-ba"
+normalizer = "data/normalizers/hr.toml"
+ram_gb = 2
+
+[country.ba.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ba/photon-db-ba-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ba/photon-db-ba-250720.tar.bz2.md5"
+
+[country.bb]
+name = "Barbados"
+index_name = "index-bb"
+normalizer = "data/normalizers/en-caribbean.toml"
+ram_gb = 2
+
+[country.bb.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/bb/photon-db-bb-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/bb/photon-db-bb-250720.tar.bz2.md5"
+
+[country.bd]
+name = "Bangladesh"
+index_name = "index-bd"
+normalizer = "data/normalizers/bn.toml"
+ram_gb = 2
+
+[country.bd.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/bd/photon-db-bd-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/bd/photon-db-bd-250720.tar.bz2.md5"
+
+[country.bf]
+name = "Burkina Faso"
+index_name = "index-bf"
+normalizer = "data/normalizers/fr.toml"
+ram_gb = 2
+
+[country.bf.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/bf/photon-db-bf-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/bf/photon-db-bf-250720.tar.bz2.md5"
+
+[country.bg]
+name = "Bulgaria"
+index_name = "index-bg"
+normalizer = "data/normalizers/bg.toml"
+ram_gb = 2
+
+[country.bg.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/bg/photon-db-bg-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/bg/photon-db-bg-250720.tar.bz2.md5"
+
+[country.bh]
+name = "Bahrain"
+index_name = "index-bh"
+normalizer = "data/normalizers/ar.toml"
+ram_gb = 2
+
+[country.bh.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/bh/photon-db-bh-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/bh/photon-db-bh-250720.tar.bz2.md5"
+
+[country.bi]
+name = "Burundi"
+index_name = "index-bi"
+normalizer = "data/normalizers/fr.toml"
+ram_gb = 2
+
+[country.bi.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/bi/photon-db-bi-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/bi/photon-db-bi-250720.tar.bz2.md5"
+
+[country.bj]
+name = "Benin"
+index_name = "index-bj"
+normalizer = "data/normalizers/fr.toml"
+ram_gb = 2
+
+[country.bj.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/bj/photon-db-bj-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/bj/photon-db-bj-250720.tar.bz2.md5"
+
+[country.bm]
+name = "Bermuda"
+index_name = "index-bm"
+normalizer = "data/normalizers/en-caribbean.toml"
+ram_gb = 2
+
+[country.bm.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/bm/photon-db-bm-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/bm/photon-db-bm-250720.tar.bz2.md5"
+
+[country.bo]
+name = "Bolivia"
+index_name = "index-bo"
+normalizer = "data/normalizers/es-latam.toml"
+ram_gb = 2
+
+[country.bo.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/bo/photon-db-bo-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/bo/photon-db-bo-250720.tar.bz2.md5"
+
+[country.bs]
+name = "Bahamas"
+index_name = "index-bs"
+normalizer = "data/normalizers/en-caribbean.toml"
+ram_gb = 2
+
+[country.bs.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/bs/photon-db-bs-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/bs/photon-db-bs-250720.tar.bz2.md5"
+
+[country.bt]
+name = "Bhutan"
+index_name = "index-bt"
+normalizer = "data/normalizers/dz.toml"
+ram_gb = 2
+
+[country.bt.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/bt/photon-db-bt-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/bt/photon-db-bt-250720.tar.bz2.md5"
+
+[country.bw]
+name = "Botswana"
+index_name = "index-bw"
+normalizer = "data/normalizers/en-africa.toml"
+ram_gb = 2
+
+[country.bw.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/bw/photon-db-bw-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/bw/photon-db-bw-250720.tar.bz2.md5"
+
+[country.by]
+name = "Belarus"
+index_name = "index-by"
+normalizer = "data/normalizers/ru.toml"
+ram_gb = 1
+
+[country.by.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/by/photon-db-by-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/by/photon-db-by-250720.tar.bz2.md5"
+
+[country.bz]
+name = "Belize"
+index_name = "index-bz"
+normalizer = "data/normalizers/en-caribbean.toml"
+ram_gb = 2
+
+[country.bz.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/bz/photon-db-bz-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/bz/photon-db-bz-250720.tar.bz2.md5"
+
+[country.cd]
+name = "DR Congo"
+index_name = "index-cd"
+normalizer = "data/normalizers/fr.toml"
+ram_gb = 2
+
+[country.cd.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/cd/photon-db-cd-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/cd/photon-db-cd-250720.tar.bz2.md5"
+
+[country.cf]
+name = "Central African Rep."
+index_name = "index-cf"
+normalizer = "data/normalizers/fr.toml"
+ram_gb = 2
+
+[country.cf.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/cf/photon-db-cf-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/cf/photon-db-cf-250720.tar.bz2.md5"
+
+[country.cg]
+name = "Rep. Congo"
+index_name = "index-cg"
+normalizer = "data/normalizers/fr.toml"
+ram_gb = 2
+
+[country.cg.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/cg/photon-db-cg-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/cg/photon-db-cg-250720.tar.bz2.md5"
+
+[country.ci]
+name = "Cote d'Ivoire"
+index_name = "index-ci"
+normalizer = "data/normalizers/fr.toml"
+ram_gb = 2
+
+[country.ci.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ci/photon-db-ci-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ci/photon-db-ci-250720.tar.bz2.md5"
+
+[country.cl]
+name = "Chile"
+index_name = "index-cl"
+normalizer = "data/normalizers/es-latam.toml"
+ram_gb = 1
+
+[country.cl.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/cl/photon-db-cl-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/cl/photon-db-cl-250720.tar.bz2.md5"
+
+[country.cm]
+name = "Cameroon"
+index_name = "index-cm"
+normalizer = "data/normalizers/fr.toml"
+ram_gb = 2
+
+[country.cm.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/cm/photon-db-cm-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/cm/photon-db-cm-250720.tar.bz2.md5"
+
+[country.co]
+name = "Colombia"
+index_name = "index-co"
+normalizer = "data/normalizers/es-latam.toml"
+ram_gb = 2
+
+[country.co.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/co/photon-db-co-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/co/photon-db-co-250720.tar.bz2.md5"
+
+[country.cr]
+name = "Costa Rica"
+index_name = "index-cr"
+normalizer = "data/normalizers/es-latam.toml"
+ram_gb = 2
+
+[country.cr.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/cr/photon-db-cr-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/cr/photon-db-cr-250720.tar.bz2.md5"
+
+[country.cu]
+name = "Cuba"
+index_name = "index-cu"
+normalizer = "data/normalizers/es-latam.toml"
+ram_gb = 2
+
+[country.cu.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/cu/photon-db-cu-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/cu/photon-db-cu-250720.tar.bz2.md5"
+
+[country.cv]
+name = "Cape Verde"
+index_name = "index-cv"
+normalizer = "data/normalizers/pt-africa.toml"
+ram_gb = 2
+
+[country.cv.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/cv/photon-db-cv-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/cv/photon-db-cv-250720.tar.bz2.md5"
+
+[country.cy]
+name = "Cyprus"
+index_name = "index-cy"
+normalizer = "data/normalizers/el.toml"
+ram_gb = 2
+
+[country.cy.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/cy/photon-db-cy-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/cy/photon-db-cy-250720.tar.bz2.md5"
+
+[country.dj]
+name = "Djibouti"
+index_name = "index-dj"
+normalizer = "data/normalizers/fr.toml"
+ram_gb = 2
+
+[country.dj.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/dj/photon-db-dj-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/dj/photon-db-dj-250720.tar.bz2.md5"
+
+[country.dm]
+name = "Dominica"
+index_name = "index-dm"
+normalizer = "data/normalizers/en-caribbean.toml"
+ram_gb = 2
+
+[country.dm.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/dm/photon-db-dm-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/dm/photon-db-dm-250720.tar.bz2.md5"
+
+[country.do]
+name = "Dominican Republic"
+index_name = "index-do"
+normalizer = "data/normalizers/es-latam.toml"
+ram_gb = 2
+
+[country.do.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/do/photon-db-do-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/do/photon-db-do-250720.tar.bz2.md5"
+
+[country.dz]
+name = "Algeria"
+index_name = "index-dz"
+normalizer = "data/normalizers/ar.toml"
+ram_gb = 2
+
+[country.dz.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/dz/photon-db-dz-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/dz/photon-db-dz-250720.tar.bz2.md5"
+
+[country.ec]
+name = "Ecuador"
+index_name = "index-ec"
+normalizer = "data/normalizers/es-latam.toml"
+ram_gb = 2
+
+[country.ec.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ec/photon-db-ec-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ec/photon-db-ec-250720.tar.bz2.md5"
+
+[country.eg]
+name = "Egypt"
+index_name = "index-eg"
+normalizer = "data/normalizers/ar.toml"
+ram_gb = 1
+
+[country.eg.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/eg/photon-db-eg-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/eg/photon-db-eg-250720.tar.bz2.md5"
+
+[country.er]
+name = "Eritrea"
+index_name = "index-er"
+normalizer = "data/normalizers/am.toml"
+ram_gb = 2
+
+[country.er.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/er/photon-db-er-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/er/photon-db-er-250720.tar.bz2.md5"
+
+[country.es]
+name = "Spain"
+index_name = "index-es"
+normalizer = "data/normalizers/es.toml"
+ram_gb = 1
+
+[country.es.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/es/photon-db-es-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/es/photon-db-es-250720.tar.bz2.md5"
+
+[country.et]
+name = "Ethiopia"
+index_name = "index-et"
+normalizer = "data/normalizers/am.toml"
+ram_gb = 2
+
+[country.et.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/et/photon-db-et-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/et/photon-db-et-250720.tar.bz2.md5"
+
+[country.ga]
+name = "Gabon"
+index_name = "index-ga"
+normalizer = "data/normalizers/fr.toml"
+ram_gb = 2
+
+[country.ga.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ga/photon-db-ga-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ga/photon-db-ga-250720.tar.bz2.md5"
+
+[country.gd]
+name = "Grenada"
+index_name = "index-gd"
+normalizer = "data/normalizers/en-caribbean.toml"
+ram_gb = 2
+
+[country.gd.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/gd/photon-db-gd-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/gd/photon-db-gd-250720.tar.bz2.md5"
+
+[country.ge]
+name = "Georgia"
+index_name = "index-ge"
+normalizer = "data/normalizers/ka.toml"
+ram_gb = 2
+
+[country.ge.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ge/photon-db-ge-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ge/photon-db-ge-250720.tar.bz2.md5"
+
+[country.gh]
+name = "Ghana"
+index_name = "index-gh"
+normalizer = "data/normalizers/en-africa.toml"
+ram_gb = 2
+
+[country.gh.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/gh/photon-db-gh-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/gh/photon-db-gh-250720.tar.bz2.md5"
+
+[country.gm]
+name = "Gambia"
+index_name = "index-gm"
+normalizer = "data/normalizers/en-africa.toml"
+ram_gb = 2
+
+[country.gm.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/gm/photon-db-gm-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/gm/photon-db-gm-250720.tar.bz2.md5"
+
+[country.gn]
+name = "Guinea"
+index_name = "index-gn"
+normalizer = "data/normalizers/fr.toml"
+ram_gb = 2
+
+[country.gn.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/gn/photon-db-gn-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/gn/photon-db-gn-250720.tar.bz2.md5"
+
+[country.gq]
+name = "Equatorial Guinea"
+index_name = "index-gq"
+normalizer = "data/normalizers/fr.toml"
+ram_gb = 2
+
+[country.gq.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/gq/photon-db-gq-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/gq/photon-db-gq-250720.tar.bz2.md5"
+
+[country.gr]
+name = "Greece"
+index_name = "index-gr"
+normalizer = "data/normalizers/el.toml"
+ram_gb = 2
+
+[country.gr.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/gr/photon-db-gr-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/gr/photon-db-gr-250720.tar.bz2.md5"
+
+[country.gt]
+name = "Guatemala"
+index_name = "index-gt"
+normalizer = "data/normalizers/es-latam.toml"
+ram_gb = 2
+
+[country.gt.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/gt/photon-db-gt-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/gt/photon-db-gt-250720.tar.bz2.md5"
+
+[country.gw]
+name = "Guinea-Bissau"
+index_name = "index-gw"
+normalizer = "data/normalizers/pt-africa.toml"
+ram_gb = 2
+
+[country.gw.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/gw/photon-db-gw-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/gw/photon-db-gw-250720.tar.bz2.md5"
+
+[country.gy]
+name = "Guyana"
+index_name = "index-gy"
+normalizer = "data/normalizers/en-caribbean.toml"
+ram_gb = 2
+
+[country.gy.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/gy/photon-db-gy-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/gy/photon-db-gy-250720.tar.bz2.md5"
+
+[country.hn]
+name = "Honduras"
+index_name = "index-hn"
+normalizer = "data/normalizers/es-latam.toml"
+ram_gb = 2
+
+[country.hn.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/hn/photon-db-hn-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/hn/photon-db-hn-250720.tar.bz2.md5"
+
+[country.hr]
+name = "Croatia"
+index_name = "index-hr"
+normalizer = "data/normalizers/hr.toml"
+ram_gb = 2
+
+[country.hr.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/hr/photon-db-hr-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/hr/photon-db-hr-250720.tar.bz2.md5"
+
+[country.ht]
+name = "Haiti"
+index_name = "index-ht"
+normalizer = "data/normalizers/ht.toml"
+ram_gb = 2
+
+[country.ht.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ht/photon-db-ht-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ht/photon-db-ht-250720.tar.bz2.md5"
+
+[country.hu]
+name = "Hungary"
+index_name = "index-hu"
+normalizer = "data/normalizers/hu.toml"
+ram_gb = 2
+
+[country.hu.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/hu/photon-db-hu-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/hu/photon-db-hu-250720.tar.bz2.md5"
+
+[country.ie]
+name = "Ireland"
+index_name = "index-ie"
+normalizer = "data/normalizers/ie.toml"
+ram_gb = 2
+
+[country.ie.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ie/photon-db-ie-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ie/photon-db-ie-250720.tar.bz2.md5"
+
+[country.il]
+name = "Israel"
+index_name = "index-il"
+normalizer = "data/normalizers/he.toml"
+ram_gb = 2
+
+[country.il.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/il/photon-db-il-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/il/photon-db-il-250720.tar.bz2.md5"
+
+[country.in]
+name = "India"
+index_name = "index-in"
+normalizer = "data/normalizers/hi.toml"
+ram_gb = 2
+
+[country.in.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/in/photon-db-in-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/in/photon-db-in-250720.tar.bz2.md5"
+
+[country.iq]
+name = "Iraq"
+index_name = "index-iq"
+normalizer = "data/normalizers/ar.toml"
+ram_gb = 2
+
+[country.iq.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/iq/photon-db-iq-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/iq/photon-db-iq-250720.tar.bz2.md5"
+
+[country.ir]
+name = "Iran"
+index_name = "index-ir"
+normalizer = "data/normalizers/fa.toml"
+ram_gb = 2
+
+[country.ir.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ir/photon-db-ir-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ir/photon-db-ir-250720.tar.bz2.md5"
+
+[country.is]
+name = "Iceland"
+index_name = "index-is"
+normalizer = "data/normalizers/is.toml"
+ram_gb = 2
+
+[country.is.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/is/photon-db-is-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/is/photon-db-is-250720.tar.bz2.md5"
+
+[country.it]
+name = "Italy"
+index_name = "index-it"
+normalizer = "data/normalizers/it.toml"
+ram_gb = 2
+
+[country.it.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/it/photon-db-it-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/it/photon-db-it-250720.tar.bz2.md5"
+
+[country.jm]
+name = "Jamaica"
+index_name = "index-jm"
+normalizer = "data/normalizers/en-caribbean.toml"
+ram_gb = 2
+
+[country.jm.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/jm/photon-db-jm-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/jm/photon-db-jm-250720.tar.bz2.md5"
+
+[country.jo]
+name = "Jordan"
+index_name = "index-jo"
+normalizer = "data/normalizers/ar.toml"
+ram_gb = 2
+
+[country.jo.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/jo/photon-db-jo-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/jo/photon-db-jo-250720.tar.bz2.md5"
+
+[country.ke]
+name = "Kenya"
+index_name = "index-ke"
+normalizer = "data/normalizers/en-africa.toml"
+ram_gb = 2
+
+[country.ke.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ke/photon-db-ke-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ke/photon-db-ke-250720.tar.bz2.md5"
+
+[country.km]
+name = "Comoros"
+index_name = "index-km"
+normalizer = "data/normalizers/fr.toml"
+ram_gb = 2
+
+[country.km.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/km/photon-db-km-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/km/photon-db-km-250720.tar.bz2.md5"
+
+[country.kn]
+name = "Saint Kitts and Nevis"
+index_name = "index-kn"
+normalizer = "data/normalizers/en-caribbean.toml"
+ram_gb = 2
+
+[country.kn.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/kn/photon-db-kn-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/kn/photon-db-kn-250720.tar.bz2.md5"
+
+[country.kw]
+name = "Kuwait"
+index_name = "index-kw"
+normalizer = "data/normalizers/ar.toml"
+ram_gb = 2
+
+[country.kw.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/kw/photon-db-kw-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/kw/photon-db-kw-250720.tar.bz2.md5"
+
+[country.lb]
+name = "Lebanon"
+index_name = "index-lb"
+normalizer = "data/normalizers/ar.toml"
+ram_gb = 2
+
+[country.lb.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/lb/photon-db-lb-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/lb/photon-db-lb-250720.tar.bz2.md5"
+
+[country.lc]
+name = "Saint Lucia"
+index_name = "index-lc"
+normalizer = "data/normalizers/en-caribbean.toml"
+ram_gb = 2
+
+[country.lc.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/lc/photon-db-lc-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/lc/photon-db-lc-250720.tar.bz2.md5"
+
+[country.lk]
+name = "Sri Lanka"
+index_name = "index-lk"
+normalizer = "data/normalizers/si.toml"
+ram_gb = 2
+
+[country.lk.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/lk/photon-db-lk-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/lk/photon-db-lk-250720.tar.bz2.md5"
+
+[country.lr]
+name = "Liberia"
+index_name = "index-lr"
+normalizer = "data/normalizers/en-africa.toml"
+ram_gb = 2
+
+[country.lr.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/lr/photon-db-lr-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/lr/photon-db-lr-250720.tar.bz2.md5"
+
+[country.ls]
+name = "Lesotho"
+index_name = "index-ls"
+normalizer = "data/normalizers/en-africa.toml"
+ram_gb = 2
+
+[country.ls.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ls/photon-db-ls-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ls/photon-db-ls-250720.tar.bz2.md5"
+
+[country.lu]
+name = "Luxembourg"
+index_name = "index-lu"
+normalizer = "data/normalizers/lu.toml"
+ram_gb = 2
+
+[country.lu.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/lu/photon-db-lu-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/lu/photon-db-lu-250720.tar.bz2.md5"
+
+[country.ly]
+name = "Libya"
+index_name = "index-ly"
+normalizer = "data/normalizers/ar.toml"
+ram_gb = 2
+
+[country.ly.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ly/photon-db-ly-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ly/photon-db-ly-250720.tar.bz2.md5"
+
+[country.ma]
+name = "Morocco"
+index_name = "index-ma"
+normalizer = "data/normalizers/ar.toml"
+ram_gb = 2
+
+[country.ma.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ma/photon-db-ma-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ma/photon-db-ma-250720.tar.bz2.md5"
+
+[country.mc]
+name = "Monaco"
+index_name = "index-mc"
+normalizer = "data/normalizers/fr.toml"
+ram_gb = 2
+
+[country.mc.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/mc/photon-db-mc-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/mc/photon-db-mc-250720.tar.bz2.md5"
+
+[country.md]
+name = "Moldova"
+index_name = "index-md"
+normalizer = "data/normalizers/ro.toml"
+ram_gb = 2
+
+[country.md.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/md/photon-db-md-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/md/photon-db-md-250720.tar.bz2.md5"
+
+[country.me]
+name = "Montenegro"
+index_name = "index-me"
+normalizer = "data/normalizers/hr.toml"
+ram_gb = 2
+
+[country.me.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/me/photon-db-me-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/me/photon-db-me-250720.tar.bz2.md5"
+
+[country.mg]
+name = "Madagascar"
+index_name = "index-mg"
+normalizer = "data/normalizers/fr.toml"
+ram_gb = 2
+
+[country.mg.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/mg/photon-db-mg-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/mg/photon-db-mg-250720.tar.bz2.md5"
+
+[country.mk]
+name = "North Macedonia"
+index_name = "index-mk"
+normalizer = "data/normalizers/hr.toml"
+ram_gb = 2
+
+[country.mk.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/mk/photon-db-mk-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/mk/photon-db-mk-250720.tar.bz2.md5"
+
+[country.ml]
+name = "Mali"
+index_name = "index-ml"
+normalizer = "data/normalizers/fr.toml"
+ram_gb = 2
+
+[country.ml.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ml/photon-db-ml-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ml/photon-db-ml-250720.tar.bz2.md5"
+
+[country.mr]
+name = "Mauritania"
+index_name = "index-mr"
+normalizer = "data/normalizers/ar.toml"
+ram_gb = 2
+
+[country.mr.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/mr/photon-db-mr-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/mr/photon-db-mr-250720.tar.bz2.md5"
+
+[country.mt]
+name = "Malta"
+index_name = "index-mt"
+normalizer = "data/normalizers/it.toml"
+ram_gb = 2
+
+[country.mt.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/mt/photon-db-mt-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/mt/photon-db-mt-250720.tar.bz2.md5"
+
+[country.mu]
+name = "Mauritius"
+index_name = "index-mu"
+normalizer = "data/normalizers/en-africa.toml"
+ram_gb = 2
+
+[country.mu.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/mu/photon-db-mu-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/mu/photon-db-mu-250720.tar.bz2.md5"
+
+[country.mv]
+name = "Maldives"
+index_name = "index-mv"
+normalizer = "data/normalizers/dv.toml"
+ram_gb = 2
+
+[country.mv.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/mv/photon-db-mv-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/mv/photon-db-mv-250720.tar.bz2.md5"
+
+[country.mw]
+name = "Malawi"
+index_name = "index-mw"
+normalizer = "data/normalizers/en-africa.toml"
+ram_gb = 2
+
+[country.mw.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/mw/photon-db-mw-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/mw/photon-db-mw-250720.tar.bz2.md5"
+
+[country.mx]
+name = "Mexico"
+index_name = "index-mx"
+normalizer = "data/normalizers/es-latam.toml"
+ram_gb = 2
+
+[country.mx.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/mx/photon-db-mx-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/mx/photon-db-mx-250720.tar.bz2.md5"
+
+[country.mz]
+name = "Mozambique"
+index_name = "index-mz"
+normalizer = "data/normalizers/pt-africa.toml"
+ram_gb = 2
+
+[country.mz.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/mz/photon-db-mz-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/mz/photon-db-mz-250720.tar.bz2.md5"
+
+[country.na]
+name = "Namibia"
+index_name = "index-na"
+normalizer = "data/normalizers/en-africa.toml"
+ram_gb = 2
+
+[country.na.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/na/photon-db-na-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/na/photon-db-na-250720.tar.bz2.md5"
+
+[country.ne]
+name = "Niger"
+index_name = "index-ne"
+normalizer = "data/normalizers/fr.toml"
+ram_gb = 2
+
+[country.ne.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ne/photon-db-ne-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ne/photon-db-ne-250720.tar.bz2.md5"
+
+[country.ng]
+name = "Nigeria"
+index_name = "index-ng"
+normalizer = "data/normalizers/en-africa.toml"
+ram_gb = 2
+
+[country.ng.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ng/photon-db-ng-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ng/photon-db-ng-250720.tar.bz2.md5"
+
+[country.ni]
+name = "Nicaragua"
+index_name = "index-ni"
+normalizer = "data/normalizers/es-latam.toml"
+ram_gb = 2
+
+[country.ni.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ni/photon-db-ni-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ni/photon-db-ni-250720.tar.bz2.md5"
+
+[country.np]
+name = "Nepal"
+index_name = "index-np"
+normalizer = "data/normalizers/hi.toml"
+ram_gb = 2
+
+[country.np.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/np/photon-db-np-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/np/photon-db-np-250720.tar.bz2.md5"
+
+[country.om]
+name = "Oman"
+index_name = "index-om"
+normalizer = "data/normalizers/ar.toml"
+ram_gb = 2
+
+[country.om.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/om/photon-db-om-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/om/photon-db-om-250720.tar.bz2.md5"
+
+[country.pa]
+name = "Panama"
+index_name = "index-pa"
+normalizer = "data/normalizers/es-latam.toml"
+ram_gb = 2
+
+[country.pa.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/pa/photon-db-pa-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/pa/photon-db-pa-250720.tar.bz2.md5"
+
+[country.pe]
+name = "Peru"
+index_name = "index-pe"
+normalizer = "data/normalizers/es-latam.toml"
+ram_gb = 2
+
+[country.pe.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/pe/photon-db-pe-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/pe/photon-db-pe-250720.tar.bz2.md5"
+
+[country.pk]
+name = "Pakistan"
+index_name = "index-pk"
+normalizer = "data/normalizers/ur.toml"
+ram_gb = 2
+
+[country.pk.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/pk/photon-db-pk-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/pk/photon-db-pk-250720.tar.bz2.md5"
+
+[country.ps]
+name = "Palestine"
+index_name = "index-ps"
+normalizer = "data/normalizers/ar.toml"
+ram_gb = 2
+
+[country.ps.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ps/photon-db-ps-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ps/photon-db-ps-250720.tar.bz2.md5"
+
+[country.pt]
+name = "Portugal"
+index_name = "index-pt"
+normalizer = "data/normalizers/pt.toml"
+ram_gb = 2
+
+[country.pt.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/pt/photon-db-pt-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/pt/photon-db-pt-250720.tar.bz2.md5"
+
+[country.py]
+name = "Paraguay"
+index_name = "index-py"
+normalizer = "data/normalizers/es-latam.toml"
+ram_gb = 2
+
+[country.py.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/py/photon-db-py-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/py/photon-db-py-250720.tar.bz2.md5"
+
+[country.qa]
+name = "Qatar"
+index_name = "index-qa"
+normalizer = "data/normalizers/ar.toml"
+ram_gb = 2
+
+[country.qa.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/qa/photon-db-qa-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/qa/photon-db-qa-250720.tar.bz2.md5"
+
+[country.ro]
+name = "Romania"
+index_name = "index-ro"
+normalizer = "data/normalizers/ro.toml"
+ram_gb = 2
+
+[country.ro.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ro/photon-db-ro-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ro/photon-db-ro-250720.tar.bz2.md5"
+
+[country.rs]
+name = "Serbia"
+index_name = "index-rs"
+normalizer = "data/normalizers/hr.toml"
+ram_gb = 2
+
+[country.rs.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/rs/photon-db-rs-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/rs/photon-db-rs-250720.tar.bz2.md5"
+
+[country.ru]
+name = "Russia"
+index_name = "index-ru"
+normalizer = "data/normalizers/ru.toml"
+ram_gb = 2
+
+[country.ru.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ru/photon-db-ru-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ru/photon-db-ru-250720.tar.bz2.md5"
+
+[country.rw]
+name = "Rwanda"
+index_name = "index-rw"
+normalizer = "data/normalizers/en-africa.toml"
+ram_gb = 2
+
+[country.rw.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/rw/photon-db-rw-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/rw/photon-db-rw-250720.tar.bz2.md5"
+
+[country.sa]
+name = "Saudi Arabia"
+index_name = "index-sa"
+normalizer = "data/normalizers/ar.toml"
+ram_gb = 2
+
+[country.sa.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/sa/photon-db-sa-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/sa/photon-db-sa-250720.tar.bz2.md5"
+
+[country.sc]
+name = "Seychelles"
+index_name = "index-sc"
+normalizer = "data/normalizers/en-africa.toml"
+ram_gb = 2
+
+[country.sc.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/sc/photon-db-sc-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/sc/photon-db-sc-250720.tar.bz2.md5"
+
+[country.sd]
+name = "Sudan"
+index_name = "index-sd"
+normalizer = "data/normalizers/ar.toml"
+ram_gb = 2
+
+[country.sd.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/sd/photon-db-sd-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/sd/photon-db-sd-250720.tar.bz2.md5"
+
+[country.si]
+name = "Slovenia"
+index_name = "index-si"
+normalizer = "data/normalizers/hr.toml"
+ram_gb = 2
+
+[country.si.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/si/photon-db-si-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/si/photon-db-si-250720.tar.bz2.md5"
+
+[country.sk]
+name = "Slovakia"
+index_name = "index-sk"
+normalizer = "data/normalizers/sk.toml"
+ram_gb = 2
+
+[country.sk.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/sk/photon-db-sk-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/sk/photon-db-sk-250720.tar.bz2.md5"
+
+[country.sl]
+name = "Sierra Leone"
+index_name = "index-sl"
+normalizer = "data/normalizers/en-africa.toml"
+ram_gb = 2
+
+[country.sl.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/sl/photon-db-sl-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/sl/photon-db-sl-250720.tar.bz2.md5"
+
+[country.sm]
+name = "San Marino"
+index_name = "index-sm"
+normalizer = "data/normalizers/it.toml"
+ram_gb = 2
+
+[country.sm.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/sm/photon-db-sm-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/sm/photon-db-sm-250720.tar.bz2.md5"
+
+[country.sn]
+name = "Senegal"
+index_name = "index-sn"
+normalizer = "data/normalizers/fr.toml"
+ram_gb = 2
+
+[country.sn.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/sn/photon-db-sn-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/sn/photon-db-sn-250720.tar.bz2.md5"
+
+[country.so]
+name = "Somalia"
+index_name = "index-so"
+normalizer = "data/normalizers/ar.toml"
+ram_gb = 2
+
+[country.so.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/so/photon-db-so-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/so/photon-db-so-250720.tar.bz2.md5"
+
+[country.sr]
+name = "Suriname"
+index_name = "index-sr"
+normalizer = "data/normalizers/nl-sr.toml"
+ram_gb = 2
+
+[country.sr.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/sr/photon-db-sr-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/sr/photon-db-sr-250720.tar.bz2.md5"
+
+[country.ss]
+name = "South Sudan"
+index_name = "index-ss"
+normalizer = "data/normalizers/en-africa.toml"
+ram_gb = 2
+
+[country.ss.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ss/photon-db-ss-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ss/photon-db-ss-250720.tar.bz2.md5"
+
+[country.st]
+name = "Sao Tome"
+index_name = "index-st"
+normalizer = "data/normalizers/pt-africa.toml"
+ram_gb = 2
+
+[country.st.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/st/photon-db-st-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/st/photon-db-st-250720.tar.bz2.md5"
+
+[country.sv]
+name = "El Salvador"
+index_name = "index-sv"
+normalizer = "data/normalizers/es-latam.toml"
+ram_gb = 2
+
+[country.sv.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/sv/photon-db-sv-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/sv/photon-db-sv-250720.tar.bz2.md5"
+
+[country.sy]
+name = "Syria"
+index_name = "index-sy"
+normalizer = "data/normalizers/ar.toml"
+ram_gb = 2
+
+[country.sy.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/sy/photon-db-sy-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/sy/photon-db-sy-250720.tar.bz2.md5"
+
+[country.sz]
+name = "Eswatini"
+index_name = "index-sz"
+normalizer = "data/normalizers/en-africa.toml"
+ram_gb = 2
+
+[country.sz.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/sz/photon-db-sz-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/sz/photon-db-sz-250720.tar.bz2.md5"
+
+[country.td]
+name = "Chad"
+index_name = "index-td"
+normalizer = "data/normalizers/fr.toml"
+ram_gb = 2
+
+[country.td.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/td/photon-db-td-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/td/photon-db-td-250720.tar.bz2.md5"
+
+[country.tg]
+name = "Togo"
+index_name = "index-tg"
+normalizer = "data/normalizers/fr.toml"
+ram_gb = 2
+
+[country.tg.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/tg/photon-db-tg-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/tg/photon-db-tg-250720.tar.bz2.md5"
+
+[country.tn]
+name = "Tunisia"
+index_name = "index-tn"
+normalizer = "data/normalizers/ar.toml"
+ram_gb = 2
+
+[country.tn.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/tn/photon-db-tn-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/tn/photon-db-tn-250720.tar.bz2.md5"
+
+[country.tr]
+name = "Turkey"
+index_name = "index-tr"
+normalizer = "data/normalizers/tr.toml"
+ram_gb = 2
+
+[country.tr.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/tr/photon-db-tr-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/tr/photon-db-tr-250720.tar.bz2.md5"
+
+[country.tt]
+name = "Trinidad and Tobago"
+index_name = "index-tt"
+normalizer = "data/normalizers/en-caribbean.toml"
+ram_gb = 2
+
+[country.tt.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/tt/photon-db-tt-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/tt/photon-db-tt-250720.tar.bz2.md5"
+
+[country.tz]
+name = "Tanzania"
+index_name = "index-tz"
+normalizer = "data/normalizers/en-africa.toml"
+ram_gb = 2
+
+[country.tz.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/tz/photon-db-tz-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/tz/photon-db-tz-250720.tar.bz2.md5"
+
+[country.ua]
+name = "Ukraine"
+index_name = "index-ua"
+normalizer = "data/normalizers/uk.toml"
+ram_gb = 2
+
+[country.ua.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ua/photon-db-ua-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ua/photon-db-ua-250720.tar.bz2.md5"
+
+[country.ug]
+name = "Uganda"
+index_name = "index-ug"
+normalizer = "data/normalizers/en-africa.toml"
+ram_gb = 2
+
+[country.ug.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ug/photon-db-ug-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ug/photon-db-ug-250720.tar.bz2.md5"
+
+[country.uy]
+name = "Uruguay"
+index_name = "index-uy"
+normalizer = "data/normalizers/es-latam.toml"
+ram_gb = 2
+
+[country.uy.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/uy/photon-db-uy-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/uy/photon-db-uy-250720.tar.bz2.md5"
+
+
+[country.vc]
+name = "Saint Vincent and the Grenadines"
+index_name = "index-vc"
+normalizer = "data/normalizers/en-caribbean.toml"
+ram_gb = 2
+
+[country.vc.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/vc/photon-db-vc-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/vc/photon-db-vc-250720.tar.bz2.md5"
+
+[country.ve]
+name = "Venezuela"
+index_name = "index-ve"
+normalizer = "data/normalizers/es-latam.toml"
+ram_gb = 2
+
+[country.ve.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ve/photon-db-ve-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ve/photon-db-ve-250720.tar.bz2.md5"
+
+[country.xk]
+name = "Kosovo"
+index_name = "index-xk"
+normalizer = "data/normalizers/hr.toml"
+ram_gb = 2
+
+[country.xk.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/xk/photon-db-xk-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/xk/photon-db-xk-250720.tar.bz2.md5"
+
+[country.ye]
+name = "Yemen"
+index_name = "index-ye"
+normalizer = "data/normalizers/ar.toml"
+ram_gb = 2
+
+[country.ye.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ye/photon-db-ye-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ye/photon-db-ye-250720.tar.bz2.md5"
+
+[country.za]
+name = "South Africa"
+index_name = "index-za"
+normalizer = "data/normalizers/en-africa.toml"
+ram_gb = 2
+
+[country.za.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/za/photon-db-za-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/za/photon-db-za-250720.tar.bz2.md5"
+
+[country.zm]
+name = "Zambia"
+index_name = "index-zm"
+normalizer = "data/normalizers/en-africa.toml"
+ram_gb = 2
+
+[country.zm.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/zm/photon-db-zm-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/zm/photon-db-zm-250720.tar.bz2.md5"
+
+[country.zw]
+name = "Zimbabwe"
+index_name = "index-zw"
+normalizer = "data/normalizers/en-africa.toml"
+ram_gb = 2
+
+[country.zw.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/zw/photon-db-zw-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/zw/photon-db-zw-250720.tar.bz2.md5"
+
+[country.cn]
+name = "China"
+index_name = "index-cn"
+normalizer = "data/normalizers/zh.toml"
+ram_gb = 2
+
+[country.cn.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/cn/photon-db-cn-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/cn/photon-db-cn-250720.tar.bz2.md5"
+
+[country.tw]
+name = "Taiwan"
+index_name = "index-tw"
+normalizer = "data/normalizers/zh.toml"
+ram_gb = 2
+
+[country.tw.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/tw/photon-db-tw-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/tw/photon-db-tw-250720.tar.bz2.md5"
+
+[country.mn]
+name = "Mongolia"
+index_name = "index-mn"
+normalizer = "data/normalizers/mn.toml"
+ram_gb = 2
+
+[country.mn.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/mn/photon-db-mn-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/mn/photon-db-mn-250720.tar.bz2.md5"
+
+[country.bn]
+name = "Brunei"
+index_name = "index-bn"
+normalizer = "data/normalizers/ms.toml"
+ram_gb = 2
+
+[country.bn.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/bn/photon-db-bn-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/bn/photon-db-bn-250720.tar.bz2.md5"
+
+[country.id]
+name = "Indonesia"
+index_name = "index-id"
+normalizer = "data/normalizers/ms.toml"
+ram_gb = 2
+
+[country.id.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/id/photon-db-id-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/id/photon-db-id-250720.tar.bz2.md5"
+
+[country.kh]
+name = "Cambodia"
+index_name = "index-kh"
+normalizer = "data/normalizers/km.toml"
+ram_gb = 2
+
+[country.kh.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/kh/photon-db-kh-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/kh/photon-db-kh-250720.tar.bz2.md5"
+
+[country.la]
+name = "Laos"
+index_name = "index-la"
+normalizer = "data/normalizers/lo.toml"
+ram_gb = 2
+
+[country.la.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/la/photon-db-la-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/la/photon-db-la-250720.tar.bz2.md5"
+
+[country.mm]
+name = "Myanmar"
+index_name = "index-mm"
+normalizer = "data/normalizers/my.toml"
+ram_gb = 2
+
+[country.mm.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/mm/photon-db-mm-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/mm/photon-db-mm-250720.tar.bz2.md5"
+
+[country.my]
+name = "Malaysia"
+index_name = "index-my"
+normalizer = "data/normalizers/ms.toml"
+ram_gb = 2
+
+[country.my.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/my/photon-db-my-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/my/photon-db-my-250720.tar.bz2.md5"
+
+[country.ph]
+name = "Philippines"
+index_name = "index-ph"
+normalizer = "data/normalizers/tl.toml"
+ram_gb = 2
+
+[country.ph.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ph/photon-db-ph-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ph/photon-db-ph-250720.tar.bz2.md5"
+
+[country.sg]
+name = "Singapore"
+index_name = "index-sg"
+normalizer = "data/normalizers/ms.toml"
+ram_gb = 2
+
+[country.sg.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/sg/photon-db-sg-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/sg/photon-db-sg-250720.tar.bz2.md5"
+
+[country.th]
+name = "Thailand"
+index_name = "index-th"
+normalizer = "data/normalizers/th.toml"
+ram_gb = 2
+
+[country.th.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/th/photon-db-th-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/th/photon-db-th-250720.tar.bz2.md5"
+
+[country.tl]
+name = "Timor-Leste"
+index_name = "index-tl"
+normalizer = "data/normalizers/tl.toml"
+ram_gb = 2
+
+[country.tl.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/tl/photon-db-tl-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/tl/photon-db-tl-250720.tar.bz2.md5"
+
+[country.vn]
+name = "Vietnam"
+index_name = "index-vn"
+normalizer = "data/normalizers/vi.toml"
+ram_gb = 2
+
+[country.vn.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/vn/photon-db-vn-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/vn/photon-db-vn-250720.tar.bz2.md5"
+
+[country.ck]
+name = "Cook Islands"
+index_name = "index-ck"
+normalizer = "data/normalizers/en-oceania.toml"
+ram_gb = 2
+
+[country.ck.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ck/photon-db-ck-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ck/photon-db-ck-250720.tar.bz2.md5"
+
+[country.fj]
+name = "Fiji"
+index_name = "index-fj"
+normalizer = "data/normalizers/en-oceania.toml"
+ram_gb = 2
+
+[country.fj.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/fj/photon-db-fj-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/fj/photon-db-fj-250720.tar.bz2.md5"
+
+[country.fm]
+name = "Micronesia"
+index_name = "index-fm"
+normalizer = "data/normalizers/en-oceania.toml"
+ram_gb = 2
+
+[country.fm.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/fm/photon-db-fm-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/fm/photon-db-fm-250720.tar.bz2.md5"
+
+
+[country.mh]
+name = "Marshall Islands"
+index_name = "index-mh"
+normalizer = "data/normalizers/en-oceania.toml"
+ram_gb = 2
+
+[country.mh.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/mh/photon-db-mh-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/mh/photon-db-mh-250720.tar.bz2.md5"
+
+[country.ki]
+name = "Kiribati"
+index_name = "index-ki"
+normalizer = "data/normalizers/en-oceania.toml"
+ram_gb = 2
+
+[country.ki.osm]
+url = "https://download.geofabrik.de/australia-oceania/kiribati-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/australia-oceania/kiribati-updates/state.txt"
+
+[country.nr]
+name = "Nauru"
+index_name = "index-nr"
+normalizer = "data/normalizers/en-oceania.toml"
+ram_gb = 2
+
+[country.nr.osm]
+url = "https://download.geofabrik.de/australia-oceania/nauru-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/australia-oceania/nauru-updates/state.txt"
+
+[country.nu]
+name = "Niue"
+index_name = "index-nu"
+normalizer = "data/normalizers/en-oceania.toml"
+ram_gb = 2
+
+[country.nu.osm]
+url = "https://download.geofabrik.de/australia-oceania/niue-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/australia-oceania/niue-updates/state.txt"
+
+[country.pg]
+name = "Papua New Guinea"
+index_name = "index-pg"
+normalizer = "data/normalizers/en-oceania.toml"
+ram_gb = 2
+
+[country.pg.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/pg/photon-db-pg-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/pg/photon-db-pg-250720.tar.bz2.md5"
+
+[country.pw]
+name = "Palau"
+index_name = "index-pw"
+normalizer = "data/normalizers/en-oceania.toml"
+ram_gb = 2
+
+[country.pw.osm]
+url = "https://download.geofabrik.de/australia-oceania/palau-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/australia-oceania/palau-updates/state.txt"
+
+[country.sb]
+name = "Solomon Islands"
+index_name = "index-sb"
+normalizer = "data/normalizers/en-oceania.toml"
+ram_gb = 2
+
+[country.sb.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/sb/photon-db-sb-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/sb/photon-db-sb-250720.tar.bz2.md5"
+
+[country.to]
+name = "Tonga"
+index_name = "index-to"
+normalizer = "data/normalizers/en-oceania.toml"
+ram_gb = 2
+
+[country.to.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/to/photon-db-to-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/to/photon-db-to-250720.tar.bz2.md5"
+
+[country.tv]
+name = "Tuvalu"
+index_name = "index-tv"
+normalizer = "data/normalizers/en-oceania.toml"
+ram_gb = 2
+
+[country.tv.osm]
+url = "https://download.geofabrik.de/australia-oceania/tuvalu-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/australia-oceania/tuvalu-updates/state.txt"
+
+[country.vu]
+name = "Vanuatu"
+index_name = "index-vu"
+normalizer = "data/normalizers/en-oceania.toml"
+ram_gb = 2
+
+[country.vu.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/vu/photon-db-vu-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/vu/photon-db-vu-250720.tar.bz2.md5"
+
+[country.ws]
+name = "Samoa"
+index_name = "index-ws"
+normalizer = "data/normalizers/en-oceania.toml"
+ram_gb = 2
+
+[country.ws.photon]
+url = "https://download1.graphhopper.com/public/extracts/by-country-code/ws/photon-db-ws-250720.tar.bz2"
+md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ws/photon-db-ws-250720.tar.bz2.md5"

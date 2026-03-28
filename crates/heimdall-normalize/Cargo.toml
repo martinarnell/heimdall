@@ -1,0 +1,11 @@
+[package]
+name = "heimdall-normalize"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde.workspace = true
+anyhow.workspace = true
+unicode-normalization = "0.1"
+rphonetic = "2"
+toml = "0.8"

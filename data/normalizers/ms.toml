@@ -1,0 +1,150 @@
+# Malay/Indonesian place name normalizer
+# Used for Malaysia (MY), Indonesia (ID), Brunei (BN), and Singapore (SG).
+# Malay and Indonesian are closely related languages using Latin script with
+# minimal diacritics. Street type abbreviations are standardized across the region.
+# No phonetic encoding — Latin script with simple orthography needs no phonetic layer.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Street type abbreviations (Malay/Indonesian)
+"jalan" = "jl"
+"jl." = "jl"
+"lorong" = "lor"
+"lor." = "lor"
+"kampung" = "kg"
+"kg." = "kg"
+"taman" = "tmn"
+"tmn." = "tmn"
+"persiaran" = "psrn"
+"lebuh" = "lbh"
+"lengkok" = "lgk"
+"simpang" = "spg"
+"gang" = "gg"
+
+# English street types (common in Singapore/Malaysia)
+"street" = "st"
+"avenue" = "ave"
+"road" = "rd"
+"drive" = "dr"
+"boulevard" = "blvd"
+"highway" = "hwy"
+"lane" = "ln"
+"place" = "pl"
+"st." = "st"
+"ave." = "ave"
+"rd." = "rd"
+"dr." = "dr"
+"blvd." = "blvd"
+
+# Directional abbreviations
+"north" = "n"
+"south" = "s"
+"east" = "e"
+"west" = "w"
+"utara" = "u"
+"selatan" = "s"
+"timur" = "t"
+"barat" = "b"
+
+# Administrative
+"kota" = "kota"
+"kabupaten" = "kab"
+"kecamatan" = "kec"
+"kelurahan" = "kel"
+"provinsi" = "prov"
+"negeri" = "negeri"
+
+[stopwords]
+words = [
+    "malaysia",
+    "my",
+    "indonesia",
+    "id",
+    "brunei",
+    "bn",
+    "singapore",
+    "sg",
+    "brunei darussalam",
+    "republic of indonesia",
+    "republik indonesia",
+    "republic of singapore",
+]
+
+[known_variants]
+# Malaysia
+"kuala lumpur" = "kuala lumpur"
+"kl" = "kuala lumpur"
+"penang" = "pulau pinang"
+"pulau pinang" = "penang"
+"george town" = "georgetown"
+"georgetown" = "george town"
+"malacca" = "melaka"
+"melaka" = "malacca"
+"johor bahru" = "johor bahru"
+"jb" = "johor bahru"
+"kota kinabalu" = "kota kinabalu"
+"kk" = "kota kinabalu"
+"kuching" = "kuching"
+"ipoh" = "ipoh"
+"shah alam" = "shah alam"
+"petaling jaya" = "petaling jaya"
+"pj" = "petaling jaya"
+"subang jaya" = "subang jaya"
+
+# Indonesia
+"jakarta" = "jakarta"
+"jkt" = "jakarta"
+"surabaya" = "surabaya"
+"sby" = "surabaya"
+"bandung" = "bandung"
+"bdg" = "bandung"
+"medan" = "medan"
+"semarang" = "semarang"
+"makassar" = "makassar"
+"ujung pandang" = "makassar"
+"yogyakarta" = "yogyakarta"
+"jogja" = "yogyakarta"
+"jogjakarta" = "yogyakarta"
+"denpasar" = "denpasar"
+"bali" = "bali"
+"palembang" = "palembang"
+"balikpapan" = "balikpapan"
+"manado" = "manado"
+"padang" = "padang"
+"batam" = "batam"
+"solo" = "surakarta"
+"surakarta" = "solo"
+
+# Singapore
+"singapore" = "singapura"
+"singapura" = "singapore"
+
+# Brunei
+"bandar seri begawan" = "bandar seri begawan"
+"bsb" = "bandar seri begawan"
+
+[diacritics]
+# Malay/Indonesian is mostly ASCII. Handle occasional accented imports.
+"é" = "e"
+"è" = "e"
+"ê" = "e"
+"ë" = "e"
+"á" = "a"
+"à" = "a"
+"â" = "a"
+"ä" = "a"
+"í" = "i"
+"ì" = "i"
+"î" = "i"
+"ï" = "i"
+"ó" = "o"
+"ò" = "o"
+"ô" = "o"
+"ö" = "o"
+"ú" = "u"
+"ù" = "u"
+"û" = "u"
+"ü" = "u"
+"ñ" = "n"

@@ -1,0 +1,76 @@
+# Czech place name normalizer
+# Covers Czech diacritics (č→c, ř→r, š→s, ž→z, etc.), street abbreviations,
+# English city name variants, and admin stopwords.
+
+[phonetic]
+engine = "none"  # No phonetic encoding for Czech (diacritic stripping is sufficient)
+
+[abbreviations]
+# Street type abbreviations
+"ul." = "ulice"
+"ul" = "ulice"
+"nám." = "náměstí"
+"nám" = "náměstí"
+"tř." = "třída"
+"tř" = "třída"
+"nábř." = "nábřeží"
+"nábř" = "nábřeží"
+"sady" = "sady"
+"most" = "most"
+
+# Administrative
+"sv." = "svatý"
+"sv" = "svatý"
+
+[stopwords]
+words = [
+    "česko",
+    "czech republic",
+    "czech",
+    "cz",
+    "česká republika",
+]
+
+[diacritics]
+# Czech diacritics → ASCII equivalents
+"á" = "a"
+"č" = "c"
+"ď" = "d"
+"é" = "e"
+"ě" = "e"
+"í" = "i"
+"ň" = "n"
+"ó" = "o"
+"ř" = "r"
+"š" = "s"
+"ť" = "t"
+"ú" = "u"
+"ů" = "u"
+"ý" = "y"
+"ž" = "z"
+
+[known_variants]
+# English names for Czech cities
+"prague" = "praha"
+"brno" = "brno"
+"pilsen" = "plzeň"
+"plzen" = "plzeň"
+"ostrava" = "ostrava"
+"budweis" = "české budějovice"
+"ceske budejovice" = "české budějovice"
+"karlsbad" = "karlovy vary"
+"karlovy vary" = "karlovy vary"
+"marienbad" = "mariánské lázně"
+"marianske lazne" = "mariánské lázně"
+"aussig" = "ústí nad labem"
+"usti nad labem" = "ústí nad labem"
+"brunn" = "brno"
+"reichenberg" = "liberec"
+"olmütz" = "olomouc"
+"olmutz" = "olomouc"
+"zlin" = "zlín"
+"jihlava" = "jihlava"
+"hradec kralove" = "hradec králové"
+"pardubice" = "pardubice"
+"teplice" = "teplice"
+"cesky krumlov" = "český krumlov"

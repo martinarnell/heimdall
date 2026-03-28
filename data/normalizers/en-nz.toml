@@ -1,0 +1,120 @@
+# New Zealand English place name normalizer
+# Handles Māori macrons (tohutō), bilingual place names, and NZ street abbreviations.
+# No phonetic encoding — English doesn't benefit from Nordic/German phonetic schemes.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Street type abbreviations (normalize long → short canonical form)
+"street" = "st"
+"avenue" = "ave"
+"road" = "rd"
+"drive" = "dr"
+"court" = "ct"
+"crescent" = "cres"
+"place" = "pl"
+"lane" = "ln"
+"close" = "cl"
+"terrace" = "tce"
+"parade" = "pde"
+"highway" = "hwy"
+"boulevard" = "blvd"
+"way" = "way"
+"grove" = "gr"
+"gardens" = "gdns"
+"square" = "sq"
+"rise" = "rise"
+"trail" = "trl"
+"esplanade" = "esp"
+"quay" = "qy"
+"mews" = "mews"
+# Also handle abbreviated input → canonical short
+"st." = "st"
+"ave." = "ave"
+"rd." = "rd"
+"dr." = "dr"
+"ct." = "ct"
+"cres." = "cres"
+"pl." = "pl"
+"ln." = "ln"
+"cl." = "cl"
+"tce." = "tce"
+"pde." = "pde"
+"hwy." = "hwy"
+"blvd." = "blvd"
+
+# Directional abbreviations
+"north" = "n"
+"south" = "s"
+"east" = "e"
+"west" = "w"
+"n." = "n"
+"s." = "s"
+"e." = "e"
+"w." = "w"
+
+# Common NZ abbreviations
+"mount" = "mt"
+"saint" = "st"
+"mt." = "mt"
+
+[stopwords]
+words = [
+    "new zealand",
+    "nz",
+    "aotearoa",
+]
+
+[known_variants]
+# Official Māori name ↔ English name pairs (both directions indexed)
+"christchurch" = "otautahi"
+"auckland" = "tamaki makaurau"
+"wellington" = "te whanganui-a-tara"
+"dunedin" = "otepoti"
+"hamilton" = "kirikiriroa"
+"napier" = "ahuriri"
+"rotorua" = "te rotorua-nui-a-kahumatamomoe"
+"tauranga" = "tauranga moana"
+"palmerston north" = "te papaioea"
+"nelson" = "whakatu"
+"invercargill" = "waihopai"
+"new plymouth" = "ngamotu"
+"hastings" = "heretaunga"
+"whanganui" = "wanganui"
+# City nicknames
+"chch" = "christchurch"
+"palmy" = "palmerston north"
+# Common alternate names
+"the capital" = "wellington"
+
+[diacritics]
+# Māori macron (tohutō) stripping — queries without macrons match macron forms
+"ā" = "a"
+"ē" = "e"
+"ī" = "i"
+"ō" = "o"
+"ū" = "u"
+# Handle occasional accented imports from other languages
+"é" = "e"
+"è" = "e"
+"ê" = "e"
+"ë" = "e"
+"á" = "a"
+"à" = "a"
+"â" = "a"
+"ä" = "a"
+"í" = "i"
+"ì" = "i"
+"î" = "i"
+"ï" = "i"
+"ó" = "o"
+"ò" = "o"
+"ô" = "o"
+"ö" = "o"
+"ú" = "u"
+"ù" = "u"
+"û" = "u"
+"ü" = "u"
+"ñ" = "n"
+"ç" = "c"

@@ -1,0 +1,117 @@
+# Bengali place name normalizer
+# Bangladesh (BD).
+# Bengali script with Latin transliterations in Photon data.
+# No phonetic encoding — Bengali syllabic structure needs a dedicated scheme (not implemented).
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Bengali street types
+"সড়ক" = "সড়ক"
+"রোড" = "রোড"
+"গলি" = "গলি"
+"লেন" = "লেন"
+
+# English street types common in Bangladeshi addresses
+"road" = "rd"
+"street" = "st"
+"lane" = "ln"
+"sarak" = "srk"
+
+[stopwords]
+words = [
+    "বাংলাদেশ",
+    "bangladesh",
+    "bd",
+    "people's republic of bangladesh",
+    "গণপ্রজাতন্ত্রী বাংলাদেশ",
+]
+
+[known_variants]
+# Major Bangladeshi cities — English → Bengali
+"dhaka" = "ঢাকা"
+"dacca" = "ঢাকা"
+"chittagong" = "চট্টগ্রাম"
+"chattogram" = "চট্টগ্রাম"
+"khulna" = "খুলনা"
+"rajshahi" = "রাজশাহী"
+"sylhet" = "সিলেট"
+"comilla" = "কুমিল্লা"
+"cumilla" = "কুমিল্লা"
+"rangpur" = "রংপুর"
+"barisal" = "বরিশাল"
+"barishal" = "বরিশাল"
+"mymensingh" = "ময়মনসিংহ"
+"gazipur" = "গাজীপুর"
+"narayanganj" = "নারায়ণগঞ্জ"
+"tongi" = "টঙ্গী"
+"bogra" = "বগুড়া"
+"bogura" = "বগুড়া"
+"cox's bazar" = "কক্সবাজার"
+"jessore" = "যশোর"
+"jashore" = "যশোর"
+"dinajpur" = "দিনাজপুর"
+
+[diacritics]
+# Bengali vowels → Latin
+"অ" = "a"
+"আ" = "aa"
+"ই" = "i"
+"ঈ" = "ee"
+"উ" = "u"
+"ঊ" = "oo"
+"এ" = "e"
+"ঐ" = "oi"
+"ও" = "o"
+"ঔ" = "ou"
+# Bengali consonants → Latin
+"ক" = "k"
+"খ" = "kh"
+"গ" = "g"
+"ঘ" = "gh"
+"ঙ" = "ng"
+"চ" = "ch"
+"ছ" = "chh"
+"জ" = "j"
+"ঝ" = "jh"
+"ঞ" = "n"
+"ট" = "t"
+"ঠ" = "th"
+"ড" = "d"
+"ঢ" = "dh"
+"ণ" = "n"
+"ত" = "t"
+"থ" = "th"
+"দ" = "d"
+"ধ" = "dh"
+"ন" = "n"
+"প" = "p"
+"ফ" = "ph"
+"ব" = "b"
+"ভ" = "bh"
+"ম" = "m"
+"য" = "j"
+"র" = "r"
+"ল" = "l"
+"শ" = "sh"
+"ষ" = "sh"
+"স" = "s"
+"হ" = "h"
+"ড়" = "r"
+"ঢ়" = "rh"
+"য়" = "y"
+# Bengali matras → strip/map
+"া" = "a"
+"ি" = "i"
+"ী" = "ee"
+"ু" = "u"
+"ূ" = "oo"
+"ে" = "e"
+"ৈ" = "oi"
+"ো" = "o"
+"ৌ" = "ou"
+"ং" = "ng"
+"ঃ" = "h"
+"্" = ""
+"ঁ" = "n"

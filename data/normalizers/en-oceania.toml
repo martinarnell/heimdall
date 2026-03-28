@@ -1,0 +1,187 @@
+# Pacific Islands English place name normalizer
+# Used for English-speaking Pacific Island nations: Fiji (FJ), Papua New Guinea (PG),
+# Solomon Islands (SB), Vanuatu (VU), Samoa (WS), Tonga (TO), Cook Islands (CK),
+# Micronesia (FM), Kiribati (KI), Marshall Islands (MH), N. Mariana Islands (MP),
+# Nauru (NR), Niue (NU), Palau (PW), Tuvalu (TV).
+# Basic English normalizer with Pacific-specific city variants and Polynesian macrons.
+# No phonetic encoding — English with simple orthography.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Street type abbreviations (English — common across Pacific)
+"street" = "st"
+"avenue" = "ave"
+"road" = "rd"
+"drive" = "dr"
+"lane" = "ln"
+"highway" = "hwy"
+"boulevard" = "blvd"
+"crescent" = "cres"
+"place" = "pl"
+"close" = "cl"
+"st." = "st"
+"ave." = "ave"
+"rd." = "rd"
+"dr." = "dr"
+"ln." = "ln"
+"hwy." = "hwy"
+"blvd." = "blvd"
+
+# Directional abbreviations
+"north" = "n"
+"south" = "s"
+"east" = "e"
+"west" = "w"
+"n." = "n"
+"s." = "s"
+"e." = "e"
+"w." = "w"
+
+# Common abbreviations
+"mount" = "mt"
+"saint" = "st"
+"mt." = "mt"
+
+[stopwords]
+words = [
+    "fiji",
+    "fj",
+    "papua new guinea",
+    "png",
+    "pg",
+    "solomon islands",
+    "sb",
+    "vanuatu",
+    "vu",
+    "samoa",
+    "ws",
+    "tonga",
+    "to",
+    "cook islands",
+    "ck",
+    "micronesia",
+    "federated states of micronesia",
+    "fm",
+    "kiribati",
+    "ki",
+    "marshall islands",
+    "mh",
+    "northern mariana islands",
+    "mp",
+    "nauru",
+    "nr",
+    "niue",
+    "nu",
+    "palau",
+    "pw",
+    "tuvalu",
+    "tv",
+]
+
+[known_variants]
+# Fiji
+"suva" = "suva"
+"nadi" = "nadi"
+"lautoka" = "lautoka"
+"labasa" = "labasa"
+"sigatoka" = "sigatoka"
+"nausori" = "nausori"
+"savusavu" = "savusavu"
+"levuka" = "levuka"
+
+# Papua New Guinea
+"port moresby" = "port moresby"
+"lae" = "lae"
+"mount hagen" = "mount hagen"
+"mt hagen" = "mount hagen"
+"madang" = "madang"
+"goroka" = "goroka"
+"wewak" = "wewak"
+"rabaul" = "rabaul"
+"kokopo" = "kokopo"
+"arawa" = "arawa"
+"kimbe" = "kimbe"
+
+# Solomon Islands
+"honiara" = "honiara"
+"gizo" = "gizo"
+"auki" = "auki"
+
+# Vanuatu
+"port vila" = "port vila"
+"luganville" = "luganville"
+"santo" = "luganville"
+
+# Samoa
+"apia" = "apia"
+"salelologa" = "salelologa"
+
+# Tonga
+"nukualofa" = "nukualofa"
+"nuku'alofa" = "nukualofa"
+"neiafu" = "neiafu"
+
+# Cook Islands
+"avarua" = "avarua"
+"rarotonga" = "rarotonga"
+
+# Micronesia
+"palikir" = "palikir"
+"kolonia" = "kolonia"
+"weno" = "weno"
+
+# Kiribati
+"tarawa" = "tarawa"
+"south tarawa" = "tarawa"
+"betio" = "betio"
+
+# Marshall Islands
+"majuro" = "majuro"
+"ebeye" = "ebeye"
+
+# Northern Mariana Islands
+"saipan" = "saipan"
+"garapan" = "garapan"
+
+# Nauru
+"yaren" = "yaren"
+
+# Niue
+"alofi" = "alofi"
+
+# Palau
+"ngerulmud" = "ngerulmud"
+"koror" = "koror"
+"melekeok" = "melekeok"
+
+# Tuvalu
+"funafuti" = "funafuti"
+"fongafale" = "fongafale"
+
+[diacritics]
+# Polynesian macrons (Samoan, Tongan, Fijian)
+"ā" = "a"
+"ē" = "e"
+"ī" = "i"
+"ō" = "o"
+"ū" = "u"
+# Glottal stop representation (okina) — strip for matching
+"ʻ" = ""
+"'" = ""
+# Handle occasional accented imports
+"é" = "e"
+"è" = "e"
+"ê" = "e"
+"á" = "a"
+"à" = "a"
+"â" = "a"
+"í" = "i"
+"ì" = "i"
+"ó" = "o"
+"ò" = "o"
+"ô" = "o"
+"ú" = "u"
+"ù" = "u"
+"ñ" = "n"

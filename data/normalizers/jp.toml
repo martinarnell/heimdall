@@ -1,0 +1,58 @@
+# Japanese place name normalizer
+# Japan uses a hierarchical block-based address system, not streets.
+# Searches happen in both kanji and romaji — no phonetic encoding needed.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Prefecture suffixes (romaji)
+"shi" = "shi"
+"ku" = "ku"
+"cho" = "cho"
+"machi" = "machi"
+"mura" = "mura"
+"gun" = "gun"
+"ken" = "ken"
+"fu" = "fu"
+"to" = "to"
+"do" = "do"
+
+[stopwords]
+words = ["japan", "jp", "nippon", "nihon"]
+
+[known_variants]
+# Major cities — romaji to kanji
+"tokyo" = "東京"
+"osaka" = "大阪"
+"kyoto" = "京都"
+"yokohama" = "横浜"
+"nagoya" = "名古屋"
+"sapporo" = "札幌"
+"kobe" = "神戸"
+"fukuoka" = "福岡"
+"hiroshima" = "広島"
+"sendai" = "仙台"
+"nara" = "奈良"
+"kawasaki" = "川崎"
+"chiba" = "千葉"
+"saitama" = "さいたま"
+"niigata" = "新潟"
+"shizuoka" = "静岡"
+"hamamatsu" = "浜松"
+"okayama" = "岡山"
+"kumamoto" = "熊本"
+"kagoshima" = "鹿児島"
+"kanazawa" = "金沢"
+"nagasaki" = "長崎"
+"matsuyama" = "松山"
+"takamatsu" = "高松"
+"okinawa" = "沖縄"
+
+[diacritics]
+# Romaji long vowels (macron form to plain)
+"ā" = "a"
+"ē" = "e"
+"ī" = "i"
+"ō" = "o"
+"ū" = "u"

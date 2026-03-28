@@ -1,0 +1,255 @@
+# Latin American Spanish place name normalizer
+# Covers: MX (Mexico), AR (Argentina), CL (Chile), CO (Colombia), PE (Peru),
+#         VE (Venezuela), EC (Ecuador), BO (Bolivia), PY (Paraguay), UY (Uruguay),
+#         CR (Costa Rica), PA (Panama), GT (Guatemala), HN (Honduras),
+#         SV (El Salvador), NI (Nicaragua), CU (Cuba), DO (Dominican Republic)
+# Photon-only countries. Street type abbreviations, diacritics, city variants.
+# No phonetic encoding — Spanish spelling is regular enough for exact + Levenshtein.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Street type abbreviations (normalize long → short canonical form)
+"calle" = "c"
+"c/" = "c"
+"c." = "c"
+"cl." = "c"
+"avenida" = "av"
+"av." = "av"
+"avda." = "av"
+"avda" = "av"
+"carrera" = "cra"
+"cra." = "cra"
+"boulevard" = "blvd"
+"blvd." = "blvd"
+"paseo" = "pso"
+"pso." = "pso"
+"callejón" = "cjn"
+"cjn." = "cjn"
+"autopista" = "aut"
+"aut." = "aut"
+"camino" = "cno"
+"cno." = "cno"
+"carretera" = "ctra"
+"ctra." = "ctra"
+"diagonal" = "diag"
+"diag." = "diag"
+"plaza" = "pza"
+"pza." = "pza"
+"pl." = "pza"
+"ronda" = "rda"
+"rda." = "rda"
+"transversal" = "trv"
+"trv." = "trv"
+"urbanización" = "urb"
+"urb." = "urb"
+"prolongación" = "prol"
+"prol." = "prol"
+"circunvalación" = "circunv"
+"glorieta" = "gta"
+"gta." = "gta"
+"pasaje" = "pje"
+"pje." = "pje"
+"jirón" = "jr"
+"jr." = "jr"
+
+# Religious/honorific
+"santo" = "sto"
+"santa" = "sta"
+"san" = "s"
+"general" = "gral"
+"gral." = "gral"
+"coronel" = "cnel"
+"cnel." = "cnel"
+"presidente" = "pte"
+"pte." = "pte"
+"doctor" = "dr"
+"dr." = "dr"
+"profesor" = "prof"
+"prof." = "prof"
+
+[stopwords]
+words = [
+    "mexico",
+    "méxico",
+    "mx",
+    "argentina",
+    "ar",
+    "chile",
+    "cl",
+    "colombia",
+    "co",
+    "peru",
+    "perú",
+    "pe",
+    "venezuela",
+    "ve",
+    "ecuador",
+    "ec",
+    "bolivia",
+    "bo",
+    "paraguay",
+    "py",
+    "uruguay",
+    "uy",
+    "costa rica",
+    "cr",
+    "panama",
+    "panamá",
+    "pa",
+    "guatemala",
+    "gt",
+    "honduras",
+    "hn",
+    "el salvador",
+    "sv",
+    "nicaragua",
+    "ni",
+    "cuba",
+    "cu",
+    "república dominicana",
+    "dominican republic",
+    "do",
+    "república",
+    "estado",
+    "departamento",
+    "provincia",
+    "municipio",
+    "cantón",
+    "distrito",
+    "región",
+    "parroquia",
+]
+
+[diacritics]
+# Spanish accented characters → ASCII equivalents
+"ñ" = "n"
+"á" = "a"
+"é" = "e"
+"í" = "i"
+"ó" = "o"
+"ú" = "u"
+"ü" = "u"
+
+[known_variants]
+# Mexico
+"mexico city" = "ciudad de méxico"
+"ciudad de mexico" = "ciudad de méxico"
+"cdmx" = "ciudad de méxico"
+"df" = "ciudad de méxico"
+"monterrey" = "monterrey"
+"guadalajara" = "guadalajara"
+"gdl" = "guadalajara"
+"mty" = "monterrey"
+"cancun" = "cancún"
+"merida" = "mérida"
+"leon" = "león"
+"queretaro" = "querétaro"
+"san luis potosi" = "san luis potosí"
+"playa del carmen" = "playa del carmen"
+
+# Argentina
+"buenos aires" = "buenos aires"
+"bsas" = "buenos aires"
+"caba" = "buenos aires"
+"ba" = "buenos aires"
+"cordoba" = "córdoba"
+"rosario" = "rosario"
+"mendoza" = "mendoza"
+"tucuman" = "tucumán"
+"mar del plata" = "mar del plata"
+"la plata" = "la plata"
+"salta" = "salta"
+"neuquen" = "neuquén"
+"bariloche" = "san carlos de bariloche"
+
+# Chile
+"santiago" = "santiago"
+"stgo" = "santiago"
+"valparaiso" = "valparaíso"
+"valpo" = "valparaíso"
+"concepcion" = "concepción"
+"vina del mar" = "viña del mar"
+"antofagasta" = "antofagasta"
+
+# Colombia
+"bogota" = "bogotá"
+"medellin" = "medellín"
+"cali" = "cali"
+"barranquilla" = "barranquilla"
+"cartagena" = "cartagena"
+"bucaramanga" = "bucaramanga"
+"pereira" = "pereira"
+
+# Peru
+"lima" = "lima"
+"cusco" = "cusco"
+"cuzco" = "cusco"
+"arequipa" = "arequipa"
+"trujillo" = "trujillo"
+
+# Venezuela
+"caracas" = "caracas"
+"ccs" = "caracas"
+"maracaibo" = "maracaibo"
+"valencia" = "valencia"
+"barquisimeto" = "barquisimeto"
+"ciudad guayana" = "ciudad guayana"
+
+# Ecuador
+"quito" = "quito"
+"guayaquil" = "guayaquil"
+"gye" = "guayaquil"
+"cuenca" = "cuenca"
+
+# Bolivia
+"la paz" = "la paz"
+"santa cruz" = "santa cruz de la sierra"
+"cochabamba" = "cochabamba"
+"sucre" = "sucre"
+
+# Paraguay
+"asuncion" = "asunción"
+
+# Uruguay
+"montevideo" = "montevideo"
+"mvd" = "montevideo"
+"punta del este" = "punta del este"
+
+# Costa Rica
+"san jose" = "san josé"
+"sjo" = "san josé"
+
+# Panama
+"panama city" = "ciudad de panamá"
+"ciudad de panama" = "ciudad de panamá"
+"colon" = "colón"
+
+# Guatemala
+"guatemala city" = "ciudad de guatemala"
+"ciudad de guatemala" = "ciudad de guatemala"
+"antigua" = "antigua guatemala"
+
+# Honduras
+"tegucigalpa" = "tegucigalpa"
+"tgu" = "tegucigalpa"
+"san pedro sula" = "san pedro sula"
+
+# El Salvador
+"san salvador" = "san salvador"
+
+# Nicaragua
+"managua" = "managua"
+"granada" = "granada"
+"leon nicaragua" = "león"
+
+# Cuba
+"havana" = "la habana"
+"habana" = "la habana"
+"santiago de cuba" = "santiago de cuba"
+
+# Dominican Republic
+"santo domingo" = "santo domingo"
+"sdq" = "santo domingo"
+"punta cana" = "punta cana"

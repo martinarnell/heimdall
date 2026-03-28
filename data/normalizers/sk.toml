@@ -1,0 +1,84 @@
+# Slovak place name normalizer
+# Covers Slovakia (SK)
+# Street type abbreviations, diacritics, English city name variants.
+
+[phonetic]
+engine = "none"  # No phonetic encoding for Slovak
+
+[abbreviations]
+# Street type abbreviations
+"ul." = "ulica"
+"ul" = "ulica"
+"nám." = "námestie"
+"nám" = "námestie"
+"tr." = "trieda"
+"tr" = "trieda"
+"nábr." = "nábrežie"
+"nábr" = "nábrežie"
+"most" = "most"
+"cesta" = "cesta"
+
+# Administrative
+"sv." = "svätý"
+"sv" = "svätý"
+
+[stopwords]
+words = [
+    "slovensko",
+    "slovakia",
+    "sk",
+    "slovenská republika",
+    "slovak republic",
+    "kraj",
+    "okres",
+    "obec",
+    "mesto",
+]
+
+[diacritics]
+# Slovak diacritics → ASCII equivalents
+"á" = "a"
+"ä" = "a"
+"č" = "c"
+"ď" = "d"
+"é" = "e"
+"í" = "i"
+"ĺ" = "l"
+"ľ" = "l"
+"ň" = "n"
+"ó" = "o"
+"ô" = "o"
+"ŕ" = "r"
+"š" = "s"
+"ť" = "t"
+"ú" = "u"
+"ý" = "y"
+"ž" = "z"
+
+[known_variants]
+# English/German names for Slovak cities
+"bratislava" = "bratislava"
+"pressburg" = "bratislava"
+"pozsony" = "bratislava"
+"kosice" = "košice"
+"kaschau" = "košice"
+"kassa" = "košice"
+"presov" = "prešov"
+"eperjes" = "prešov"
+"nitra" = "nitra"
+"neutra" = "nitra"
+"zilina" = "žilina"
+"sillein" = "žilina"
+"banska bystrica" = "banská bystrica"
+"neusohl" = "banská bystrica"
+"trnava" = "trnava"
+"tyrnau" = "trnava"
+"trencin" = "trenčín"
+"trentschin" = "trenčín"
+"poprad" = "poprad"
+"piestany" = "piešťany"
+"komarno" = "komárno"
+"komorn" = "komárno"
+"lucenec" = "lučenec"
+"banska stiavnica" = "banská štiavnica"
+"schemnitz" = "banská štiavnica"

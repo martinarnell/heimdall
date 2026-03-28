@@ -1,0 +1,130 @@
+# Urdu place name normalizer
+# Pakistan (PK).
+# Urdu script is Arabic/Persian-based with additional characters.
+# Photon data has both Urdu-script and English/Latin names.
+# No phonetic encoding.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Urdu street types
+"سڑک" = "سڑک"
+"گلی" = "گلی"
+"شاہراہ" = "ش"
+"روڈ" = "روڈ"
+"بازار" = "بزر"
+
+# English street types common in Pakistani addresses
+"road" = "rd"
+"street" = "st"
+"lane" = "ln"
+"block" = "blk"
+"sector" = "sec"
+"phase" = "ph"
+"scheme" = "sch"
+"colony" = "col"
+"town" = "twn"
+"garden" = "gdn"
+"society" = "soc"
+"shahrah" = "sh"
+"bazaar" = "bzr"
+"bazar" = "bzr"
+
+[stopwords]
+words = [
+    "پاکستان",
+    "pakistan",
+    "pk",
+    "islamic republic of pakistan",
+    "اسلامی جمہوریہ پاکستان",
+]
+
+[known_variants]
+# Major Pakistani cities — English → Urdu
+"karachi" = "کراچی"
+"lahore" = "لاہور"
+"islamabad" = "اسلام آباد"
+"rawalpindi" = "راولپنڈی"
+"faisalabad" = "فیصل آباد"
+"lyallpur" = "فیصل آباد"
+"multan" = "ملتان"
+"peshawar" = "پشاور"
+"quetta" = "کوئٹہ"
+"sialkot" = "سیالکوٹ"
+"gujranwala" = "گوجرانوالہ"
+"hyderabad" = "حیدر آباد"
+"bahawalpur" = "بہاولپور"
+"sargodha" = "سرگودھا"
+"sukkur" = "سکھر"
+"larkana" = "لاڑکانہ"
+"abbottabad" = "ایبٹ آباد"
+"mardan" = "مردان"
+"mingora" = "مینگورہ"
+"dera ghazi khan" = "ڈیرہ غازی خان"
+"dera ismail khan" = "ڈیرہ اسماعیل خان"
+"muzaffarabad" = "مظفرآباد"
+"gilgit" = "گلگت"
+"skardu" = "سکردو"
+"chitral" = "چترال"
+"swat" = "سوات"
+
+[diacritics]
+# Urdu-specific letters → Latin
+"پ" = "p"
+"چ" = "ch"
+"ژ" = "zh"
+"گ" = "g"
+"ٹ" = "t"
+"ڈ" = "d"
+"ڑ" = "r"
+"ں" = "n"
+"ھ" = "h"
+"ے" = "e"
+"ۓ" = "e"
+
+# Shared Arabic/Persian letters → Latin
+"ا" = "a"
+"أ" = "a"
+"إ" = "i"
+"آ" = "a"
+"ب" = "b"
+"ت" = "t"
+"ث" = "s"
+"ج" = "j"
+"ح" = "h"
+"خ" = "kh"
+"د" = "d"
+"ذ" = "z"
+"ر" = "r"
+"ز" = "z"
+"س" = "s"
+"ش" = "sh"
+"ص" = "s"
+"ض" = "z"
+"ط" = "t"
+"ظ" = "z"
+"ع" = "a"
+"غ" = "gh"
+"ف" = "f"
+"ق" = "q"
+"ک" = "k"
+"ل" = "l"
+"م" = "m"
+"ن" = "n"
+"ه" = "h"
+"و" = "w"
+"ی" = "y"
+"ي" = "y"
+"ك" = "k"
+"ة" = "a"
+
+# Tashkeel → strip
+"َ" = ""
+"ُ" = ""
+"ِ" = ""
+"ّ" = ""
+"ً" = ""
+"ٌ" = ""
+"ٍ" = ""
+"ْ" = ""

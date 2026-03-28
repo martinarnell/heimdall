@@ -1,0 +1,110 @@
+# Spanish place name normalizer
+# Covers Spain (ES), Andorra (AD)
+# Street type abbreviations, diacritics, English city name variants.
+
+[phonetic]
+engine = "none"  # No phonetic encoding for Spanish
+
+[abbreviations]
+# Street type abbreviations
+"calle" = "c"
+"c/" = "c"
+"c." = "c"
+"cl." = "c"
+"avenida" = "av"
+"av." = "av"
+"avda." = "av"
+"avda" = "av"
+"plaza" = "pza"
+"pza." = "pza"
+"pl." = "pza"
+"paseo" = "p"
+"pº" = "p"
+"p." = "p"
+"camino" = "cno"
+"cno." = "cno"
+"carretera" = "ctra"
+"ctra." = "ctra"
+"ronda" = "rda"
+"rda." = "rda"
+"travesía" = "trv"
+"trv." = "trv"
+"glorieta" = "gta"
+"gta." = "gta"
+"callejón" = "cjón"
+"urbanización" = "urb"
+"urb." = "urb"
+"partida" = "ptda"
+
+# Religious/honorific
+"santo" = "sto"
+"santa" = "sta"
+"san" = "s"
+
+# Catalan street types (Barcelona, Andorra)
+"carrer" = "c"
+"plaça" = "pça"
+"passeig" = "pg"
+"avinguda" = "av"
+
+[stopwords]
+words = [
+    "españa",
+    "spain",
+    "es",
+    "reino de españa",
+    "provincia",
+    "comunidad autónoma",
+    "comunitat autònoma",
+    "municipio",
+    "andorra",
+    "ad",
+    "principat d'andorra",
+]
+
+[diacritics]
+# Spanish/Catalan accented characters → ASCII equivalents
+"á" = "a"
+"à" = "a"
+"é" = "e"
+"è" = "e"
+"í" = "i"
+"ï" = "i"
+"ó" = "o"
+"ò" = "o"
+"ú" = "u"
+"ü" = "u"
+"ñ" = "n"
+"ç" = "c"
+
+[known_variants]
+# English/international names for Spanish cities
+"seville" = "sevilla"
+"saragossa" = "zaragoza"
+"zaragossa" = "zaragoza"
+"majorca" = "mallorca"
+"minorca" = "menorca"
+"ibiza" = "eivissa"
+"tenerife" = "tenerife"
+"the canary islands" = "islas canarias"
+"catalonia" = "catalunya"
+"basque country" = "euskadi"
+"navarre" = "navarra"
+"galicia" = "galicia"
+"andalusia" = "andalucía"
+"andalucia" = "andalucía"
+"castile" = "castilla"
+# Common ASCII approximations
+"cordoba" = "córdoba"
+"cadiz" = "cádiz"
+"malaga" = "málaga"
+"almeria" = "almería"
+"castellon" = "castellón"
+"leon" = "león"
+"caceres" = "cáceres"
+"avila" = "ávila"
+"jaen" = "jaén"
+"la coruna" = "a coruña"
+"corunna" = "a coruña"
+# Andorra
+"andorra la vella" = "andorra la vella"

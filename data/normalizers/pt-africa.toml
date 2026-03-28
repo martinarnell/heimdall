@@ -1,0 +1,96 @@
+# Portuguese place name normalizer for Lusophone Africa
+# Covers: AO (Angola), CV (Cape Verde), GW (Guinea-Bissau), MZ (Mozambique), ST (Sao Tome)
+# Portuguese street abbreviations + diacritics + African city variants.
+# No phonetic encoding.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Street type abbreviations (normalize long -> short canonical form)
+"rua" = "r"
+"r." = "r"
+"avenida" = "av"
+"av." = "av"
+"praça" = "pç"
+"pç." = "pç"
+"travessa" = "tv"
+"tv." = "tv"
+"largo" = "lg"
+"lg." = "lg"
+"alameda" = "al"
+"al." = "al"
+"estrada" = "estr"
+"estr." = "estr"
+"beco" = "bc"
+"bc." = "bc"
+"calçada" = "calc"
+"calc." = "calc"
+"campo" = "cpo"
+"rotunda" = "rot"
+
+# Religious/honorific
+"santo" = "sto"
+"santa" = "sta"
+"são" = "s"
+"s." = "s"
+
+[stopwords]
+words = [
+    "república",
+    "provincia",
+    "distrito",
+    "concelho",
+    "município",
+    "municipio",
+]
+
+[known_variants]
+# Angola
+"luanda" = "luanda"
+"lobito" = "lobito"
+"benguela" = "benguela"
+"huambo" = "huambo"
+"nova lisboa" = "huambo"
+"cabinda" = "cabinda"
+"lubango" = "lubango"
+"sa da bandeira" = "lubango"
+"namibe" = "namibe"
+"mocamedes" = "namibe"
+"malanje" = "malanje"
+# Mozambique
+"maputo" = "maputo"
+"lourenco marques" = "maputo"
+"beira" = "beira"
+"nampula" = "nampula"
+"quelimane" = "quelimane"
+"tete" = "tete"
+"pemba" = "pemba"
+"chimoio" = "chimoio"
+"inhambane" = "inhambane"
+# Cape Verde
+"praia" = "praia"
+"mindelo" = "mindelo"
+"sal" = "sal"
+"espargos" = "espargos"
+# Guinea-Bissau
+"bissau" = "bissau"
+# Sao Tome and Principe
+"sao tome" = "são tomé"
+"santo antonio" = "santo antónio"
+
+[diacritics]
+# Portuguese accented characters -> ASCII equivalents
+"á" = "a"
+"à" = "a"
+"â" = "a"
+"ã" = "a"
+"é" = "e"
+"ê" = "e"
+"í" = "i"
+"ó" = "o"
+"ô" = "o"
+"õ" = "o"
+"ú" = "u"
+"ü" = "u"
+"ç" = "c"

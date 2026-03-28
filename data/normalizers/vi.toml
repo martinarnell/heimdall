@@ -1,0 +1,154 @@
+# Vietnamese place name normalizer
+# Vietnamese uses Latin script with extensive diacritics (tone marks + modified vowels).
+# All diacritics are stripped to plain Latin for fuzzy matching — critical because
+# users searching from non-Vietnamese keyboards rarely type the marks.
+# No phonetic encoding — diacritic stripping provides sufficient normalization.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Street type abbreviations
+"đường" = "d"
+"phố" = "pho"
+"ngõ" = "ngo"
+"ngách" = "ngach"
+"hẻm" = "hem"
+
+# Administrative suffixes
+"thành phố" = "tp"
+"tỉnh" = "tinh"
+"quận" = "q"
+"huyện" = "h"
+"phường" = "p"
+"xã" = "xa"
+"thị trấn" = "tt"
+
+[stopwords]
+words = [
+    "vietnam",
+    "viet nam",
+    "vn",
+    "việt nam",
+    "cộng hòa xã hội chủ nghĩa việt nam",
+    "socialist republic of vietnam",
+]
+
+[known_variants]
+# Major cities — diacritic-free romanized → canonical Vietnamese
+"ho chi minh city" = "hồ chí minh"
+"ho chi minh" = "hồ chí minh"
+"saigon" = "hồ chí minh"
+"sai gon" = "hồ chí minh"
+"hanoi" = "hà nội"
+"ha noi" = "hà nội"
+"da nang" = "đà nẵng"
+"danang" = "đà nẵng"
+"hai phong" = "hải phòng"
+"haiphong" = "hải phòng"
+"hue" = "huế"
+"can tho" = "cần thơ"
+"nha trang" = "nha trang"
+"da lat" = "đà lạt"
+"dalat" = "đà lạt"
+"vung tau" = "vũng tàu"
+"bien hoa" = "biên hòa"
+"qui nhon" = "quy nhơn"
+"quy nhon" = "quy nhơn"
+"ha long" = "hạ long"
+"halong" = "hạ long"
+"phan thiet" = "phan thiết"
+"buon ma thuot" = "buôn ma thuột"
+"vinh" = "vinh"
+"thai nguyen" = "thái nguyên"
+"nam dinh" = "nam định"
+"my tho" = "mỹ tho"
+"long xuyen" = "long xuyên"
+"rach gia" = "rạch giá"
+"sapa" = "sa pa"
+"sa pa" = "sa pa"
+"phu quoc" = "phú quốc"
+"hoi an" = "hội an"
+
+[diacritics]
+# Vietnamese vowels with diacritics → plain Latin
+# a-family
+"á" = "a"
+"à" = "a"
+"ả" = "a"
+"ã" = "a"
+"ạ" = "a"
+"ă" = "a"
+"ắ" = "a"
+"ằ" = "a"
+"ẳ" = "a"
+"ẵ" = "a"
+"ặ" = "a"
+"â" = "a"
+"ấ" = "a"
+"ầ" = "a"
+"ẩ" = "a"
+"ẫ" = "a"
+"ậ" = "a"
+
+# d-family
+"đ" = "d"
+
+# e-family
+"é" = "e"
+"è" = "e"
+"ẻ" = "e"
+"ẽ" = "e"
+"ẹ" = "e"
+"ê" = "e"
+"ế" = "e"
+"ề" = "e"
+"ể" = "e"
+"ễ" = "e"
+"ệ" = "e"
+
+# i-family
+"í" = "i"
+"ì" = "i"
+"ỉ" = "i"
+"ĩ" = "i"
+"ị" = "i"
+
+# o-family
+"ó" = "o"
+"ò" = "o"
+"ỏ" = "o"
+"õ" = "o"
+"ọ" = "o"
+"ô" = "o"
+"ố" = "o"
+"ồ" = "o"
+"ổ" = "o"
+"ỗ" = "o"
+"ộ" = "o"
+"ơ" = "o"
+"ớ" = "o"
+"ờ" = "o"
+"ở" = "o"
+"ỡ" = "o"
+"ợ" = "o"
+
+# u-family
+"ú" = "u"
+"ù" = "u"
+"ủ" = "u"
+"ũ" = "u"
+"ụ" = "u"
+"ư" = "u"
+"ứ" = "u"
+"ừ" = "u"
+"ử" = "u"
+"ữ" = "u"
+"ự" = "u"
+
+# y-family
+"ý" = "y"
+"ỳ" = "y"
+"ỷ" = "y"
+"ỹ" = "y"
+"ỵ" = "y"

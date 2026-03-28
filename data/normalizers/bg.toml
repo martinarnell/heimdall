@@ -1,0 +1,99 @@
+# Bulgarian place name normalizer
+# Covers Bulgaria (BG)
+# Cyrillic→Latin transliteration, street type abbreviations.
+# NOTE: Photon data includes Latin-script transliterations — this normalizer
+# handles both Cyrillic originals and their Latin equivalents.
+
+[phonetic]
+engine = "none"  # No phonetic encoding for Bulgarian
+
+[abbreviations]
+# Bulgarian street types (Latin transliteration)
+"ulitsa" = "ul"
+"ul." = "ul"
+"bulevar" = "bul"
+"bul." = "bul"
+"ploshtad" = "pl"
+"pl." = "pl"
+"kvartal" = "kv"
+"kv." = "kv"
+"zhilishten kompleks" = "zhk"
+"zhk." = "zhk"
+
+[stopwords]
+words = [
+    "bulgaria",
+    "българия",
+    "bg",
+    "република българия",
+    "oblast",
+    "obshtina",
+    "община",
+]
+
+[diacritics]
+# Latin-script diacritics that may appear in transliterated names
+"á" = "a"
+"é" = "e"
+"í" = "i"
+"ó" = "o"
+"ú" = "u"
+
+[char_equivalences]
+# Bulgarian Cyrillic → Latin transliteration (official BGN/PCGN)
+"а" = "a"
+"б" = "b"
+"в" = "v"
+"г" = "g"
+"д" = "d"
+"е" = "e"
+"ж" = "zh"
+"з" = "z"
+"и" = "i"
+"й" = "y"
+"к" = "k"
+"л" = "l"
+"м" = "m"
+"н" = "n"
+"о" = "o"
+"п" = "p"
+"р" = "r"
+"с" = "s"
+"т" = "t"
+"у" = "u"
+"ф" = "f"
+"х" = "h"
+"ц" = "ts"
+"ч" = "ch"
+"ш" = "sh"
+"щ" = "sht"
+"ъ" = "a"
+"ь" = "y"
+"ю" = "yu"
+"я" = "ya"
+
+[known_variants]
+# English/international names for Bulgarian cities
+"sofia" = "sofiya"
+"plovdiv" = "plovdiv"
+"philippopolis" = "plovdiv"
+"varna" = "varna"
+"burgas" = "burgas"
+"bourgas" = "burgas"
+"ruse" = "ruse"
+"rustchuk" = "ruse"
+"stara zagora" = "stara zagora"
+"pleven" = "pleven"
+"plevna" = "pleven"
+"sliven" = "sliven"
+"dobrich" = "dobrich"
+"shumen" = "shumen"
+"blagoevgrad" = "blagoevgrad"
+"veliko tarnovo" = "veliko tarnovo"
+"veliko turnovo" = "veliko tarnovo"
+"kazanlak" = "kazanlak"
+"kazanluk" = "kazanlak"
+"vidin" = "vidin"
+"montana" = "montana"
+"pernik" = "pernik"
+"haskovo" = "haskovo"

@@ -1,0 +1,20 @@
+[package]
+name = "heimdall-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+fst.workspace = true
+serde.workspace = true
+bincode.workspace = true
+postcard.workspace = true
+geo.workspace = true
+geohash.workspace = true
+ahash.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+zstd.workspace = true
+memmap2 = "0.9"
+libc = "0.2"
+lz4_flex = "0.11"

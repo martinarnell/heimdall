@@ -1,0 +1,129 @@
+# US English place name normalizer
+# Street type abbreviations, directionals, city nicknames, state stopwords.
+# No phonetic encoding — US English doesn't benefit from Nordic/German phonetic schemes.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Street type abbreviations (normalize long → short canonical form)
+"street" = "st"
+"avenue" = "ave"
+"boulevard" = "blvd"
+"drive" = "dr"
+"road" = "rd"
+"lane" = "ln"
+"court" = "ct"
+"place" = "pl"
+"parkway" = "pkwy"
+"highway" = "hwy"
+"circle" = "cir"
+"terrace" = "ter"
+"trail" = "trl"
+"expressway" = "expy"
+"freeway" = "fwy"
+"alley" = "aly"
+# Also handle abbreviated input → canonical short
+"st." = "st"
+"ave." = "ave"
+"blvd." = "blvd"
+"dr." = "dr"
+"rd." = "rd"
+"ln." = "ln"
+"ct." = "ct"
+"pl." = "pl"
+"pkwy." = "pkwy"
+"hwy." = "hwy"
+"cir." = "cir"
+"ter." = "ter"
+"trl." = "trl"
+
+# Directional abbreviations (normalize long → short)
+"north" = "n"
+"south" = "s"
+"east" = "e"
+"west" = "w"
+"northeast" = "ne"
+"northwest" = "nw"
+"southeast" = "se"
+"southwest" = "sw"
+"n." = "n"
+"s." = "s"
+"e." = "e"
+"w." = "w"
+
+# Common US-specific abbreviations
+"mount" = "mt"
+"fort" = "ft"
+"saint" = "st"
+"mt." = "mt"
+"ft." = "ft"
+
+[stopwords]
+words = [
+    "united states",
+    "united states of america",
+    "usa",
+    "us",
+    "america",
+]
+
+[known_variants]
+# City nicknames → canonical
+"nyc" = "new york"
+"la" = "los angeles"
+"dc" = "washington"
+"sf" = "san francisco"
+"chi" = "chicago"
+"philly" = "philadelphia"
+"vegas" = "las vegas"
+"nola" = "new orleans"
+"atl" = "atlanta"
+"bmore" = "baltimore"
+"det" = "detroit"
+"stl" = "st louis"
+"kc" = "kansas city"
+"slc" = "salt lake city"
+"lv" = "las vegas"
+"dfw" = "dallas"
+"jax" = "jacksonville"
+"msp" = "minneapolis"
+"pdx" = "portland"
+"sea" = "seattle"
+# Historic / alternate names
+"new amsterdam" = "new york"
+"big apple" = "new york"
+"the big easy" = "new orleans"
+"sin city" = "las vegas"
+"motor city" = "detroit"
+"windy city" = "chicago"
+"mile high city" = "denver"
+"charm city" = "baltimore"
+"steel city" = "pittsburgh"
+"city of angels" = "los angeles"
+
+[diacritics]
+# US English is ASCII — no diacritics needed
+# But handle occasional accented imports (café → cafe, naïve → naive)
+"é" = "e"
+"è" = "e"
+"ê" = "e"
+"ë" = "e"
+"á" = "a"
+"à" = "a"
+"â" = "a"
+"ä" = "a"
+"í" = "i"
+"ì" = "i"
+"î" = "i"
+"ï" = "i"
+"ó" = "o"
+"ò" = "o"
+"ô" = "o"
+"ö" = "o"
+"ú" = "u"
+"ù" = "u"
+"û" = "u"
+"ü" = "u"
+"ñ" = "n"
+"ç" = "c"

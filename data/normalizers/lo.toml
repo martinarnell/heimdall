@@ -1,0 +1,65 @@
+# Lao place name normalizer
+# Used for Laos (LA). Lao script is closely related to Thai but with distinct characters.
+# No standard Latin transliteration — romanization varies between sources.
+# Known variants map common romanized names to Lao script.
+# No phonetic encoding — Lao tonal system doesn't map to European phonetic schemes.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Lao administrative suffixes
+"ແขວງ" = "ແຂວງ"    # khoueng — province
+"ເມືອງ" = "ເມືອງ"   # mueang — district
+"ບ້ານ" = "ບ້ານ"      # ban — village
+"ຖະໜົນ" = "ຖ."       # thanon — road/street
+
+# Romanized road types
+"street" = "st"
+"road" = "rd"
+"st." = "st"
+"rd." = "rd"
+"thanon" = "th."
+
+[stopwords]
+words = [
+    "laos",
+    "lao",
+    "la",
+    "ລາວ",
+    "ສາທາລະນະລັດ ປະຊາທິປະໄຕ ປະຊາຊົນລາວ",
+    "lao peoples democratic republic",
+    "lao pdr",
+]
+
+[known_variants]
+# Major cities — romanized → Lao script
+"vientiane" = "ວຽງຈັນ"
+"viangchan" = "ວຽງຈັນ"
+"luang prabang" = "ຫຼວງພະບາງ"
+"luangprabang" = "ຫຼວງພະບາງ"
+"pakse" = "ປາກເຊ"
+"pakxe" = "ປາກເຊ"
+"savannakhet" = "ສະຫວັນນະເຂດ"
+"thakhek" = "ທ່າແຂກ"
+"vang vieng" = "ວັງວຽງ"
+"vangvieng" = "ວັງວຽງ"
+"phonsavan" = "ໂພນສະຫວັນ"
+"sam neua" = "ຊຳເໜືອ"
+"luang namtha" = "ຫຼວງນ້ຳທາ"
+"oudomxay" = "ອຸດົມໄຊ"
+"phongsali" = "ຜົ້ງສາລີ"
+"attapeu" = "ອັດຕະປື"
+"champasak" = "ຈຳປາສັກ"
+"sekong" = "ເຊກອງ"
+"xam nua" = "ຊຳເໜືອ"
+"muang xai" = "ເມືອງໄຊ"
+
+[diacritics]
+# Lao script has no Latin diacritics. Handle romanization artifacts.
+"é" = "e"
+"è" = "e"
+"ā" = "a"
+"ī" = "i"
+"ū" = "u"
+"ō" = "o"

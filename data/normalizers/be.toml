@@ -1,0 +1,120 @@
+# Belgian place name normalizer (Dutch + French bilingual)
+# Belgium has three linguistic regions: Dutch (Flanders), French (Wallonia/Brussels),
+# and German (small eastern community). This config covers Dutch and French.
+# No phonetic encoding — multilingual context makes phonetic matching unreliable.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Dutch street types
+"str" = "straat"
+"str." = "straat"
+"ln" = "laan"
+"ln." = "laan"
+"wg" = "weg"
+"wg." = "weg"
+"pl" = "plein"
+"pl." = "plein"
+"sg" = "singel"
+"sg." = "singel"
+"stw" = "steenweg"
+"stw." = "steenweg"
+
+# French street types
+"r" = "rue"
+"r." = "rue"
+"av" = "avenue"
+"av." = "avenue"
+"bd" = "boulevard"
+"bd." = "boulevard"
+"ch" = "chemin"
+"ch." = "chemin"
+"pl" = "place"
+"pl." = "place"
+"all" = "allee"
+"all." = "allee"
+"sq" = "square"
+"sq." = "square"
+"imp" = "impasse"
+"imp." = "impasse"
+"rte" = "route"
+"rte." = "route"
+
+# Directional (Dutch)
+"n." = "noord"
+"z." = "zuid"
+"o." = "oost"
+"w." = "west"
+
+[stopwords]
+words = [
+    "belgie",
+    "belgique",
+    "belgium",
+    "be",
+    "gemeente",
+    "commune",
+    "provincie",
+    "province",
+    "gewest",
+    "region",
+    "vlaanderen",
+    "wallonie",
+    "bruxelles-capitale",
+]
+
+[diacritics]
+# French diacritics
+"é" = "e"
+"è" = "e"
+"ê" = "e"
+"ë" = "e"
+"à" = "a"
+"â" = "a"
+"ù" = "u"
+"û" = "u"
+"ü" = "u"
+"ï" = "i"
+"î" = "i"
+"ô" = "o"
+"ö" = "o"
+"ç" = "c"
+# Dutch diacritics
+"ä" = "a"
+
+[known_variants]
+# Bilingual city names (French ↔ Dutch)
+"bruxelles" = "brussel"
+"brussels" = "brussel"
+"anvers" = "antwerpen"
+"antwerp" = "antwerpen"
+"gand" = "gent"
+"ghent" = "gent"
+"liege" = "liege"
+"luik" = "liege"
+"namur" = "namen"
+"mons" = "bergen"
+"louvain" = "leuven"
+"malines" = "mechelen"
+"mechlin" = "mechelen"
+"courtrai" = "kortrijk"
+"tournai" = "doornik"
+"bruges" = "brugge"
+"ostende" = "oostende"
+"ostend" = "oostende"
+"ypres" = "ieper"
+"verviers" = "verviers"
+"hasselt" = "hasselt"
+"arlon" = "aarlen"
+"wavre" = "waver"
+"nivelles" = "nijvel"
+"soignies" = "zinnik"
+"ath" = "aat"
+"mouscron" = "moeskroen"
+"tirlemont" = "tienen"
+"alost" = "aalst"
+"termonde" = "dendermonde"
+"grammont" = "geraardsbergen"
+"renaix" = "ronse"
+"audenarde" = "oudenaarde"

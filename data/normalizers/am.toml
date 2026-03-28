@@ -1,0 +1,126 @@
+# Amharic/Ge'ez place name normalizer for Ethiopia and Eritrea
+# Covers: ET (Ethiopia), ER (Eritrea)
+#
+# Strategy: Ethiopic (Ge'ez) is a syllabary with ~300+ characters, each encoding
+# a consonant+vowel combination. Transliterating all syllables via [diacritics] is
+# impractical and brittle. Instead:
+#   - Ge'ez text is kept as-is for exact matching of Amharic queries
+#   - Photon's romanized names (name:en, name:la) handle Latin-script queries
+#   - [known_variants] bridges Ge'ez ↔ romanized for major cities
+#   - strip_combining_marks strips Latin diacritics in romanized names
+#   - No phonetic encoding — Amharic transliterations vary too widely
+
+[phonetic]
+engine = "none"
+strip_combining_marks = true
+
+[abbreviations]
+# Street type abbreviations (English, common in Ethiopian addresses)
+"street" = "st"
+"road" = "rd"
+"avenue" = "ave"
+"st." = "st"
+"rd." = "rd"
+"ave." = "ave"
+
+# Amharic address/admin terms (Latin transliterations)
+"menged" = "menged"
+"godana" = "godana"
+"kebele" = "keb"
+"woreda" = "wor"
+"kifle ketema" = "kk"
+"subcity" = "kk"
+"sub-city" = "kk"
+
+[stopwords]
+words = [
+    "ethiopia",
+    "eritrea",
+    "federal democratic republic",
+    "region",
+    "zone",
+    "woreda",
+    "kebele",
+]
+
+[known_variants]
+# Ethiopia — major cities
+# Romanized variants → canonical romanized form
+"addis ababa" = "addis abeba"
+"addis abeba" = "addis abeba"
+"addis" = "addis abeba"
+"finfine" = "addis abeba"
+"finfinne" = "addis abeba"
+"dire dawa" = "dire dawa"
+"diredawa" = "dire dawa"
+"dire-dawa" = "dire dawa"
+"hawassa" = "hawassa"
+"awasa" = "hawassa"
+"awassa" = "hawassa"
+"bahir dar" = "bahir dar"
+"baher dar" = "bahir dar"
+"bahirdar" = "bahir dar"
+"gondar" = "gonder"
+"gonder" = "gonder"
+"mekelle" = "mekelle"
+"mekele" = "mekelle"
+"mek'ele" = "mekelle"
+"adama" = "adama"
+"nazret" = "adama"
+"nazareth" = "adama"
+"jimma" = "jimma"
+"jima" = "jimma"
+"dessie" = "dessie"
+"dese" = "dessie"
+"harar" = "harar"
+"harrar" = "harar"
+"debre markos" = "debre markos"
+"debre berhan" = "debre berhan"
+"debreberhan" = "debre berhan"
+"arba minch" = "arba minch"
+"arbaminch" = "arba minch"
+"shashamane" = "shashamane"
+"shashemene" = "shashamane"
+
+# Ge'ez script → canonical romanized form
+# Allows Amharic-script queries to find romanized index entries from Photon.
+# Only major cities are mapped — smaller places rely on exact Ge'ez FST match.
+"አዲስ አበባ" = "addis abeba"
+"ድሬ ዳዋ" = "dire dawa"
+"መቀሌ" = "mekelle"
+"ጎንደር" = "gonder"
+"ሀዋሳ" = "hawassa"
+"ባህር ዳር" = "bahir dar"
+"አዳማ" = "adama"
+"ጅማ" = "jimma"
+"ደሴ" = "dessie"
+"ሐረር" = "harar"
+
+# Eritrea
+"asmara" = "asmara"
+"asmera" = "asmara"
+"massawa" = "massawa"
+"mitsiwa" = "massawa"
+"keren" = "keren"
+"assab" = "assab"
+"asseb" = "assab"
+
+[diacritics]
+# Latin diacritics in romanized Amharic names.
+# With strip_combining_marks = true, most of these are stripped before reaching
+# apply_diacritics. Kept as fallback if strip_combining_marks is ever disabled.
+# Ge'ez characters are NOT mapped — too many syllables for a diacritics table.
+"é" = "e"
+"è" = "e"
+"ê" = "e"
+"á" = "a"
+"à" = "a"
+"â" = "a"
+"í" = "i"
+"ì" = "i"
+"ó" = "o"
+"ò" = "o"
+"ú" = "u"
+"ù" = "u"
+"ñ" = "n"
+"ç" = "c"

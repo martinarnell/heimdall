@@ -1,0 +1,200 @@
+# English Caribbean place name normalizer
+# Covers: JM (Jamaica), TT (Trinidad & Tobago), BB (Barbados), AG (Antigua & Barbuda),
+#         BS (Bahamas), BM (Bermuda), DM (Dominica), GD (Grenada),
+#         KN (Saint Kitts & Nevis), LC (Saint Lucia), VC (Saint Vincent & the Grenadines),
+#         BZ (Belize), GY (Guyana)
+# Photon-only countries. Standard English street abbreviations + Caribbean city variants.
+# No phonetic encoding.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Street type abbreviations (normalize long → short canonical form)
+"street" = "st"
+"avenue" = "ave"
+"road" = "rd"
+"drive" = "dr"
+"boulevard" = "blvd"
+"lane" = "ln"
+"court" = "ct"
+"place" = "pl"
+"crescent" = "cres"
+"close" = "cl"
+"terrace" = "tce"
+"highway" = "hwy"
+"way" = "way"
+"circle" = "cir"
+"square" = "sq"
+"gardens" = "gdns"
+# Also handle abbreviated input → canonical short
+"st." = "st"
+"ave." = "ave"
+"rd." = "rd"
+"dr." = "dr"
+"blvd." = "blvd"
+"ln." = "ln"
+"ct." = "ct"
+"pl." = "pl"
+"cres." = "cres"
+"cl." = "cl"
+"hwy." = "hwy"
+
+# Directional abbreviations
+"north" = "n"
+"south" = "s"
+"east" = "e"
+"west" = "w"
+"n." = "n"
+"s." = "s"
+"e." = "e"
+"w." = "w"
+
+# Common abbreviations
+"mount" = "mt"
+"saint" = "st"
+"mt." = "mt"
+
+[stopwords]
+words = [
+    "jamaica",
+    "jm",
+    "trinidad and tobago",
+    "trinidad & tobago",
+    "tt",
+    "barbados",
+    "bb",
+    "antigua and barbuda",
+    "antigua & barbuda",
+    "ag",
+    "bahamas",
+    "the bahamas",
+    "bs",
+    "bermuda",
+    "bm",
+    "dominica",
+    "dm",
+    "grenada",
+    "gd",
+    "saint kitts and nevis",
+    "st kitts and nevis",
+    "st kitts & nevis",
+    "kn",
+    "saint lucia",
+    "st lucia",
+    "lc",
+    "saint vincent and the grenadines",
+    "st vincent",
+    "vc",
+    "belize",
+    "bz",
+    "guyana",
+    "gy",
+    "parish",
+    "county",
+    "district",
+    "region",
+]
+
+[known_variants]
+# Jamaica
+"kingston" = "kingston"
+"kgn" = "kingston"
+"montego bay" = "montego bay"
+"mobay" = "montego bay"
+"ocho rios" = "ocho rios"
+"spanish town" = "spanish town"
+"may pen" = "may pen"
+"mandeville" = "mandeville"
+"port antonio" = "port antonio"
+"negril" = "negril"
+
+# Trinidad & Tobago
+"port of spain" = "port of spain"
+"pos" = "port of spain"
+"san fernando" = "san fernando"
+"chaguanas" = "chaguanas"
+"arima" = "arima"
+"scarborough" = "scarborough"
+"tobago" = "tobago"
+
+# Barbados
+"bridgetown" = "bridgetown"
+"speightstown" = "speightstown"
+"oistins" = "oistins"
+"holetown" = "holetown"
+
+# Bahamas
+"nassau" = "nassau"
+"freeport" = "freeport"
+"marsh harbour" = "marsh harbour"
+
+# Bermuda
+"hamilton" = "hamilton"
+"st george's" = "st george's"
+"saint george's" = "st george's"
+"st georges" = "st george's"
+
+# Antigua & Barbuda
+"st john's" = "st john's"
+"saint john's" = "st john's"
+"st johns" = "st john's"
+
+# Dominica
+"roseau" = "roseau"
+"portsmouth" = "portsmouth"
+
+# Grenada
+"st george's grenada" = "st george's"
+
+# Saint Kitts & Nevis
+"basseterre" = "basseterre"
+"charlestown" = "charlestown"
+
+# Saint Lucia
+"castries" = "castries"
+"vieux fort" = "vieux fort"
+"soufriere" = "soufrière"
+"soufrière" = "soufriere"
+
+# Saint Vincent
+"kingstown" = "kingstown"
+
+# Belize
+"belize city" = "belize city"
+"belmopan" = "belmopan"
+"san ignacio" = "san ignacio"
+"orange walk" = "orange walk"
+"dangriga" = "dangriga"
+"san pedro" = "san pedro"
+
+# Guyana
+"georgetown" = "georgetown"
+"linden" = "linden"
+"new amsterdam" = "new amsterdam"
+"bartica" = "bartica"
+
+[diacritics]
+# English is ASCII — handle occasional accented imports
+"é" = "e"
+"è" = "e"
+"ê" = "e"
+"ë" = "e"
+"á" = "a"
+"à" = "a"
+"â" = "a"
+"ä" = "a"
+"í" = "i"
+"ì" = "i"
+"î" = "i"
+"ï" = "i"
+"ó" = "o"
+"ò" = "o"
+"ô" = "o"
+"ö" = "o"
+"ú" = "u"
+"ù" = "u"
+"û" = "u"
+"ü" = "u"
+"ñ" = "n"
+"ç" = "c"

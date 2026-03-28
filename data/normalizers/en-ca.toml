@@ -1,0 +1,136 @@
+# Canadian English place name normalizer
+# Bilingual (EN/FR) — handles both English and French street types,
+# province abbreviations, and city name aliases.
+# No phonetic encoding — English doesn't benefit from Nordic/German phonetic schemes.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# English street type abbreviations
+"street" = "st"
+"avenue" = "ave"
+"boulevard" = "blvd"
+"drive" = "dr"
+"road" = "rd"
+"lane" = "ln"
+"court" = "ct"
+"place" = "pl"
+"crescent" = "cres"
+"terrace" = "ter"
+"highway" = "hwy"
+"parkway" = "pkwy"
+"circle" = "cir"
+"trail" = "trl"
+"close" = "cl"
+"way" = "way"
+"gardens" = "gdns"
+"square" = "sq"
+# Abbreviated input → canonical short
+"st." = "st"
+"ave." = "ave"
+"blvd." = "blvd"
+"dr." = "dr"
+"rd." = "rd"
+"ln." = "ln"
+"ct." = "ct"
+"pl." = "pl"
+"cres." = "cres"
+"hwy." = "hwy"
+
+# French street types (Quebec, New Brunswick)
+"rue" = "rue"
+"chemin" = "ch"
+"ch." = "ch"
+"rang" = "rang"
+"montee" = "montee"
+"montée" = "montee"
+"cote" = "cote"
+"côte" = "cote"
+
+# Directional abbreviations
+"north" = "n"
+"south" = "s"
+"east" = "e"
+"west" = "w"
+"nord" = "n"
+"sud" = "s"
+"est" = "e"
+"ouest" = "o"
+"n." = "n"
+"s." = "s"
+"e." = "e"
+"w." = "w"
+"o." = "o"
+
+# Common abbreviations
+"mount" = "mt"
+"saint" = "st"
+"sainte" = "ste"
+"fort" = "ft"
+"mt." = "mt"
+"ft." = "ft"
+"ste." = "ste"
+
+[stopwords]
+words = [
+    "canada",
+    "canadian",
+]
+
+[known_variants]
+# Bilingual city name aliases (EN ↔ FR)
+"montreal" = "montréal"
+"montréal" = "montreal"
+"quebec city" = "québec"
+"québec" = "quebec city"
+"quebec" = "québec"
+"trois-rivieres" = "trois-rivières"
+"trois-rivières" = "trois-rivieres"
+# Province capital aliases
+"fredericton" = "fredericton"
+"ottawa" = "ottawa"
+"toronto" = "toronto"
+"winnipeg" = "winnipeg"
+"regina" = "regina"
+"edmonton" = "edmonton"
+"victoria" = "victoria"
+"halifax" = "halifax"
+"charlottetown" = "charlottetown"
+"st. john's" = "st johns"
+"st johns" = "st. john's"
+"yellowknife" = "yellowknife"
+"whitehorse" = "whitehorse"
+"iqaluit" = "iqaluit"
+# Common short forms
+"the six" = "toronto"
+"van" = "vancouver"
+"yyc" = "calgary"
+"yeg" = "edmonton"
+"yow" = "ottawa"
+"yul" = "montreal"
+
+[diacritics]
+# French diacritics — common in Quebec place names
+"é" = "e"
+"è" = "e"
+"ê" = "e"
+"ë" = "e"
+"á" = "a"
+"à" = "a"
+"â" = "a"
+"ä" = "a"
+"í" = "i"
+"ì" = "i"
+"î" = "i"
+"ï" = "i"
+"ó" = "o"
+"ò" = "o"
+"ô" = "o"
+"ö" = "o"
+"ú" = "u"
+"ù" = "u"
+"û" = "u"
+"ü" = "u"
+"ñ" = "n"
+"ç" = "c"

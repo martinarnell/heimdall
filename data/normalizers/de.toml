@@ -1,0 +1,98 @@
+# German place name normalizer
+# Covers German diacritics (ä→ae, ö→oe, ü→ue), ß/ss equivalence,
+# street suffixes, English city name variants, and admin stopwords.
+
+[phonetic]
+engine = "cologne"  # Kölner Phonetik — purpose-built for German
+
+[abbreviations]
+# Street suffixes (attached or detached)
+"str." = "straße"
+"str" = "straße"
+"strasse" = "straße"
+"gasse" = "gasse"
+"weg" = "weg"
+"allee" = "allee"
+"alle" = "allee"
+"platz" = "platz"
+"pl." = "platz"
+"ring" = "ring"
+"damm" = "damm"
+"ufer" = "ufer"
+"chaussee" = "chaussee"
+"promenade" = "promenade"
+"brücke" = "brücke"
+"steig" = "steig"
+"stieg" = "stieg"
+"graben" = "graben"
+"markt" = "markt"
+
+# Directional
+"n." = "nord"
+"s." = "süd"
+"o." = "ost"
+"w." = "west"
+
+# Administrative short forms
+"hbf" = "hauptbahnhof"
+"bf." = "bahnhof"
+"bhf." = "bahnhof"
+
+[stopwords]
+words = [
+    "stadt",
+    "gemeinde",
+    "landkreis",
+    "kreis",
+    "germany",
+    "deutschland",
+    "bundesrepublik",
+    "bundesland",
+    "freistaat",
+    "hansestadt",
+    "universitätsstadt",
+]
+
+[diacritics]
+# German umlauts → standard ASCII expansions (NOT single-char like Nordic)
+"ä" = "ae"
+"ö" = "oe"
+"ü" = "ue"
+# ß handled separately via char_equivalences
+
+[char_equivalences]
+# ß ↔ ss: both directions must match
+"ß" = "ss"
+
+[known_variants]
+# English names for German cities
+"munich" = "münchen"
+"muenchen" = "münchen"
+"cologne" = "köln"
+"koeln" = "köln"
+"nuremberg" = "nürnberg"
+"nuernberg" = "nürnberg"
+"nuremburg" = "nürnberg"
+"hanover" = "hannover"
+"dusseldorf" = "düsseldorf"
+"duesseldorf" = "düsseldorf"
+"brunswick" = "braunschweig"
+"frankfort" = "frankfurt am main"
+"ratisbon" = "regensburg"
+"aix-la-chapelle" = "aachen"
+"hamburgh" = "hamburg"
+"trier" = "trier"
+"treves" = "trier"
+
+# Frankfurt disambiguation (Main vs Oder)
+# Don't map plain "frankfurt" → "frankfurt am main" since Frankfurt (Oder) exists
+"frankfurt main" = "frankfurt am main"
+"frankfurt/main" = "frankfurt am main"
+"frankfurt (main)" = "frankfurt am main"
+"frankfurt oder" = "frankfurt (oder)"
+"frankfurt/oder" = "frankfurt (oder)"
+"frankfurt (oder)" = "frankfurt (oder)"
+
+# Other common variants
+"freiburg breisgau" = "freiburg im breisgau"
+"freiburg/breisgau" = "freiburg im breisgau"

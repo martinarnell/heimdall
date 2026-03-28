@@ -1,0 +1,95 @@
+# Armenian place name normalizer
+# Armenian script to Latin transliteration in [diacritics],
+# Armenian street abbreviations, and English city name variants.
+# No phonetic encoding -- script transliteration provides sufficient fuzzy matching.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Street type abbreviations (long to short)
+"փողոց" = "փ"
+"պողոտա" = "պղ"
+"հրապարակ" = "հրպ"
+"նրբանցք" = "նրբ"
+
+# Latin equivalents for transliterated queries
+"poghots" = "փ"
+"poghota" = "պղ"
+"hraparak" = "հրպ"
+"street" = "փ"
+"avenue" = "պղ"
+"square" = "հրպ"
+
+[stopwords]
+words = [
+    "հայաստան",
+    "armenia",
+    "am",
+    "մարզ",
+    "համայնք",
+    "region",
+    "community",
+]
+
+[known_variants]
+# English to Armenian canonical names
+"yerevan" = "երևան"
+"gyumri" = "գյումրի"
+"leninakan" = "գյումրի"
+"vanadzor" = "վանաձոր"
+"kirovakan" = "վանաձոր"
+"vagharshapat" = "վաղարշապատ"
+"echmiadzin" = "վաղարշապատ"
+"hrazdan" = "հրազդան"
+"abovyan" = "աբովյան"
+"kapan" = "կապան"
+"sevan" = "սևան"
+"dilijan" = "դիլիջան"
+"jermuk" = "ջերմուկ"
+"goris" = "գորիս"
+
+[diacritics]
+# Armenian script to Latin transliteration
+"ա" = "a"
+"բ" = "b"
+"գ" = "g"
+"դ" = "d"
+"ե" = "e"
+"զ" = "z"
+"է" = "e"
+"ը" = "y"
+"թ" = "t"
+"ժ" = "zh"
+"ի" = "i"
+"լ" = "l"
+"խ" = "kh"
+"ծ" = "ts"
+"կ" = "k"
+"հ" = "h"
+"ձ" = "dz"
+"ղ" = "gh"
+"ճ" = "ch"
+"մ" = "m"
+"յ" = "y"
+"ն" = "n"
+"շ" = "sh"
+"ո" = "o"
+"չ" = "ch"
+"պ" = "p"
+"ջ" = "j"
+"ռ" = "rr"
+"ս" = "s"
+"վ" = "v"
+"տ" = "t"
+"ր" = "r"
+"ց" = "ts"
+"ւ" = "u"
+"փ" = "p"
+"ք" = "k"
+"օ" = "o"
+"ֆ" = "f"
+"և" = "ev"
+
+[char_equivalences]
+# No specific equivalences needed

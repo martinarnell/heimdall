@@ -1,0 +1,115 @@
+# UK place name normalizer
+# Covers street type abbreviations, Welsh/Scottish Gaelic variants,
+# Welsh diacritics, and common UK place name aliases.
+
+[abbreviations]
+# Street type abbreviations — very common in UK
+"st." = "street"
+"st" = "street"
+"rd." = "road"
+"rd" = "road"
+"ave." = "avenue"
+"ave" = "avenue"
+"ln." = "lane"
+"ln" = "lane"
+"dr." = "drive"
+"dr" = "drive"
+"cl." = "close"
+"cl" = "close"
+"cres." = "crescent"
+"cres" = "crescent"
+"gdns." = "gardens"
+"gdns" = "gardens"
+"pl." = "place"
+"sq." = "square"
+"bvd." = "boulevard"
+"bvd" = "boulevard"
+"ct." = "court"
+"ct" = "court"
+"grn." = "green"
+"grn" = "green"
+"pk." = "park"
+
+# Directional
+"n." = "north"
+"s." = "south"
+"e." = "east"
+"w." = "west"
+
+[stopwords]
+words = [
+    "united kingdom",
+    "england",
+    "scotland",
+    "wales",
+    "northern ireland",
+    "great britain",
+    "britain",
+    "uk",
+    "gb",
+]
+
+[diacritics]
+# Welsh diacritics (Cymraeg) — circumflex
+"â" = "a"
+"ê" = "e"
+"î" = "i"
+"ô" = "o"
+"û" = "u"
+"ŵ" = "w"
+"ŷ" = "y"
+# Scottish Gaelic diacritics — grave accent
+"à" = "a"
+"è" = "e"
+"ì" = "i"
+"ò" = "o"
+"ù" = "u"
+
+[known_variants]
+# English ↔ Welsh place name pairs
+"cardiff" = "caerdydd"
+"caerdydd" = "cardiff"
+"swansea" = "abertawe"
+"abertawe" = "swansea"
+"newport" = "casnewydd"
+"casnewydd" = "newport"
+"wrexham" = "wrecsam"
+"wrecsam" = "wrexham"
+"holyhead" = "caergybi"
+"caergybi" = "holyhead"
+"carmarthen" = "caerfyrddin"
+"caerfyrddin" = "carmarthen"
+"aberystwyth" = "aberystwyth"
+"bangor" = "bangor"
+
+# Scottish Gaelic variants (bidirectional)
+"edinburgh" = "dùn èideann"
+"dùn èideann" = "edinburgh"
+"dun eideann" = "edinburgh"
+"glasgow" = "glaschu"
+"glaschu" = "glasgow"
+"inverness" = "inbhir nis"
+"inbhir nis" = "inverness"
+"aberdeen" = "obar dheathain"
+"obar dheathain" = "aberdeen"
+"dundee" = "dùn dèagh"
+"dùn dèagh" = "dundee"
+"dun deagh" = "dundee"
+"stirling" = "sruighlea"
+"sruighlea" = "stirling"
+"perth" = "peairt"
+"peairt" = "perth"
+"fort william" = "an gearasdan"
+"an gearasdan" = "fort william"
+
+# Northern Ireland name dispute
+"londonderry" = "derry"
+"derry" = "londonderry"
+
+# Common informal short names
+"kingston upon hull" = "hull"
+"hull" = "kingston upon hull"
+"stoke-on-trent" = "stoke"
+"newcastle upon tyne" = "newcastle"
+"southend-on-sea" = "southend"
+"stratford-upon-avon" = "stratford"

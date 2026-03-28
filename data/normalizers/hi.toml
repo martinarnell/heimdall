@@ -1,0 +1,194 @@
+# Hindi/Devanagari place name normalizer
+# Covers: IN (India), NP (Nepal)
+#
+# Strategy: Devanagari is an abugida — consonants carry an inherent vowel, modified
+# by combining matras (vowel signs). With strip_combining_marks = true, matras
+# (ा ि ी ु ू े ै ो ौ), virama (्), anusvara (ं), visarga (ः), and chandrabindu (ँ)
+# are stripped, leaving only base consonants and independent vowels. The [diacritics]
+# table then transliterates these base forms to Latin equivalents.
+#
+# Example: "मुंबई" → strip matras (ु, ं) → "मबई" → diacritics → "mbi"
+# This is imperfect but sufficient for fuzzy matching. Exact Devanagari queries
+# match the original script via the FST.
+
+[phonetic]
+engine = "none"
+strip_combining_marks = true
+
+[abbreviations]
+# Hindi street types (Devanagari) — kept as-is for Devanagari query matching
+"सड़क" = "सड़क"
+"मार्ग" = "मार्ग"
+"रोड" = "रोड"
+"गली" = "गली"
+"चौक" = "चौक"
+"नगर" = "नगर"
+"पथ" = "पथ"
+
+# English street types common in Indian addresses
+"road" = "rd"
+"street" = "st"
+"lane" = "ln"
+"marg" = "marg"
+"path" = "path"
+"gali" = "gali"
+"chowk" = "chowk"
+"nagar" = "ngr"
+"colony" = "col"
+"sector" = "sec"
+"block" = "blk"
+"phase" = "ph"
+"enclave" = "enc"
+"extension" = "extn"
+"vihar" = "vihar"
+"puram" = "puram"
+"bagh" = "bagh"
+
+[stopwords]
+words = [
+    "भारत",
+    "india",
+    "republic of india",
+    "भारत गणराज्य",
+    "hindustan",
+    "हिंदुस्तान",
+    "नेपाल",
+    "nepal",
+]
+
+[known_variants]
+# Major Indian cities — English variants → Devanagari canonical
+"mumbai" = "मुंबई"
+"bombay" = "मुंबई"
+"delhi" = "दिल्ली"
+"new delhi" = "नई दिल्ली"
+"kolkata" = "कोलकाता"
+"calcutta" = "कोलकाता"
+"chennai" = "चेन्नई"
+"madras" = "चेन्नई"
+"bangalore" = "बेंगलूरु"
+"bengaluru" = "बेंगलूरु"
+"hyderabad" = "हैदराबाद"
+"ahmedabad" = "अहमदाबाद"
+"pune" = "पुणे"
+"poona" = "पुणे"
+"jaipur" = "जयपुर"
+"lucknow" = "लखनऊ"
+"kanpur" = "कानपुर"
+"cawnpore" = "कानपुर"
+"nagpur" = "नागपुर"
+"indore" = "इंदौर"
+"bhopal" = "भोपाल"
+"patna" = "पटना"
+"vadodara" = "वडोदरा"
+"baroda" = "वडोदरा"
+"surat" = "सूरत"
+"agra" = "आगरा"
+"varanasi" = "वाराणसी"
+"benares" = "वाराणसी"
+"banaras" = "वाराणसी"
+"kashi" = "वाराणसी"
+"chandigarh" = "चंडीगढ़"
+"coimbatore" = "कोयंबटूर"
+"thiruvananthapuram" = "तिरुवनंतपुरम"
+"trivandrum" = "तिरुवनंतपुरम"
+"kochi" = "कोच्चि"
+"cochin" = "कोच्चि"
+"visakhapatnam" = "विशाखापट्टनम"
+"vizag" = "विशाखापट्टनम"
+"amritsar" = "अमृतसर"
+"jodhpur" = "जोधपुर"
+"udaipur" = "उदयपुर"
+"guwahati" = "गुवाहाटी"
+"gauhati" = "गुवाहाटी"
+"ranchi" = "रांची"
+"shimla" = "शिमला"
+"simla" = "शिमला"
+"dehradun" = "देहरादून"
+"mysore" = "मैसूरु"
+"mysuru" = "मैसूरु"
+
+# Major Nepal cities — English variants → Devanagari canonical
+"kathmandu" = "काठमांडू"
+"pokhara" = "पोखरा"
+"lalitpur" = "ललितपुर"
+"patan" = "ललितपुर"
+"bhaktapur" = "भक्तपुर"
+"biratnagar" = "बिराटनगर"
+"birgunj" = "वीरगंज"
+"bharatpur" = "भरतपुर"
+
+[diacritics]
+# Devanagari base consonants → Latin transliteration
+# With strip_combining_marks = true, matras/virama/anusvara are stripped first,
+# leaving only these base consonants and independent vowels for transliteration.
+
+# Independent vowels
+"अ" = "a"
+"आ" = "a"
+"इ" = "i"
+"ई" = "i"
+"उ" = "u"
+"ऊ" = "u"
+"ए" = "e"
+"ऐ" = "ai"
+"ओ" = "o"
+"औ" = "au"
+"ऋ" = "ri"
+
+# Velar consonants
+"क" = "k"
+"ख" = "kh"
+"ग" = "g"
+"घ" = "gh"
+"ङ" = "ng"
+
+# Palatal consonants
+"च" = "ch"
+"छ" = "chh"
+"ज" = "j"
+"झ" = "jh"
+"ञ" = "n"
+
+# Retroflex consonants
+"ट" = "t"
+"ठ" = "th"
+"ड" = "d"
+"ढ" = "dh"
+"ण" = "n"
+
+# Dental consonants
+"त" = "t"
+"थ" = "th"
+"द" = "d"
+"ध" = "dh"
+"न" = "n"
+
+# Labial consonants
+"प" = "p"
+"फ" = "ph"
+"ब" = "b"
+"भ" = "bh"
+"म" = "m"
+
+# Semivowels and sibilants
+"य" = "y"
+"र" = "r"
+"ल" = "l"
+"व" = "v"
+"श" = "sh"
+"ष" = "sh"
+"स" = "s"
+"ह" = "h"
+
+# Nukta characters (Perso-Arabic loanwords common in Indian place names)
+# Note: with strip_combining_marks = true, the nukta (U+093C) is stripped,
+# so ड़→ड (mapped as "d"), ज़→ज ("j"), etc. These entries are kept for
+# correctness if strip_combining_marks is ever disabled.
+"ड़" = "r"
+"ढ़" = "rh"
+"फ़" = "f"
+"ज़" = "z"
+"क़" = "q"
+"ख़" = "kh"
+"ग़" = "gh"

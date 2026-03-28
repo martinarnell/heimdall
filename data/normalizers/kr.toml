@@ -1,0 +1,114 @@
+# Korean place name normalizer
+# Handles Hangul road-name addresses, romanized city names,
+# and historical romanization variants (McCune-Reischauer → Revised).
+# No phonetic encoding — Korean syllable blocks don't benefit from
+# European phonetic schemes, and a Korean-specific one (e.g., chosung)
+# is not yet implemented.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Korean road type suffixes (Hangul) — keep as-is, they are part of the road name
+"대로" = "대로"    # daero — boulevard / major road
+"로" = "로"        # ro — road
+"길" = "길"        # gil — street / lane
+
+# Romanized road type suffixes
+"daero" = "daero"
+"ro" = "ro"
+"gil" = "gil"
+
+# Administrative suffixes — normalize long forms to short
+"특별시" = "시"        # special city → city
+"광역시" = "시"        # metropolitan city → city
+"특별자치시" = "시"    # special autonomous city → city
+"특별자치도" = "도"    # special autonomous province → province
+
+[stopwords]
+words = [
+    "korea",
+    "south korea",
+    "republic of korea",
+    "kr",
+    "대한민국",
+    "한국",
+    "남한",
+]
+
+[known_variants]
+# Major cities — romanized → Hangul
+"seoul" = "서울"
+"busan" = "부산"
+"incheon" = "인천"
+"daegu" = "대구"
+"daejeon" = "대전"
+"gwangju" = "광주"
+"ulsan" = "울산"
+"sejong" = "세종"
+"suwon" = "수원"
+"seongnam" = "성남"
+"goyang" = "고양"
+"yongin" = "용인"
+"bucheon" = "부천"
+"ansan" = "안산"
+"changwon" = "창원"
+"jeonju" = "전주"
+"cheongju" = "청주"
+"cheonan" = "천안"
+"gimhae" = "김해"
+"pohang" = "포항"
+"jeju" = "제주"
+"wonju" = "원주"
+"chuncheon" = "춘천"
+"iksan" = "익산"
+"gunsan" = "군산"
+"mokpo" = "목포"
+"gyeongju" = "경주"
+"gangneung" = "강릉"
+"sokcho" = "속초"
+"andong" = "안동"
+"gimpo" = "김포"
+"paju" = "파주"
+
+# Historical/McCune-Reischauer romanizations → modern Revised Romanization → Hangul
+"pusan" = "부산"
+"taegu" = "대구"
+"taejon" = "대전"
+"kwangju" = "광주"
+"cheju" = "제주"
+"inchon" = "인천"
+"chonju" = "전주"
+"chongju" = "청주"
+"chonan" = "천안"
+"kimhae" = "김해"
+"pohang" = "포항"
+"kyongju" = "경주"
+"kangnung" = "강릉"
+"sokch'o" = "속초"
+"andong" = "안동"
+"ch'unch'on" = "춘천"
+"mokp'o" = "목포"
+"kunsan" = "군산"
+"iksan" = "익산"
+"suwon" = "수원"
+
+# Province names — romanized → Hangul
+"gyeonggi" = "경기"
+"gangwon" = "강원"
+"chungbuk" = "충북"
+"chungnam" = "충남"
+"jeonbuk" = "전북"
+"jeonnam" = "전남"
+"gyeongbuk" = "경북"
+"gyeongnam" = "경남"
+
+# Island
+"jejudo" = "제주도"
+"jeju island" = "제주도"
+"cheju island" = "제주도"
+
+[diacritics]
+# McCune-Reischauer romanization uses breves and apostrophes
+"ŏ" = "o"
+"ŭ" = "u"

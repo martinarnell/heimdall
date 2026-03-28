@@ -1,0 +1,45 @@
+[package]
+name = "heimdall-build"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "heimdall-build"
+path = "src/main.rs"
+
+[dependencies]
+heimdall-core = { path = "../heimdall-core" }
+heimdall-normalize = { path = "../heimdall-normalize" }
+osmpbf.workspace = true
+fst.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+bincode.workspace = true
+postcard.workspace = true
+rayon.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+geo.workspace = true
+geohash.workspace = true
+parquet.workspace = true
+arrow.workspace = true
+indicatif = "0.17"   # progress bars
+reqwest = { version = "0.12", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
+rand = "0.8"
+rusqlite = { version = "0.31", features = ["bundled"] }  # GeoPackage = SQLite
+zip = "2"                                                 # Extract downloaded .zip files
+flate2 = { version = "1", features = ["zlib-ng"], default-features = false }  # zlib-ng: 2-3x faster decompression
+ureq = { version = "2", features = ["json"] }             # Sync HTTP for DVV OGC API
+zstd.workspace = true                                     # Decompress Photon .jsonl.zst dumps / package tarballs
+tar.workspace = true                                      # Create .tar.zst packages
+sha2.workspace = true                                     # SHA256 checksums for manifests
+toml = "0.8"                                               # Parse sources.toml for rebuild command
+quick-xml.workspace = true                                   # Parse SSR GML (Kartverket place names)
+shapefile = "0.6"                                          # Parse TIGER/Line shapefiles (.shp/.dbf)
+geojson = "0.24"                                           # Parse OpenAddresses GeoJSON
+tikv-jemallocator.workspace = true                        # Returns freed memory to OS between pipeline steps
+libc = "0.2"                                              # CPU time via getrusage, madvise
+memmap2 = "0.9"                                           # Disk-backed geocode index

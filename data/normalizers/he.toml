@@ -1,0 +1,129 @@
+# Hebrew place name normalizer
+# Israel (IL). Hebrew script with Latin transliterations common in Photon data.
+# No phonetic encoding — Hebrew has no suitable European phonetic scheme.
+#
+# Pipeline: strip_combining_marks removes niqqud (vowel points) and dagesh
+# via NFD decomposition BEFORE [diacritics] transliteration runs.
+# Since dagesh is stripped, ב defaults to "v" (vet) and פ defaults to "f" (fe).
+
+[phonetic]
+engine = "none"
+strip_combining_marks = true  # strips niqqud and dagesh before transliteration
+
+[abbreviations]
+# Hebrew street types
+"רחוב" = "רח'"
+"שדרות" = "שד'"
+"כיכר" = "כ'"
+"סמטה" = "סמ'"
+"דרך" = "ד'"
+
+# Latin-script transliterations
+"rehov" = "rh"
+"rechov" = "rh"
+"sderot" = "sd"
+"kikar" = "kk"
+"derech" = "dr"
+
+# Directional
+"צפון" = "צ'"
+"דרום" = "ד'"
+"מזרח" = "מ'"
+"מערב" = "מע'"
+
+[stopwords]
+words = [
+    "ישראל",
+    "israel",
+    "il",
+    "מדינת ישראל",
+    "state of israel",
+]
+
+[known_variants]
+# Major cities — Latin -> Hebrew
+"jerusalem" = "ירושלים"
+"yerushalayim" = "ירושלים"
+"tel aviv" = "תל אביב"
+"tel-aviv" = "תל אביב"
+"tel aviv-yafo" = "תל אביב-יפו"
+"tel aviv yafo" = "תל אביב-יפו"
+"haifa" = "חיפה"
+"beer sheva" = "באר שבע"
+"beersheba" = "באר שבע"
+"be'er sheva" = "באר שבע"
+"netanya" = "נתניה"
+"holon" = "חולון"
+"bnei brak" = "בני ברק"
+"ramat gan" = "רמת גן"
+"ashdod" = "אשדוד"
+"ashkelon" = "אשקלון"
+"bat yam" = "בת ים"
+"petah tikva" = "פתח תקווה"
+"petach tikva" = "פתח תקווה"
+"rishon lezion" = "ראשון לציון"
+"rishon le-zion" = "ראשון לציון"
+"rishon le zion" = "ראשון לציון"
+"rehovot" = "רחובות"
+"herzliya" = "הרצליה"
+"kfar saba" = "כפר סבא"
+"raanana" = "רעננה"
+"ra'anana" = "רעננה"
+"nazareth" = "נצרת"
+"natsrat" = "נצרת"
+"acre" = "עכו"
+"akko" = "עכו"
+"tiberias" = "טבריה"
+"eilat" = "אילת"
+"elat" = "אילת"
+"safed" = "צפת"
+"tzfat" = "צפת"
+"hadera" = "חדרה"
+"lod" = "לוד"
+"lydda" = "לוד"
+"ramla" = "רמלה"
+"jaffa" = "יפו"
+"yafo" = "יפו"
+"modiin" = "מודיעין"
+"modi'in" = "מודיעין"
+"nahariya" = "נהריה"
+"afula" = "עפולה"
+"beit shemesh" = "בית שמש"
+"dimona" = "דימונה"
+"kiryat gat" = "קריית גת"
+"kiryat shmona" = "קריית שמונה"
+
+[diacritics]
+# 22 Hebrew consonants -> Latin transliteration
+# Niqqud (vowel points) and dagesh are stripped automatically by
+# strip_combining_marks = true BEFORE these mappings run.
+# Since dagesh is stripped, ב defaults to "v" (vet) and פ defaults to "f" (fe).
+"א" = "a"
+"ב" = "v"
+"ג" = "g"
+"ד" = "d"
+"ה" = "h"
+"ו" = "v"
+"ז" = "z"
+"ח" = "ch"
+"ט" = "t"
+"י" = "y"
+"כ" = "k"
+"ל" = "l"
+"מ" = "m"
+"נ" = "n"
+"ס" = "s"
+"ע" = "a"
+"פ" = "f"
+"צ" = "ts"
+"ק" = "k"
+"ר" = "r"
+"ש" = "sh"
+"ת" = "t"
+
+# Final forms (sofit) — separate Unicode codepoints
+"ך" = "k"
+"ם" = "m"
+"ן" = "n"
+"ף" = "f"
+"ץ" = "ts"

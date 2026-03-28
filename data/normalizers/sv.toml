@@ -1,0 +1,69 @@
+# Swedish place name abbreviations
+# Format: abbreviation = expanded
+# Used by heimdall-normalize during indexing and query normalization
+
+[abbreviations]
+# Religious/historical
+"s:t" = "sankta"
+"s:ta" = "sankta"
+
+# Administrative
+"kga" = "kyrka"
+"k:a" = "kyrka"
+"hd" = "härad"
+"sn" = "socken"
+"gd" = "gård"
+"fg" = "församling"
+
+# Directions (common in Swedish place names)
+"n." = "norra"
+"s." = "södra"
+"ö." = "östra"
+"v." = "västra"
+
+# Size modifiers
+"st." = "stora"
+"lt." = "lilla"
+"lts" = "lilla"
+
+[stopwords]
+words = [
+    "stad",
+    "kommun",
+    "municipality",
+    "län",
+    "landskap",
+    "province",
+    "county",
+    "sverige",
+    "sweden",
+]
+
+[known_variants]
+# Explicit name → canonical name mappings
+# For cases where normalization alone isn't enough
+"gothenburg" = "göteborg"
+"helsingborg" = "hälsingborg"
+"gothia" = "götaland"
+"scania" = "skåne"
+"lapland" = "lappland"
+"dalarna" = "dalarna"
+"dalecarlia" = "dalarna"
+"öresund" = "öresund"
+"oresund" = "öresund"
+"malmoe" = "malmö"
+"gbg" = "göteborg"
+"sto" = "stockholm"
+"mmo" = "malmö"
+"linkoping" = "linköping"
+"norrkoping" = "norrköping"
+"jonkoping" = "jönköping"
+"vasteras" = "västerås"
+"ostersund" = "östersund"
+"sodertalje" = "södertälje"
+"gavle" = "gävle"
+"boras" = "borås"
+"umea" = "umeå"
+"lulea" = "luleå"
+"orebro" = "örebro"
+"vaxjo" = "växjö"

@@ -1,0 +1,101 @@
+# Austrian German place name normalizer
+# Similar to de.toml — Kölner Phonetik, German diacritics, ß/ss equivalence.
+# Austrian-specific abbreviations, stopwords, and city name variants.
+
+[phonetic]
+engine = "cologne"  # Kölner Phonetik — purpose-built for German
+
+[abbreviations]
+# Street suffixes (attached or detached)
+"str." = "straße"
+"str" = "straße"
+"strasse" = "straße"
+"gasse" = "gasse"
+"g." = "gasse"
+"weg" = "weg"
+"w." = "weg"
+"platz" = "platz"
+"pl." = "platz"
+"ring" = "ring"
+"r." = "ring"
+"allee" = "allee"
+"damm" = "damm"
+"ufer" = "ufer"
+"steig" = "steig"
+"stieg" = "stieg"
+"graben" = "graben"
+"markt" = "markt"
+"gürtel" = "gürtel"
+"zeile" = "zeile"
+"promenade" = "promenade"
+"kai" = "kai"
+
+# Directional
+"n." = "nord"
+"s." = "süd"
+"o." = "ost"
+"w." = "west"
+
+# Administrative short forms
+"hbf" = "hauptbahnhof"
+"bf." = "bahnhof"
+"bhf." = "bahnhof"
+
+[stopwords]
+words = [
+    "österreich",
+    "oesterreich",
+    "austria",
+    "at",
+    "bundesland",
+    "bezirk",
+    "gemeinde",
+    "stadt",
+    "markt",
+    "land",
+    "republik",
+]
+
+[diacritics]
+# German umlauts → standard ASCII expansions
+"ä" = "ae"
+"ö" = "oe"
+"ü" = "ue"
+# ß handled via char_equivalences
+
+[char_equivalences]
+# ß ↔ ss: both directions must match
+"ß" = "ss"
+
+[known_variants]
+# English/alternate names for Austrian cities
+"vienna" = "wien"
+"graz" = "graz"
+"klagenfurt" = "klagenfurt am wörthersee"
+"salzburg" = "salzburg"
+"innsbruck" = "innsbruck"
+"linz" = "linz"
+"villach" = "villach"
+"wels" = "wels"
+"st. poelten" = "st. pölten"
+"st. polten" = "st. pölten"
+"sant poelten" = "st. pölten"
+"klagenfurt woerthersee" = "klagenfurt am wörthersee"
+"klagenfurt wörthersee" = "klagenfurt am wörthersee"
+"bregenz" = "bregenz"
+"eisenstadt" = "eisenstadt"
+
+# Common diacritic-free spellings
+"woerthersee" = "wörthersee"
+"worthersee" = "wörthersee"
+"kaernten" = "kärnten"
+"niederoesterreich" = "niederösterreich"
+"oberoesterreich" = "oberösterreich"
+"vorarlberg" = "vorarlberg"
+"steiermark" = "steiermark"
+"styria" = "steiermark"
+"carinthia" = "kärnten"
+"tyrol" = "tirol"
+"tirol" = "tirol"
+"lower austria" = "niederösterreich"
+"upper austria" = "oberösterreich"

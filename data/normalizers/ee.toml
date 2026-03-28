@@ -1,0 +1,63 @@
+# Estonian place name normalizer
+# Covers Estonian diacritics (ä, ö, ü, õ), street type abbreviations,
+# and common city name variants.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Street types
+"tn." = "tänav"
+"tänav" = "tänav"
+"pst." = "puiestee"
+"puiestee" = "puiestee"
+"tee" = "tee"
+"väljak" = "väljak"
+"mnt." = "maantee"
+"maantee" = "maantee"
+"põik" = "põik"
+
+# Directional
+"p." = "põhja"
+"l." = "lõuna"
+"i." = "ida"
+"lä." = "lääne"
+
+[stopwords]
+words = [
+    "eesti",
+    "ee",
+    "vabariik",
+    "linn",
+    "maakond",
+    "vald",
+]
+
+[diacritics]
+"ä" = "a"
+"ö" = "o"
+"ü" = "u"
+"õ" = "o"
+"š" = "s"
+"ž" = "z"
+
+[known_variants]
+# Common ASCII and alternative spellings
+"tallinn" = "tallinn"
+"tartu" = "tartu"
+"parnu" = "pärnu"
+"narva" = "narva"
+"kohtla-jarve" = "kohtla-järve"
+"kohtla jarve" = "kohtla-järve"
+"viljandi" = "viljandi"
+"rakvere" = "rakvere"
+"haapsalu" = "haapsalu"
+"kuressaare" = "kuressaare"
+"johvi" = "jõhvi"
+"polva" = "põlva"
+"rapla" = "rapla"
+"valga" = "valga"
+"voru" = "võru"
+"reval" = "tallinn"
+"dorpat" = "tartu"
+"pernau" = "pärnu"

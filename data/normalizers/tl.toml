@@ -1,0 +1,125 @@
+# Filipino/Tagalog place name normalizer
+# Used for Philippines (PH) and Timor-Leste (TL). Filipino uses Latin script
+# with the addition of ñ from Spanish influence. Place names often have
+# Spanish-era origins. Timor-Leste uses Portuguese-influenced place names.
+# No phonetic encoding — Latin script with simple orthography.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Street type abbreviations (Filipino/English)
+"street" = "st"
+"avenue" = "ave"
+"road" = "rd"
+"drive" = "dr"
+"boulevard" = "blvd"
+"highway" = "hwy"
+"lane" = "ln"
+"court" = "ct"
+"st." = "st"
+"ave." = "ave"
+"rd." = "rd"
+"dr." = "dr"
+"blvd." = "blvd"
+"hwy." = "hwy"
+
+# Filipino/Spanish road types
+"kalye" = "st"
+"daang" = "rd"
+"daan" = "rd"
+"lansangan" = "st"
+
+# Directional abbreviations
+"north" = "n"
+"south" = "s"
+"east" = "e"
+"west" = "w"
+"n." = "n"
+"s." = "s"
+"e." = "e"
+"w." = "w"
+
+# Administrative
+"barangay" = "brgy"
+"brgy." = "brgy"
+"city" = "city"
+"municipality" = "mun"
+"province" = "prov"
+
+[stopwords]
+words = [
+    "philippines",
+    "ph",
+    "pilipinas",
+    "republika ng pilipinas",
+    "republic of the philippines",
+    "timor-leste",
+    "tl",
+    "east timor",
+    "timor leste",
+    "republica democratica de timor-leste",
+]
+
+[known_variants]
+# Philippines — major cities
+"manila" = "maynila"
+"maynila" = "manila"
+"quezon city" = "lungsod quezon"
+"makati" = "makati"
+"cebu" = "cebu"
+"sugbu" = "cebu"
+"davao" = "davao"
+"zamboanga" = "zamboanga"
+"taguig" = "taguig"
+"pasig" = "pasig"
+"cagayan de oro" = "cagayan de oro"
+"bacolod" = "bacolod"
+"dasmarinas" = "dasmariñas"
+"dasmariñas" = "dasmarinas"
+"iloilo" = "iloilo"
+"general santos" = "general santos"
+"gensan" = "general santos"
+"baguio" = "baguio"
+"muntinlupa" = "muntinlupa"
+"las pinas" = "las piñas"
+"las piñas" = "las pinas"
+"caloocan" = "caloocan"
+"angeles" = "angeles"
+"antipolo" = "antipolo"
+"boracay" = "boracay"
+"palawan" = "palawan"
+"puerto princesa" = "puerto princesa"
+"tacloban" = "tacloban"
+"olongapo" = "olongapo"
+"subic" = "subic"
+"clark" = "clark"
+
+# Timor-Leste — major cities
+"dili" = "dili"
+"baucau" = "baucau"
+"maliana" = "maliana"
+"suai" = "suai"
+"aileu" = "aileu"
+"lospalos" = "lospalos"
+
+[diacritics]
+# Spanish-influenced diacritics
+"ñ" = "n"
+# Portuguese-influenced diacritics (Timor-Leste)
+"á" = "a"
+"à" = "a"
+"â" = "a"
+"ã" = "a"
+"é" = "e"
+"è" = "e"
+"ê" = "e"
+"í" = "i"
+"ì" = "i"
+"ó" = "o"
+"ò" = "o"
+"ô" = "o"
+"õ" = "o"
+"ú" = "u"
+"ù" = "u"
+"ç" = "c"

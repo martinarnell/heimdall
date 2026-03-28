@@ -1,0 +1,144 @@
+# Ukrainian place name normalizer
+# Ukrainian Cyrillic → Latin transliteration in [diacritics], street abbreviations,
+# and English city name variants using modern Ukrainian transliteration (NOT Russian).
+# No phonetic encoding — Cyrillic transliteration provides sufficient fuzzy matching.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Street type abbreviations (long → short)
+"вулиця" = "вул"
+"проспект" = "пр"
+"провулок" = "пров"
+"бульвар" = "бул"
+"площа" = "пл"
+"шосе" = "ш"
+"набережна" = "наб"
+"проїзд" = "пр-д"
+"алея" = "ал"
+"узвіз" = "узв"
+"дорога" = "дор"
+"тупик" = "туп"
+"мікрорайон" = "мкр"
+"квартал" = "кв"
+
+# Abbreviated input with dots
+"вул." = "вул"
+"пр." = "пр"
+"пров." = "пров"
+"бул." = "бул"
+"пл." = "пл"
+"наб." = "наб"
+"узв." = "узв"
+
+# Latin equivalents for transliterated queries
+"vulytsia" = "вул"
+"vulytsya" = "вул"
+"prospekt" = "пр"
+"provulok" = "пров"
+"bulvar" = "бул"
+"ploshcha" = "пл"
+"shose" = "ш"
+"naberezhna" = "наб"
+"aleya" = "ал"
+"uzviz" = "узв"
+
+[stopwords]
+words = [
+    "україна",
+    "ukraine",
+    "ua",
+    "область",
+    "район",
+    "місто",
+    "село",
+    "селище",
+    "oblast",
+    "raion",
+]
+
+[known_variants]
+# English → Ukrainian canonical names (modern Ukrainian transliteration)
+"kyiv" = "київ"
+"kiev" = "київ"
+"kharkiv" = "харків"
+"kharkov" = "харків"
+"odesa" = "одеса"
+"odessa" = "одеса"
+"lviv" = "львів"
+"lvov" = "львів"
+"lemberg" = "львів"
+"dnipro" = "дніпро"
+"dnepropetrovsk" = "дніпро"
+"donetsk" = "донецьк"
+"zaporizhzhia" = "запоріжжя"
+"zaporozhye" = "запоріжжя"
+"mykolaiv" = "миколаїв"
+"nikolaev" = "миколаїв"
+"vinnytsia" = "вінниця"
+"vinnitsa" = "вінниця"
+"kherson" = "херсон"
+"poltava" = "полтава"
+"chernihiv" = "чернігів"
+"chernigov" = "чернігів"
+"cherkasy" = "черкаси"
+"sumy" = "суми"
+"zhytomyr" = "житомир"
+"rivne" = "рівне"
+"ternopil" = "тернопіль"
+"ivano-frankivsk" = "івано-франківськ"
+"uzhhorod" = "ужгород"
+"lutsk" = "луцьк"
+"kropyvnytskyi" = "кропивницький"
+"kirovohrad" = "кропивницький"
+"mariupol" = "маріуполь"
+"sevastopol" = "севастополь"
+"simferopol" = "сімферополь"
+"kramatorsk" = "краматорськ"
+"bila tserkva" = "біла церква"
+"belaya tserkov" = "біла церква"
+"khmelnytskyi" = "хмельницький"
+"khmelnitsky" = "хмельницький"
+
+[diacritics]
+# Ukrainian Cyrillic → Latin transliteration (lowercase)
+# Uses Ukrainian-specific letters (і, ї, є, ґ) not found in Russian
+"а" = "a"
+"б" = "b"
+"в" = "v"
+"г" = "h"
+"ґ" = "g"
+"д" = "d"
+"е" = "e"
+"є" = "ye"
+"ж" = "zh"
+"з" = "z"
+"и" = "y"
+"і" = "i"
+"ї" = "i"
+"й" = "y"
+"к" = "k"
+"л" = "l"
+"м" = "m"
+"н" = "n"
+"о" = "o"
+"п" = "p"
+"р" = "r"
+"с" = "s"
+"т" = "t"
+"у" = "u"
+"ф" = "f"
+"х" = "kh"
+"ц" = "ts"
+"ч" = "ch"
+"ш" = "sh"
+"щ" = "shch"
+"ь" = ""
+"ю" = "yu"
+"я" = "ya"
+
+[char_equivalences]
+# Common interchangeable forms in Ukrainian
+"ґ" = "г"
+"і" = "и"

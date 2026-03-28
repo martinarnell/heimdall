@@ -1,0 +1,127 @@
+# Thai place name normalizer
+# Thai script has no simple Latin transliteration mapping — romanization is
+# inconsistent and varies between RTGS, ISO 11940, and colloquial forms.
+#
+# Strategy:
+# 1. Keep Thai text as-is for exact FST matching
+# 2. Strip combining marks (tone marks, above/below vowels) for fuzzy matching
+#    within Thai script — e.g. searching without tone marks still finds the place
+# 3. Rely on Photon's name:en / name:la for romanized ↔ Thai matching
+# 4. Known variants bridge common romanized city names to Thai script
+#
+# Do NOT attempt Thai→Latin transliteration in [diacritics] — Thai consonant+vowel
+# combinations require syllable-level analysis, not character-by-character mapping.
+
+[phonetic]
+engine = "none"
+# Strip Unicode combining marks for fuzzy Thai matching.
+# Thai above-vowels (สระบน: -ิ -ี -ึ -ื -ั), below-vowels (สระล่าง: -ุ -ู),
+# and tone marks (วรรณยุกต์: -่ -้ -๊ -๋) are all combining marks (U+0E31,
+# U+0E34-0E3A, U+0E47-0E4E). Stripping them allows fuzzy matching when users
+# omit tone marks or use simplified Thai input.
+strip_combining_marks = true
+
+[abbreviations]
+# Thai road type suffixes — abbreviate for matching flexibility
+"ถนน" = "ถ."      # thanon — road/street
+"ซอย" = "ซ."      # soi — lane/alley
+"ตรอก" = "ตร."    # trok — alley
+
+# Romanized road type suffixes
+"thanon" = "th."
+"soi" = "soi"
+
+# Administrative suffixes — abbreviate for matching
+"จังหวัด" = "จ."    # changwat — province
+"อำเภอ" = "อ."      # amphoe — district
+"ตำบล" = "ต."       # tambon — subdistrict
+"เทศบาล" = "ทศ."   # thesaban — municipality
+"แขวง" = "ขว."      # khwaeng — subdistrict (Bangkok)
+"เขต" = "ข."        # khet — district (Bangkok)
+
+[stopwords]
+words = [
+    "thailand",
+    "th",
+    "ประเทศไทย",
+    "ไทย",
+    "kingdom of thailand",
+    "siam",
+    "ราชอาณาจักรไทย",
+]
+
+[known_variants]
+# Major cities — romanized → Thai script
+# Bangkok has two common Thai forms: short (กรุงเทพ) and full (กรุงเทพมหานคร)
+"bangkok" = "กรุงเทพ"
+"krung thep" = "กรุงเทพ"
+"krungthep" = "กรุงเทพ"
+"krung thep maha nakhon" = "กรุงเทพมหานคร"
+"chiang mai" = "เชียงใหม่"
+"chiangmai" = "เชียงใหม่"
+"chiang rai" = "เชียงราย"
+"chiangrai" = "เชียงราย"
+"phuket" = "ภูเก็ต"
+"pattaya" = "พัทยา"
+"nonthaburi" = "นนทบุรี"
+"hat yai" = "หาดใหญ่"
+"hatyai" = "หาดใหญ่"
+"khon kaen" = "ขอนแก่น"
+"nakhon ratchasima" = "นครราชสีมา"
+"korat" = "นครราชสีมา"
+"udon thani" = "อุดรธานี"
+"udonthani" = "อุดรธานี"
+"surat thani" = "สุราษฎร์ธานี"
+"songkhla" = "สงขลา"
+"ayutthaya" = "อยุธยา"
+"phra nakhon si ayutthaya" = "พระนครศรีอยุธยา"
+"krabi" = "กระบี่"
+"hua hin" = "หัวหิน"
+"koh samui" = "เกาะสมุย"
+"ko samui" = "เกาะสมุย"
+"samui" = "เกาะสมุย"
+"koh phangan" = "เกาะพะงัน"
+"ko phangan" = "เกาะพะงัน"
+"koh tao" = "เกาะเต่า"
+"ko tao" = "เกาะเต่า"
+"sukhothai" = "สุโขทัย"
+"lampang" = "ลำปาง"
+"lamphun" = "ลำพูน"
+"nan" = "น่าน"
+"pai" = "ปาย"
+"kanchanaburi" = "กาญจนบุรี"
+"nakhon pathom" = "นครปฐม"
+"samut prakan" = "สมุทรปราการ"
+"pathum thani" = "ปทุมธานี"
+"rayong" = "ระยอง"
+"chon buri" = "ชลบุรี"
+"chonburi" = "ชลบุรี"
+"ubon ratchathani" = "อุบลราชธานี"
+"nakhon si thammarat" = "นครศรีธรรมราช"
+"phitsanulok" = "พิษณุโลก"
+"chiang khong" = "เชียงของ"
+"mae hong son" = "แม่ฮ่องสอน"
+"lopburi" = "ลพบุรี"
+"phetchaburi" = "เพชรบุรี"
+"prachuap khiri khan" = "ประจวบคีรีขันธ์"
+"trang" = "ตรัง"
+"phang nga" = "พังงา"
+"satun" = "สตูล"
+"ranong" = "ระนอง"
+"tak" = "ตาก"
+"mae sot" = "แม่สอด"
+"nong khai" = "หนองคาย"
+"loei" = "เลย"
+"buriram" = "บุรีรัมย์"
+"surin" = "สุรินทร์"
+"roi et" = "ร้อยเอ็ด"
+"mukdahan" = "มุกดาหาร"
+
+[diacritics]
+# Thai script has no diacritics in the Latin sense.
+# Handle occasional romanization artifacts that appear in RTGS transliterations.
+"ā" = "a"
+"ī" = "i"
+"ū" = "u"
+"ō" = "o"
+"ē" = "e"

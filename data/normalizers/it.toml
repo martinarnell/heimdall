@@ -1,0 +1,86 @@
+# Italian place name normalizer
+# Covers Italy (IT), San Marino (SM), Vatican City (VA)
+# Street type abbreviations, diacritics, English city name variants.
+
+[phonetic]
+engine = "none"  # No phonetic encoding for Italian
+
+[abbreviations]
+# Street type abbreviations
+"via" = "via"
+"v." = "via"
+"viale" = "vle"
+"vle." = "vle"
+"v.le" = "vle"
+"piazza" = "pza"
+"p.za" = "pza"
+"pza." = "pza"
+"piazzale" = "pzle"
+"p.le" = "pzle"
+"corso" = "c.so"
+"c.so" = "c.so"
+"largo" = "lgo"
+"l.go" = "lgo"
+"vicolo" = "vic"
+"vic." = "vic"
+"lungotevere" = "lgotev"
+"lungarno" = "lgarno"
+"contrada" = "c.da"
+"c.da" = "c.da"
+"strada" = "str"
+"str." = "str"
+"borgata" = "b.ta"
+"b.ta" = "b.ta"
+"salita" = "sal"
+"sal." = "sal"
+
+# Religious/honorific
+"santo" = "s."
+"santa" = "s."
+"san" = "s."
+"sant'" = "s."
+
+[stopwords]
+words = [
+    "italia",
+    "italy",
+    "it",
+    "repubblica italiana",
+    "provincia",
+    "regione",
+    "comune",
+    "città metropolitana",
+]
+
+[diacritics]
+# Italian accented characters → ASCII equivalents
+"à" = "a"
+"á" = "a"
+"è" = "e"
+"é" = "e"
+"ì" = "i"
+"í" = "i"
+"ò" = "o"
+"ó" = "o"
+"ù" = "u"
+"ú" = "u"
+
+[known_variants]
+# English names for Italian cities
+"rome" = "roma"
+"milan" = "milano"
+"naples" = "napoli"
+"turin" = "torino"
+"venice" = "venezia"
+"florence" = "firenze"
+"genoa" = "genova"
+"padua" = "padova"
+"syracuse" = "siracusa"
+"mantua" = "mantova"
+"leghorn" = "livorno"
+"cagliari" = "cagliari"
+"parma" = "parma"
+"bolzano" = "bolzano"
+"bozen" = "bolzano"
+# Common ASCII approximations
+"citta del vaticano" = "città del vaticano"

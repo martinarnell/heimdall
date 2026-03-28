@@ -1,0 +1,100 @@
+# Georgian place name normalizer
+# Georgian script (ქართული) → Latin transliteration in [diacritics],
+# Georgian street abbreviations, and English city name variants.
+# No phonetic encoding — script transliteration provides sufficient fuzzy matching.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Street type abbreviations (long → short)
+"ქუჩა" = "ქ"
+"გამზირი" = "გმზ"
+"მოედანი" = "მოედ"
+"შესახვევი" = "შეს"
+"ჩიხი" = "ჩიხ"
+"გზატკეცილი" = "გზ"
+"სანაპირო" = "სნპ"
+
+# Latin equivalents for transliterated queries
+"kucha" = "ქ"
+"gamziri" = "გმზ"
+"moedani" = "მოედ"
+"street" = "ქ"
+"avenue" = "გმზ"
+"square" = "მოედ"
+
+[stopwords]
+words = [
+    "საქართველო",
+    "georgia",
+    "ge",
+    "რაიონი",
+    "მუნიციპალიტეტი",
+    "მხარე",
+    "region",
+    "municipality",
+]
+
+[known_variants]
+# English → Georgian canonical names
+"tbilisi" = "თბილისი"
+"tiflis" = "თბილისი"
+"batumi" = "ბათუმი"
+"kutaisi" = "ქუთაისი"
+"rustavi" = "რუსთავი"
+"gori" = "გორი"
+"zugdidi" = "ზუგდიდი"
+"poti" = "ფოთი"
+"sukhumi" = "სოხუმი"
+"telavi" = "თელავი"
+"mtskheta" = "მცხეთა"
+"akhaltsikhe" = "ახალციხე"
+"borjomi" = "ბორჯომი"
+"sighnaghi" = "სიღნაღი"
+"kazbegi" = "ყაზბეგი"
+"stepantsminda" = "სტეფანწმინდა"
+
+[diacritics]
+# Georgian script → Latin transliteration (National system)
+"ა" = "a"
+"ბ" = "b"
+"გ" = "g"
+"დ" = "d"
+"ე" = "e"
+"ვ" = "v"
+"ზ" = "z"
+"თ" = "t"
+"ი" = "i"
+"კ" = "k"
+"ლ" = "l"
+"მ" = "m"
+"ნ" = "n"
+"ო" = "o"
+"პ" = "p"
+"ჟ" = "zh"
+"რ" = "r"
+"ს" = "s"
+"ტ" = "t"
+"უ" = "u"
+"ფ" = "p"
+"ქ" = "k"
+"ღ" = "gh"
+"ყ" = "q"
+"შ" = "sh"
+"ჩ" = "ch"
+"ც" = "ts"
+"ძ" = "dz"
+"წ" = "ts"
+"ჭ" = "ch"
+"ხ" = "kh"
+"ჯ" = "j"
+"ჰ" = "h"
+
+[char_equivalences]
+# Georgian ejective/aspirated pairs that sound similar to non-natives
+"კ" = "ქ"
+"ტ" = "თ"
+"პ" = "ფ"
+"ც" = "წ"
+"ჩ" = "ჭ"

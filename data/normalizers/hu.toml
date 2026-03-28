@@ -1,0 +1,85 @@
+# Hungarian place name normalizer
+# Covers Hungary (HU)
+# Street type abbreviations, diacritics, English city name variants.
+
+[phonetic]
+engine = "none"  # No phonetic encoding for Hungarian
+
+[abbreviations]
+# Street type abbreviations
+"utca" = "u"
+"u." = "u"
+"út" = "ut"
+"tér" = "ter"
+"köz" = "koz"
+"sor" = "sor"
+"körút" = "krt"
+"krt." = "krt"
+"sétány" = "stny"
+"rakpart" = "rkp"
+"rkp." = "rkp"
+"fasor" = "fsr"
+"dűlő" = "dlo"
+"körönd" = "krnd"
+"lépcső" = "lpcs"
+"sugárút" = "sgt"
+"sgt." = "sgt"
+
+# Religious/honorific
+"szent" = "szt"
+"szt." = "szt"
+
+[stopwords]
+words = [
+    "magyarország",
+    "hungary",
+    "hu",
+    "megye",
+    "járás",
+    "község",
+    "város",
+    "kerület",
+]
+
+[diacritics]
+# Hungarian diacritics → ASCII equivalents
+"á" = "a"
+"é" = "e"
+"í" = "i"
+"ó" = "o"
+"ö" = "o"
+"ő" = "o"
+"ú" = "u"
+"ü" = "u"
+"ű" = "u"
+
+[known_variants]
+# English/German names for Hungarian cities
+"budapest" = "budapest"
+"buda" = "budapest"
+"pest" = "budapest"
+"debrecen" = "debrecen"
+"szeged" = "szeged"
+"miskolc" = "miskolc"
+"pecs" = "pécs"
+"fünfkirchen" = "pécs"
+"gyor" = "győr"
+"raab" = "győr"
+"nyiregyhaza" = "nyíregyháza"
+"kecskemet" = "kecskemét"
+"szekesfehervar" = "székesfehérvár"
+"stuhlweissenburg" = "székesfehérvár"
+"szombathely" = "szombathely"
+"steinamanger" = "szombathely"
+"eger" = "eger"
+"erlau" = "eger"
+"veszprem" = "veszprém"
+"sopron" = "sopron"
+"oedenburg" = "sopron"
+"kaposvar" = "kaposvár"
+"szolnok" = "szolnok"
+"bekescsaba" = "békéscsaba"
+"zalaegerszeg" = "zalaegerszeg"
+"tatabanya" = "tatabánya"
+"esztergom" = "esztergom"
+"gran" = "esztergom"

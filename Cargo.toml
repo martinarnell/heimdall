@@ -1,0 +1,87 @@
+[workspace]
+members = [
+    "crates/heimdall-core",
+    "crates/heimdall-build",
+    "crates/heimdall-normalize",
+    "crates/heimdall-nn",
+    "crates/heimdall-api",
+    "crates/heimdall-compare",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/martinarnell/heimdall"
+
+[workspace.dependencies]
+# FST
+fst = { version = "0.4", features = ["levenshtein"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bincode = "1"
+postcard = { version = "1", features = ["alloc"] }
+
+# OSM parsing
+osmpbf = "0.3"
+
+# Geo / coordinates
+geo = "0.27"
+geohash = "0.13"
+
+# Data processing
+rayon = "1"
+ahash = "0.8"
+
+# HTTP API
+axum = "0.7"
+tokio = { version = "1", features = ["full"] }
+tower = "0.4"
+
+# Phonetic
+rphonetic = "2"
+
+# Error handling
+thiserror = "1"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# CLI (for build tool)
+clap = { version = "4", features = ["derive", "env"] }
+
+# Compression / archiving
+zstd = "0.13"
+tar = "0.4"
+
+# Checksums
+sha2 = "0.10"
+
+# HTTP client
+reqwest = { version = "0.12", features = ["stream", "json"] }
+futures-util = "0.3"
+
+# Progress bars
+indicatif = "0.17"
+
+# Platform dirs
+dirs = "6"
+
+# Memory allocator (returns pages to OS aggressively)
+tikv-jemallocator = { version = "0.6", features = ["unprefixed_malloc_on_supported_platforms"] }
+
+# Metrics (Prometheus)
+metrics = "0.24"
+metrics-exporter-prometheus = { version = "0.16", default-features = false, features = ["http-listener"] }
+
+# XML parsing
+quick-xml = "0.37"
+
+# Parquet (intermediate format)
+parquet = "55"
+arrow = { version = "55", features = ["prettyprint"] }

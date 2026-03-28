@@ -1,0 +1,80 @@
+# Portuguese place name normalizer
+# Covers Portugal (PT)
+# Street type abbreviations, diacritics, English city name variants.
+
+[phonetic]
+engine = "none"  # No phonetic encoding for Portuguese
+
+[abbreviations]
+# Street type abbreviations
+"rua" = "r"
+"r." = "r"
+"avenida" = "av"
+"av." = "av"
+"praça" = "pç"
+"pç." = "pç"
+"travessa" = "tv"
+"tv." = "tv"
+"largo" = "lg"
+"lg." = "lg"
+"alameda" = "al"
+"al." = "al"
+"estrada" = "estr"
+"estr." = "estr"
+"beco" = "bc"
+"bc." = "bc"
+"calçada" = "calc"
+"calc." = "calc"
+"campo" = "cpo"
+"rotunda" = "rot"
+
+# Religious/honorific
+"santo" = "sto"
+"santa" = "sta"
+"são" = "s"
+"s." = "s"
+
+[stopwords]
+words = [
+    "portugal",
+    "pt",
+    "república portuguesa",
+    "distrito",
+    "concelho",
+    "freguesia",
+]
+
+[diacritics]
+# Portuguese accented characters → ASCII equivalents
+"á" = "a"
+"à" = "a"
+"â" = "a"
+"ã" = "a"
+"é" = "e"
+"ê" = "e"
+"í" = "i"
+"ó" = "o"
+"ô" = "o"
+"õ" = "o"
+"ú" = "u"
+"ü" = "u"
+"ç" = "c"
+
+[known_variants]
+# English names for Portuguese cities
+"lisbon" = "lisboa"
+"oporto" = "porto"
+"coimbra" = "coimbra"
+"faro" = "faro"
+"funchal" = "funchal"
+# Common ASCII approximations
+"evora" = "évora"
+"setubal" = "setúbal"
+"braganca" = "bragança"
+"santarem" = "santarém"
+"aveiro" = "aveiro"
+"guimaraes" = "guimarães"
+"viseu" = "viseu"
+"leiria" = "leiria"
+"castelo branco" = "castelo branco"
+"portalegre" = "portalegre"

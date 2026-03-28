@@ -1,0 +1,103 @@
+# Turkish place name normalizer
+# Turkish diacritics, street abbreviations, and city variants.
+# Also usable for Azerbaijani (AZ) which has very similar orthography and street types.
+# No phonetic encoding — diacritic normalization provides sufficient fuzzy matching.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Street type abbreviations (long → short)
+"sokak" = "sk"
+"sokağı" = "sk"
+"cadde" = "cd"
+"caddesi" = "cd"
+"bulvar" = "blv"
+"bulvarı" = "blv"
+"meydan" = "myd"
+"meydanı" = "myd"
+"mahalle" = "mah"
+"mahallesi" = "mah"
+"yol" = "yol"
+"yolu" = "yol"
+"köprü" = "kpr"
+"geçit" = "gçt"
+
+# Abbreviated input with dots
+"sk." = "sk"
+"cd." = "cd"
+"blv." = "blv"
+"myd." = "myd"
+"mah." = "mah"
+
+# Administrative
+"ilçe" = "ilçe"
+"il" = "il"
+
+[stopwords]
+words = [
+    "türkiye",
+    "turkey",
+    "tr",
+    "cumhuriyeti",
+    "republic",
+    "ili",
+    "ilçesi",
+]
+
+[known_variants]
+# Istanbul variants
+"istanbul" = "istanbul"
+"constantinople" = "istanbul"
+"byzantium" = "istanbul"
+
+# Capital and major cities
+"ankara" = "ankara"
+"angora" = "ankara"
+"izmir" = "izmir"
+"smyrna" = "izmir"
+"bursa" = "bursa"
+"antalya" = "antalya"
+"adana" = "adana"
+"gaziantep" = "gaziantep"
+"antep" = "gaziantep"
+"konya" = "konya"
+"iconium" = "konya"
+"mersin" = "mersin"
+"icel" = "mersin"
+"kayseri" = "kayseri"
+"caesarea" = "kayseri"
+"eskisehir" = "eskişehir"
+"eskişehir" = "eskişehir"
+"diyarbakir" = "diyarbakır"
+"diyarbakır" = "diyarbakır"
+"trabzon" = "trabzon"
+"trebizond" = "trabzon"
+"samsun" = "samsun"
+"edirne" = "edirne"
+"adrianople" = "edirne"
+
+# Azerbaijan cities (AZ can share this normalizer)
+"baku" = "bakı"
+"baki" = "bakı"
+"ganja" = "gəncə"
+"gence" = "gəncə"
+"sumgait" = "sumqayıt"
+"sumqayit" = "sumqayıt"
+
+[diacritics]
+# Turkish special characters → ASCII
+"ç" = "c"
+"ğ" = "g"
+"ı" = "i"
+"ö" = "o"
+"ş" = "s"
+"ü" = "u"
+# Capital dotted I (İ) — lowercased to regular i
+# Azerbaijani-specific characters
+"ə" = "e"
+
+[char_equivalences]
+# Turkish dotted/dotless I equivalence
+"ı" = "i"
+"ğ" = "g"

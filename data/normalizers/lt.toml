@@ -1,0 +1,61 @@
+# Lithuanian place name normalizer
+# Covers Lithuanian diacritics, street type abbreviations, and city name variants.
+
+[phonetic]
+engine = "none"
+
+[abbreviations]
+# Street types
+"g." = "gatvė"
+"gatvė" = "gatvė"
+"pr." = "prospektas"
+"prospektas" = "prospektas"
+"a." = "aikštė"
+"aikštė" = "aikštė"
+"kel." = "kelias"
+"kelias" = "kelias"
+"al." = "alėja"
+"alėja" = "alėja"
+"pl." = "plentas"
+"plentas" = "plentas"
+"tak." = "takas"
+"takas" = "takas"
+"skers." = "skersgatvis"
+
+[stopwords]
+words = [
+    "lietuva",
+    "lt",
+    "respublika",
+    "miestas",
+    "rajonas",
+    "savivaldybė",
+]
+
+[diacritics]
+"ą" = "a"
+"č" = "c"
+"ę" = "e"
+"ė" = "e"
+"į" = "i"
+"š" = "s"
+"ų" = "u"
+"ū" = "u"
+"ž" = "z"
+
+[known_variants]
+# Common ASCII spellings → correct Lithuanian
+"vilnius" = "vilnius"
+"kaunas" = "kaunas"
+"klaipeda" = "klaipėda"
+"siauliai" = "šiauliai"
+"panevezys" = "panevėžys"
+"alytus" = "alytus"
+"marijampole" = "marijampolė"
+"utena" = "utena"
+"telsiai" = "telšiai"
+"taurage" = "tauragė"
+"druskininkai" = "druskininkai"
+"palanga" = "palanga"
+"neringa" = "neringa"
+"visaginas" = "visaginas"

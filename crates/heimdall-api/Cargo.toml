@@ -1,0 +1,30 @@
+[package]
+name = "heimdall-api"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "heimdall"
+path = "src/main.rs"
+
+[dependencies]
+heimdall-core = { path = "../heimdall-core" }
+heimdall-normalize = { path = "../heimdall-normalize" }
+axum.workspace = true
+tokio.workspace = true
+tower.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+reqwest.workspace = true
+sha2.workspace = true
+indicatif.workspace = true
+tar.workspace = true
+zstd.workspace = true
+dirs.workspace = true
+futures-util.workspace = true
+metrics.workspace = true
+metrics-exporter-prometheus.workspace = true
