@@ -35,7 +35,7 @@ pub fn bundle_countries(name: &str) -> Option<Vec<&'static str>> {
     match name {
         "nordic" => Some(vec!["se", "no", "dk", "fi"]),
         "europe" => Some(vec!["se", "no", "dk", "fi", "de", "gb"]),
-        "world" => None, // dynamic — all countries in manifest
+        "world" | "planet" => None, // dynamic — all countries in manifest
         _ => None,
     }
 }
@@ -55,5 +55,5 @@ pub fn country_name(code: &str) -> &str {
 
 /// Check if a string is a known bundle name.
 pub fn is_bundle(name: &str) -> bool {
-    matches!(name, "nordic" | "europe" | "world")
+    matches!(name, "nordic" | "europe" | "world" | "planet")
 }

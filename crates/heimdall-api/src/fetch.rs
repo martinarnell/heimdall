@@ -124,7 +124,7 @@ pub async fn fetch_targets(
         let t = target.to_lowercase();
         if manifest::is_bundle(&t) {
             // Bundle: expand to individual countries
-            if t == "world" {
+            if t == "world" || t == "planet" {
                 // All countries in manifest
                 for code in manifest.countries.keys() {
                     if !country_codes.contains(code) {

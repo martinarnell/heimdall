@@ -63,25 +63,26 @@ pub struct Manifest {
 }
 
 /// Detect country code from index directory name.
+///
+/// Handles the standard `index-{cc}` format (e.g. `index-se`) by stripping
+/// the prefix and using the 2-letter code directly.  Falls back to legacy
+/// long names (e.g. `heimdall-sweden`) for backwards compatibility.
 pub fn detect_country_code(dir_name: &str) -> &str {
-    // Order matters: "denmark" contains "de" so must be checked before germany
-    if dir_name.contains("denmark") || dir_name.ends_with("-dk") {
-        "dk"
-    } else if dir_name.contains("germany") || dir_name.ends_with("-de") {
-        "de"
-    } else if dir_name.contains("norway") || dir_name.ends_with("-no") {
-        "no"
-    } else if dir_name.contains("sweden") || dir_name.ends_with("-se") {
-        "se"
-    } else if dir_name.contains("finland") || dir_name.ends_with("-fi") {
-        "fi"
-    } else if dir_name.contains("-gb") || dir_name.contains("-uk") || dir_name.contains("britain") {
-        "gb"
-    } else if dir_name.contains("-us") || dir_name.contains("united-states") || dir_name.contains("america") {
-        "us"
-    } else {
-        "unknown"
+    // Standard format: index-se, index-de, etc.
+    if let Some(suffix) = dir_name.strip_prefix("index-") {
+        if suffix.len() == 2 && suffix.bytes().all(|b| b.is_ascii_lowercase()) {
+            return suffix;
+        }
     }
+    // Legacy long names
+    if dir_name.contains("denmark") { "dk" }
+    else if dir_name.contains("germany") { "de" }
+    else if dir_name.contains("norway") { "no" }
+    else if dir_name.contains("sweden") { "se" }
+    else if dir_name.contains("finland") { "fi" }
+    else if dir_name.contains("britain") { "gb" }
+    else if dir_name.contains("united-states") || dir_name.contains("america") { "us" }
+    else { "unknown" }
 }
 
 fn country_name(code: &str) -> &str {
@@ -135,7 +136,7 @@ fn create_tarball(
     let file = fs::File::create(&tarball_path)
         .with_context(|| format!("creating {}", tarball_path.display()))?;
     let writer = BufWriter::new(file);
-    let encoder = zstd::Encoder::new(writer, 3)?;
+    let encoder = zstd::Encoder::new(writer, 19)?;
     let mut tar_builder = tar::Builder::new(encoder);
 
     // Use the directory name as the tarball root (e.g. "index-se/records.bin")
@@ -172,7 +173,7 @@ fn create_bundle_tarball(
     let tarball_path = output_dir.join(filename);
     let file = fs::File::create(&tarball_path)?;
     let writer = BufWriter::new(file);
-    let encoder = zstd::Encoder::new(writer, 3)?;
+    let encoder = zstd::Encoder::new(writer, 19)?;
     let mut tar_builder = tar::Builder::new(encoder);
 
     for index_dir in index_dirs {
@@ -271,9 +272,9 @@ pub fn package(
 
     if create_bundles {
         let mut defs = bundle_definitions();
-        // Add "world" dynamically with all available countries
+        // Add "planet" (all countries) dynamically
         let all_codes: Vec<&str> = country_dirs.keys().map(|s| s.as_str()).collect();
-        defs.push(("world", all_codes));
+        defs.push(("planet", all_codes));
 
         for (bundle_name, codes) in &defs {
             // Only create bundle if we have all the countries
