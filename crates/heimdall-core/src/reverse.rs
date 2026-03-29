@@ -22,12 +22,12 @@
 ///   This is very compact since nearby places often have nearby record IDs.
 
 use std::path::Path;
-use memmap2::Mmap;
 use std::fs::File;
 
 use crate::types::*;
 use crate::record_store::RecordStore;
 use crate::error::HeimdallError;
+use crate::compressed_io::{MmapOrVec, mmap_or_decompress};
 
 pub const GEOHASH_MAGIC: u32 = 0x47484932; // "GHI2" — version 2
 const GEOHASH_MAGIC_V1: u32 = 0x47484958;  // "GHIX" — version 1 (legacy)
@@ -124,27 +124,27 @@ enum IndexFormat {
 }
 
 pub struct GeohashIndex {
-    mmap: Mmap,
+    data: MmapOrVec,
     format: IndexFormat,
 }
 
 impl GeohashIndex {
     pub fn open(path: &Path) -> Result<Self, HeimdallError> {
-        let file = File::open(path)?;
-        let mmap = unsafe { Mmap::map(&file)? };
+        let data = mmap_or_decompress(path)?;
 
-        let magic = u32::from_le_bytes(mmap[0..4].try_into().unwrap());
+        let bytes = data.as_ref();
+        let magic = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
 
         let format = match magic {
             GEOHASH_MAGIC => {
                 // V2 compact format
-                let cell_count = u32::from_le_bytes(mmap[4..8].try_into().unwrap());
-                let total_records = u32::from_le_bytes(mmap[8..12].try_into().unwrap());
+                let cell_count = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+                let total_records = u32::from_le_bytes(bytes[8..12].try_into().unwrap());
                 IndexFormat::V2 { cell_count, total_records }
             }
             GEOHASH_MAGIC_V1 => {
                 // V1 legacy format
-                let count = u32::from_le_bytes(mmap[4..8].try_into().unwrap());
+                let count = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
                 IndexFormat::V1 { count }
             }
             _ => {
@@ -154,7 +154,7 @@ impl GeohashIndex {
             }
         };
 
-        Ok(Self { mmap, format })
+        Ok(Self { data, format })
     }
 
     pub fn len(&self) -> usize {
@@ -188,7 +188,7 @@ impl GeohashIndex {
     }
 
     fn entries_v1(&self, count: u32) -> &[GeohashEntry] {
-        let data = &self.mmap[V1_HEADER_SIZE..];
+        let data = &self.data.as_ref()[V1_HEADER_SIZE..];
         unsafe {
             std::slice::from_raw_parts(
                 data.as_ptr() as *const GeohashEntry,
@@ -202,7 +202,7 @@ impl GeohashIndex {
     fn cell_directory(&self, cell_count: u32) -> &[u8] {
         let start = HEADER_SIZE;
         let end = start + cell_count as usize * CELL_ENTRY_SIZE;
-        &self.mmap[start..end]
+        &self.data.as_ref()[start..end]
     }
 
     fn data_region_offset(&self, cell_count: u32) -> usize {
@@ -245,7 +245,7 @@ impl GeohashIndex {
 
         // Decode delta-varint record IDs
         let data_start = self.data_region_offset(cell_count) + entry.data_offset as usize;
-        let data = &self.mmap[data_start..];
+        let data = &self.data.as_ref()[data_start..];
         let count = entry.id_count as usize;
         let mut ids = Vec::with_capacity(count);
         let mut pos = 0usize;

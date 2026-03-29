@@ -47,3 +47,6 @@ rebuild*.log
 
 # ── Stray config copies ──────────────────────────────────────────────
 /sv.toml
+
+# ── Local dev notes ──────────────────────────────────────────────────
+/CLAUDE.local.md

@@ -565,6 +565,7 @@ impl RecordStore {
 }
 
 /// Decompress a single string pool block from the mmap.
+#[allow(dead_code)]
 fn decompress_sp_block(
     mmap: &Mmap,
     sp_block_dir_offset: usize,

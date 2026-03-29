@@ -9,6 +9,7 @@ use tracing::info;
 
 use crate::manifest::{self, Manifest};
 
+#[allow(dead_code)]
 const DEFAULT_BASE_URL: &str =
     "https://github.com/martinarnell/heimdall/releases/latest/download";
 
@@ -223,7 +224,7 @@ pub async fn check_updates(data_dir: &Path, base_url: &str) -> Result<()> {
 
     let mut found_any = false;
 
-    for (code, pkg) in &manifest.countries {
+    for (code, _pkg) in &manifest.countries {
         let index_dir = find_index_dir(data_dir, code);
         if !index_dir.exists() {
             continue;
