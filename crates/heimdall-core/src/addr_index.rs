@@ -488,6 +488,49 @@ pub fn is_uk_postcode(s: &str) -> bool {
     ob[alpha_end..].iter().any(|b| b.is_ascii_digit())
 }
 
+/// Try to parse "street city" without a comma by testing if trailing words
+/// match a known place. Tries splitting from the rightmost word leftward.
+///
+/// The `is_place` callback should return true if the given lowercased string
+/// is a known place name (city/town/village) in the index.
+///
+/// Examples:
+///   "kungsgatan stockholm"  → Some(("kungsgatan", "stockholm"))
+///   "karl johans gate oslo" → Some(("karl johans gate", "oslo"))
+///   "stockholm"             → None (single word, no street part)
+///   "drottninggatan 88"     → None (has a number — should be parsed as address)
+pub fn parse_street_city_freeform<F>(input: &str, is_place: F) -> Option<(String, String)>
+where
+    F: Fn(&str) -> bool,
+{
+    let input = input.trim();
+    let words: Vec<&str> = input.split_whitespace().collect();
+    if words.len() < 2 { return None; }
+
+    // Don't match if it looks like an address (word starts with digit)
+    for w in &words[1..] {
+        if w.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+            return None;
+        }
+    }
+
+    // Try splitting from right: 1 word as city, then 2 words, up to len-1
+    // (street must be at least 1 word)
+    let max_city_words = (words.len() - 1).min(3); // cities rarely exceed 3 words
+    for city_len in 1..=max_city_words {
+        let split = words.len() - city_len;
+        let city_part: String = words[split..].join(" ").to_lowercase();
+        if is_place(&city_part) {
+            let street_part = words[..split].join(" ").to_lowercase();
+            if street_part.len() >= 2 {
+                return Some((street_part, words[split..].join(" ")));
+            }
+        }
+    }
+
+    None
+}
+
 /// Hash a city name to a pseudo-municipality ID (u16).
 /// Same hash as pack_addr uses — must stay in sync.
 pub fn city_name_to_muni_id(city: &str) -> u16 {

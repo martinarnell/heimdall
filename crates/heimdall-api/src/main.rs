@@ -21,7 +21,8 @@ use clap::{Parser, Subcommand};
 
 use heimdall_core::index::HeimdallIndex;
 use heimdall_core::types::{BoundingBox, GeoQuery, GeoResult, MatchType, PlaceType};
-use heimdall_core::addr_index::{AddressIndex, parse_address_query, parse_street_query};
+use heimdall_core::addr_index::{AddressIndex, parse_address_query, parse_street_query, parse_street_city_freeform};
+use heimdall_core::types::Coord;
 use heimdall_core::zip_index::ZipIndex;
 use heimdall_core::reverse::GeohashIndex;
 use heimdall_core::global_index::GlobalIndex;
@@ -98,6 +99,7 @@ struct CountryIndex {
     zip_index: Option<ZipIndex>,
     geohash_index: Option<GeohashIndex>,
     normalizer: Normalizer,
+    #[allow(dead_code)]
     bbox: BoundingBox,
     meta: CountryMeta,
 }
@@ -116,6 +118,7 @@ type OsmIdMap = HashMap<(char, u32), (usize, u32)>;
 struct AppState {
     countries: Vec<CountryIndex>,
     global_index: Option<GlobalIndex>,
+    #[allow(dead_code)]
     country_id_map: HashMap<String, usize>,
     osm_id_map: std::sync::OnceLock<OsmIdMap>,
     started_at: std::time::SystemTime,
@@ -295,6 +298,53 @@ struct AddressDetails {
 }
 
 // ---------------------------------------------------------------------------
+// City resolution helper — works in both full and lightweight (global FST) mode
+// ---------------------------------------------------------------------------
+
+/// Resolve a city name to (admin2_id, coord) using the per-country FST first,
+/// then falling back to the global index when per-country FSTs are empty
+/// (lightweight mode).
+fn resolve_city(
+    city: &str,
+    country: &CountryIndex,
+    country_idx: usize,
+    normalizer: &Normalizer,
+    global_index: Option<&GlobalIndex>,
+) -> (Option<u16>, Option<Coord>) {
+    let city_candidates = normalizer.normalize(city);
+
+    // Try per-country FST first (populated in full mode)
+    for candidate in &city_candidates {
+        if let Some(record_id) = country.index.exact_lookup(candidate) {
+            let muni_id = country.index.record_admin2(record_id).filter(|&a2| a2 > 0);
+            let coord = country.index.record_store().get(record_id).ok().map(|r| r.coord);
+            if muni_id.is_some() || coord.is_some() {
+                return (muni_id, coord);
+            }
+        }
+    }
+
+    // Fallback: use global index postings to find the city, then resolve
+    // via the country's record store (which IS loaded even in lightweight mode)
+    if let Some(global) = global_index {
+        for candidate in &city_candidates {
+            let postings = global.exact_lookup(candidate);
+            // Postings are sorted by importance desc — pick the best match for this country
+            for posting in &postings {
+                if posting.country_id as usize == country_idx {
+                    let record_id = posting.record_id;
+                    let muni_id = country.index.record_admin2(record_id).filter(|&a2| a2 > 0);
+                    let coord = country.index.record_store().get(record_id).ok().map(|r| r.coord);
+                    return (muni_id, coord);
+                }
+            }
+        }
+    }
+
+    (None, None)
+}
+
+// ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
 
@@ -327,6 +377,13 @@ async fn search(
     if query_text.trim().is_empty() {
         return Ok(Json(vec![]));
     }
+
+    // Cap input length to prevent excessive FST automaton build times
+    let query_text = if query_text.len() > 100 {
+        query_text[..100].to_string()
+    } else {
+        query_text
+    };
 
     // For postalcode-only structured queries, try postcode FSTs first
     let postalcode_only = structured && is_postalcode_only(&params);
@@ -546,10 +603,11 @@ async fn search(
         }
     }
 
-    // Fall back to per-country loop when global index is unavailable or found
-    // no results (addresses, postcodes, street lookups still need the per-country
-    // pipeline).
-    if !used_global {
+    // Per-country pipeline: address/street lookups always run (even when
+    // global FST matched a place name) because "kungsgatan, stockholm"
+    // needs the address pipeline, not a place name result for "kungsgatan".
+    // Address/street results break out of this loop and fall through to the
+    // final sort, so they get properly ranked against global FST results.
     for &(ci, country) in &target_countries {
         let candidates = country.normalizer.normalize(&query_text);
 
@@ -597,20 +655,43 @@ async fn search(
         // Address parsing
         if let Some(ref addr_index) = country.addr_index {
             if let Some(addr_query) = parse_address_query(&query_text) {
-                let mut muni_id = None;
-                let mut city_coord = None;
+                let (mut muni_id, mut city_coord) = if let Some(city) = &addr_query.city {
+                    resolve_city(city, country, ci, &country.normalizer, state.global_index.as_ref())
+                } else {
+                    (None, None)
+                };
 
-                if let Some(city) = &addr_query.city {
-                    let city_candidates = country.normalizer.normalize(city);
-                    for candidate in &city_candidates {
-                        if let Some(record_id) = country.index.exact_lookup(candidate) {
-                            if let Some(a2) = country.index.record_admin2(record_id) {
-                                if a2 > 0 { muni_id = Some(a2); }
+                // When no city given, bias toward the most prominent place with
+                // this street name (e.g. "drottninggatan" → Stockholm)
+                if city_coord.is_none() {
+                    let street_cands = country.normalizer.normalize(&addr_query.street);
+                    // Try global index first (has importance-sorted postings)
+                    if let Some(ref global) = state.global_index {
+                        'outer_global: for sc in &street_cands {
+                            let postings = global.exact_lookup(sc);
+                            for posting in &postings {
+                                if posting.country_id as usize == ci {
+                                    if let Ok(record) = country.index.record_store().get(posting.record_id) {
+                                        city_coord = Some(record.coord);
+                                        let a2 = country.index.record_admin2(posting.record_id).filter(|&a| a > 0);
+                                        if a2.is_some() { muni_id = a2; }
+                                        break 'outer_global;
+                                    }
+                                }
                             }
-                            if let Ok(record) = country.index.record_store().get(record_id) {
-                                city_coord = Some(record.coord);
+                        }
+                    }
+                    // Fallback to per-country FST
+                    if city_coord.is_none() {
+                        for sc in &street_cands {
+                            if let Some(record_id) = country.index.exact_lookup(sc) {
+                                if let Ok(record) = country.index.record_store().get(record_id) {
+                                    city_coord = Some(record.coord);
+                                    let a2 = country.index.record_admin2(record_id).filter(|&a| a > 0);
+                                    if a2.is_some() { muni_id = a2; }
+                                    break;
+                                }
                             }
-                            break;
                         }
                     }
                 }
@@ -635,29 +716,15 @@ async fn search(
                         } else { None },
                     });
                 }
-                if !response.is_empty() {
-                    return Ok(Json(response));
+                if response.iter().any(|r| r.match_type.as_deref() == Some("address")) {
+                    break;
                 }
             }
 
             // Street-only lookup
             if let Some((street, city_str)) = parse_street_query(&query_text) {
                 let street_normalized = country.normalizer.normalize(&street);
-                let mut city_coord = None;
-                let mut muni_id = None;
-
-                let city_candidates = country.normalizer.normalize(&city_str);
-                for candidate in &city_candidates {
-                    if let Some(record_id) = country.index.exact_lookup(candidate) {
-                        if let Some(a2) = country.index.record_admin2(record_id) {
-                            if a2 > 0 { muni_id = Some(a2); }
-                        }
-                        if let Ok(record) = country.index.record_store().get(record_id) {
-                            city_coord = Some(record.coord);
-                        }
-                        break;
-                    }
-                }
+                let (muni_id, city_coord) = resolve_city(&city_str, country, ci, &country.normalizer, state.global_index.as_ref());
 
                 let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
                 for s in &street_normalized {
@@ -702,33 +769,111 @@ async fn search(
                         break;
                     }
                 }
-                if !response.is_empty() {
-                    return Ok(Json(response));
+                if response.iter().any(|r| r.match_type.as_deref() == Some("street")) {
+                    break;
+                }
+            }
+
+            // Freeform "street city" without comma (e.g. "kungsgatan stockholm")
+            if response.is_empty() {
+                let global_ref = state.global_index.as_ref();
+                let norm = &country.normalizer;
+                let idx = &country.index;
+                let ci_copy = ci;
+                if let Some((street, city_str)) = parse_street_city_freeform(&query_text, |candidate| {
+                    // Check per-country FST first, then global index
+                    let city_cands = norm.normalize(candidate);
+                    for c in &city_cands {
+                        if idx.exact_lookup(c).is_some() {
+                            return true;
+                        }
+                    }
+                    if let Some(global) = global_ref {
+                        for c in &city_cands {
+                            let postings = global.exact_lookup(c);
+                            if postings.iter().any(|p| p.country_id as usize == ci_copy) {
+                                return true;
+                            }
+                        }
+                    }
+                    false
+                }) {
+                    let street_normalized = norm.normalize(&street);
+                    let (muni_id, city_coord) = resolve_city(&city_str, country, ci, norm, global_ref);
+
+                    let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
+                    for s in &street_normalized {
+                        if let Some(result) = addr_index.lookup_street(s, muni_id, city_coord) {
+                            let display = if result.street.is_empty() {
+                                street.clone()
+                            } else {
+                                result.street.clone()
+                            };
+                            response.push(NominatimResult {
+                                place_id: 0,
+                                osm_type: None,
+                                osm_id: None,
+                                display_name: display,
+                                lat: format!("{:.7}", result.coord.lat_f64()),
+                                lon: format!("{:.7}", result.coord.lon_f64()),
+                                place_type: "street".to_owned(),
+                                importance: 0.4,
+                                match_type: Some("street".to_owned()),
+                                address: if params.addressdetails > 0 {
+                                    Some(AddressDetails {
+                                        house_number: None,
+                                        road: Some(if result.street.is_empty() {
+                                            street.clone()
+                                        } else {
+                                            result.street.clone()
+                                        }),
+                                        suburb: None,
+                                        city: Some(city_str.clone()),
+                                        town: None,
+                                        village: None,
+                                        county: None,
+                                        state: None,
+                                        postcode: if result.postcode > 0 {
+                                            Some(result.postcode.to_string())
+                                        } else { None },
+                                        country: Some(country.name.clone()),
+                                        country_code: Some(cc.clone()),
+                                    })
+                                } else { None },
+                            });
+                            break;
+                        }
+                    }
+                    if response.iter().any(|r| r.match_type.as_deref() == Some("street")) {
+                        break;
+                    }
                 }
             }
         }
 
-        // Place name lookup
-        let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
-        let mut found_exact = false;
-        for candidate in &candidates {
-            let results = country.index.geocode_normalized(candidate, &geo_query);
-            if !results.is_empty() {
+        // Place name lookup — skip when global FST already found results
+        if !used_global {
+            let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
+            let mut found_exact = false;
+            for candidate in &candidates {
+                let results = country.index.geocode_normalized(candidate, &geo_query);
+                if !results.is_empty() {
+                    for r in results {
+                        response.push(to_nominatim_enriched(ci, r, params.addressdetails > 0, &cc, &country.name, country));
+                    }
+                    found_exact = true;
+                    break;
+                }
+            }
+
+            // Phonetic fallback
+            if !found_exact {
+                let phonetic = country.normalizer.phonetic_key(&query_text);
+                let phonetic_query = GeoQuery::new(&phonetic);
+                let results = country.index.geocode_normalized(&phonetic, &phonetic_query);
                 for r in results {
                     response.push(to_nominatim_enriched(ci, r, params.addressdetails > 0, &cc, &country.name, country));
                 }
-                found_exact = true;
-                break;
-            }
-        }
-
-        // Phonetic fallback
-        if !found_exact {
-            let phonetic = country.normalizer.phonetic_key(&query_text);
-            let phonetic_query = GeoQuery::new(&phonetic);
-            let results = country.index.geocode_normalized(&phonetic, &phonetic_query);
-            for r in results {
-                response.push(to_nominatim_enriched(ci, r, params.addressdetails > 0, &cc, &country.name, country));
             }
         }
 
@@ -736,7 +881,6 @@ async fn search(
             break;
         }
     }
-    } // end if !used_global
 
     // Viewbox filtering (bounded=1) or bias (viewbox without bounded)
     if let Some(ref vbox) = bbox {
@@ -753,10 +897,15 @@ async fn search(
         }
     }
 
+    // Rank: address/street results and exact place matches are all "high confidence",
+    // then sort by importance within each tier.
     response.sort_by(|a, b| {
-        let a_exact = a.match_type.as_deref() == Some("exact");
-        let b_exact = b.match_type.as_deref() == Some("exact");
-        b_exact.cmp(&a_exact)
+        let high_confidence = |r: &NominatimResult| {
+            matches!(r.match_type.as_deref(), Some("exact" | "address" | "street"))
+        };
+        let a_hi = high_confidence(a);
+        let b_hi = high_confidence(b);
+        b_hi.cmp(&a_hi)
             .then(b.importance.partial_cmp(&a.importance).unwrap_or(std::cmp::Ordering::Equal))
     });
     response.truncate(limit);
@@ -1547,6 +1696,7 @@ fn match_us_state(s: &str) -> Option<String> {
 // Index loading
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 fn load_country_index(path: &std::path::Path) -> anyhow::Result<CountryIndex> {
     load_country_index_inner(path, false)
 }
