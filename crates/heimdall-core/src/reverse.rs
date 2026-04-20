@@ -312,27 +312,27 @@ impl GeohashIndex {
             }
         }
 
-        // Sort by (priority_tier, distance).
+        // Sort by (priority_tier, distance) with type-based distance bonus.
+        // At lower zoom levels, prefer populated places (cities/towns) over POIs
+        // even if the POI is closer. The bonus is tiered by place type so that
+        // a City 5km away outranks a cafe 50m away at zoom <= 14.
         candidates.sort_by(|a, b| {
-            let a_pop = is_populated_type(a.2);
-            let b_pop = is_populated_type(b.2);
+            let z = zoom.unwrap_or(18);
 
-            if zoom.map(|z| z <= 14).unwrap_or(false) && a_pop != b_pop {
-                if a_pop && !b_pop {
-                    if b.1 + 500.0 < a.1 {
-                        return std::cmp::Ordering::Greater;
-                    }
-                    return std::cmp::Ordering::Less;
-                }
-                if !a_pop && b_pop {
-                    if a.1 + 500.0 < b.1 {
-                        return std::cmp::Ordering::Less;
-                    }
-                    return std::cmp::Ordering::Greater;
-                }
+            if z <= 16 {
+                let a_bonus = populated_type_bonus(a.2);
+                let b_bonus = populated_type_bonus(b.2);
+
+                // Subtract the bonus from distance (more important types get
+                // a larger effective distance reduction)
+                let a_effective = a.1 - a_bonus;
+                let b_effective = b.1 - b_bonus;
+
+                a_effective.partial_cmp(&b_effective).unwrap_or(std::cmp::Ordering::Equal)
+            } else {
+                // zoom 17+: pure nearest-neighbor (POI-level detail)
+                a.1.partial_cmp(&b.1).unwrap()
             }
-
-            a.1.partial_cmp(&b.1).unwrap()
         });
 
         candidates.truncate(max_results);
@@ -340,19 +340,31 @@ impl GeohashIndex {
     }
 }
 
-/// Is this a populated/built place (vs natural feature)?
-fn is_populated_type(pt: PlaceType) -> bool {
-    matches!(
-        pt,
-        PlaceType::Country | PlaceType::State | PlaceType::County
-            | PlaceType::City | PlaceType::Town | PlaceType::Village
-            | PlaceType::Suburb | PlaceType::Quarter | PlaceType::Neighbourhood
-            | PlaceType::Hamlet | PlaceType::Farm
-            | PlaceType::Airport | PlaceType::Station
-    )
+/// Distance bonus (in meters) for populated place types when ranking reverse results.
+/// At zoom <= 16, a City gets a 5km "head start" over a POI, meaning a City
+/// 5km away will outrank a cafe right at the query point.
+fn populated_type_bonus(pt: PlaceType) -> f64 {
+    match pt {
+        PlaceType::Country => 50_000.0,
+        PlaceType::State => 20_000.0,
+        PlaceType::County => 10_000.0,
+        PlaceType::City => 5_000.0,
+        PlaceType::Town => 3_000.0,
+        PlaceType::Village => 1_500.0,
+        PlaceType::Suburb | PlaceType::Quarter | PlaceType::Neighbourhood => 800.0,
+        PlaceType::Hamlet | PlaceType::Farm => 500.0,
+        PlaceType::Island => 2_000.0,
+        PlaceType::Airport => 1_000.0,
+        PlaceType::Station => 300.0,
+        PlaceType::Lake | PlaceType::River => 500.0,
+        PlaceType::Mountain | PlaceType::Forest => 500.0,
+        _ => 0.0, // POIs, Unknown — no bonus
+    }
 }
 
 /// Does this place_type match the requested zoom level?
+/// Aligned with Nominatim's zoom-to-address-rank mapping:
+/// POIs/Unknown types only appear at zoom >= 17.
 fn matches_zoom(pt: PlaceType, zoom: u8) -> bool {
     match zoom {
         0..=3 => matches!(pt, PlaceType::Country),
@@ -368,7 +380,8 @@ fn matches_zoom(pt: PlaceType, zoom: u8) -> bool {
                 | PlaceType::Suburb | PlaceType::Lake | PlaceType::Island
         ),
         14..=15 => !matches!(pt, PlaceType::Country | PlaceType::State),
-        _ => true, // zoom 16+ = everything
+        16 => !matches!(pt, PlaceType::Country | PlaceType::State | PlaceType::Unknown),
+        _ => true, // zoom 17+ = everything including POIs
     }
 }
 

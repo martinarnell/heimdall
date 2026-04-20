@@ -1133,7 +1133,7 @@ struct ReverseParams {
     addressdetails: u8,
 }
 
-fn default_zoom() -> u8 { 18 }
+fn default_zoom() -> u8 { 16 }
 
 async fn reverse(
     Query(params): Query<ReverseParams>,
