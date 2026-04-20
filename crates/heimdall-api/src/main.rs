@@ -882,6 +882,64 @@ async fn search(
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Word-dropping fallback for multi-word queries
+    // -----------------------------------------------------------------------
+    // If the full query returned no results and has 3+ words, try progressively
+    // shorter prefixes. E.g. "Santa Cruz de Tenerife" → "Santa Cruz de" → "Santa Cruz".
+    // Also try dropping from the front for qualifier patterns like "Richmond Yorkshire".
+    if response.is_empty() {
+        let words: Vec<&str> = query_text.split_whitespace().collect();
+        if words.len() >= 2 {
+            let mut subqueries: Vec<String> = Vec::new();
+
+            // Drop words from the end: "Santa Cruz de Tenerife" → "Santa Cruz de" → "Santa Cruz"
+            for end in (2..words.len()).rev() {
+                subqueries.push(words[..end].join(" "));
+            }
+            // Drop words from the front: "Richmond Yorkshire" → "Yorkshire" (not useful alone)
+            // Only first word as a standalone (useful for "Pamplona Navarra" → "Pamplona")
+            if words.len() >= 2 {
+                subqueries.push(words[0].to_string());
+            }
+
+            'word_drop: for sub in &subqueries {
+                // Try global FST
+                if let Some(ref global) = state.global_index {
+                    if let Some(norm) = target_countries.first().map(|&(_, c)| &c.normalizer) {
+                        let sub_candidates = norm.normalize(sub);
+                        for candidate in &sub_candidates {
+                            let postings = global.exact_lookup(candidate);
+                            let filtered = filter_postings_by_country(&postings, &country_codes, &state.countries);
+                            for posting in filtered.iter().take(limit) {
+                                if let Some(result) = posting_to_nominatim(posting, &state.countries, "exact", params.addressdetails > 0) {
+                                    response.push(result);
+                                }
+                            }
+                            if !response.is_empty() { break 'word_drop; }
+                        }
+                    }
+                }
+
+                // Try per-country FST
+                for &(ci, country) in &target_countries {
+                    let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
+                    let sub_candidates = country.normalizer.normalize(sub);
+                    let mut geo_q = GeoQuery::new(sub);
+                    geo_q.limit = limit;
+
+                    for candidate in &sub_candidates {
+                        let results = country.index.geocode_normalized(candidate, &geo_q);
+                        for r in results {
+                            response.push(to_nominatim_enriched(ci, r, params.addressdetails > 0, &cc, &country.name, country));
+                        }
+                        if !response.is_empty() { break 'word_drop; }
+                    }
+                }
+            }
+        }
+    }
+
     // Viewbox filtering (bounded=1) or bias (viewbox without bounded)
     if let Some(ref vbox) = bbox {
         if params.bounded == 1 {
