@@ -207,14 +207,18 @@ pub fn pack(
                 let old_strs: Vec<&str> = if old_names_arr.is_null(i) { vec![] } else {
                     old_names_arr.value(i).split(';').filter(|s| !s.is_empty() && s.len() < 255).collect()
                 };
-                let intl_strs: Vec<&str> = if name_intl_arr.is_null(i) { vec![] } else {
-                    name_intl_arr.value(i).split(';').filter(|s| !s.is_empty() && s.len() < 255).collect()
+                let intl_names: Vec<String> = if name_intl_arr.is_null(i) { vec![] } else {
+                    name_intl_arr.value(i).split(';')
+                        .filter(|s| !s.is_empty())
+                        .filter_map(|s| s.split_once('=').map(|(_, name)| name.to_string()))
+                        .filter(|s| !s.is_empty() && s.len() < 255)
+                        .collect()
                 };
 
                 let mut all_alts: Vec<&str> = Vec::new();
                 all_alts.extend(&alt_strs);
                 all_alts.extend(&old_strs);
-                all_alts.extend(&intl_strs);
+                all_alts.extend(intl_names.iter().map(|s| s.as_str()));
 
                 let id = record_builder.add(record, name, &all_alts);
                 records_added += 1;
@@ -234,6 +238,19 @@ pub fn pack(
                 let primary_lower = name.to_lowercase();
                 write!(exact_writer, "{}\t{}\t{}\t{}\n", primary_lower, id, importance, pop_flag)?;
                 exact_count += 1;
+
+                // Split compound bilingual names (e.g. "Casteddu/Cagliari", "Bolzano - Bozen")
+                for sep in [" / ", " - ", "/"] {
+                    if primary_lower.contains(sep) {
+                        for part in primary_lower.split(sep) {
+                            let part = part.trim();
+                            if !part.is_empty() && part != primary_lower {
+                                write!(exact_writer, "{}\t{}\t{}\t{}\n", part, id, importance, pop_flag)?;
+                                exact_count += 1;
+                            }
+                        }
+                    }
+                }
 
                 for alt in &all_alts {
                     let key = alt.to_lowercase();

@@ -110,9 +110,13 @@ md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/de/
 name = "Great Britain"
 index_name = "index-gb"
 normalizer = "data/normalizers/en-gb.toml"
-ram_gb = 2
+ram_gb = 4
 
-# GB is photon-only — no OSM PBF extraction
+# GB — OSM PBF extraction + Photon for enrichment
+[country.gb.osm]
+url = "https://download.geofabrik.de/europe/great-britain-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/great-britain-updates/state.txt"
+
 [country.gb.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/gb/photon-db-gb-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/gb/photon-db-gb-250720.tar.bz2.md5"
@@ -477,6 +481,10 @@ index_name = "index-ad"
 normalizer = "data/normalizers/es.toml"
 ram_gb = 2
 
+[country.ad.osm]
+url = "https://download.geofabrik.de/europe/andorra-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/andorra-updates/state.txt"
+
 [country.ad.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ad/photon-db-ad-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ad/photon-db-ad-250720.tar.bz2.md5"
@@ -486,6 +494,11 @@ name = "UAE"
 index_name = "index-ae"
 normalizer = "data/normalizers/ar.toml"
 ram_gb = 2
+
+# Shared GCC States PBF — bbox filtering in detect_country() separates countries
+[country.ae.osm]
+url = "https://download.geofabrik.de/asia/gcc-states-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/gcc-states-updates/state.txt"
 
 [country.ae.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ae/photon-db-ae-250720.tar.bz2"
@@ -497,6 +510,10 @@ index_name = "index-af"
 normalizer = "data/normalizers/fa.toml"
 ram_gb = 2
 
+[country.af.osm]
+url = "https://download.geofabrik.de/asia/afghanistan-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/afghanistan-updates/state.txt"
+
 [country.af.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/af/photon-db-af-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/af/photon-db-af-250720.tar.bz2.md5"
@@ -506,6 +523,11 @@ name = "Antigua and Barbuda"
 index_name = "index-ag"
 normalizer = "data/normalizers/en-caribbean.toml"
 ram_gb = 2
+
+# No individual Geofabrik PBF — uses regional Central America extract + bbox filtering
+[country.ag.osm]
+url = "https://download.geofabrik.de/central-america-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/central-america-updates/state.txt"
 
 [country.ag.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ag/photon-db-ag-250720.tar.bz2"
@@ -517,6 +539,10 @@ index_name = "index-al"
 normalizer = "data/normalizers/hr.toml"
 ram_gb = 2
 
+[country.al.osm]
+url = "https://download.geofabrik.de/europe/albania-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/albania-updates/state.txt"
+
 [country.al.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/al/photon-db-al-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/al/photon-db-al-250720.tar.bz2.md5"
@@ -526,6 +552,10 @@ name = "Armenia"
 index_name = "index-am"
 normalizer = "data/normalizers/hy.toml"
 ram_gb = 2
+
+[country.am.osm]
+url = "https://download.geofabrik.de/asia/armenia-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/armenia-updates/state.txt"
 
 [country.am.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/am/photon-db-am-250720.tar.bz2"
@@ -537,6 +567,10 @@ index_name = "index-ao"
 normalizer = "data/normalizers/pt-africa.toml"
 ram_gb = 2
 
+[country.ao.osm]
+url = "https://download.geofabrik.de/africa/angola-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/angola-updates/state.txt"
+
 [country.ao.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ao/photon-db-ao-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ao/photon-db-ao-250720.tar.bz2.md5"
@@ -545,7 +579,11 @@ md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ao/
 name = "Argentina"
 index_name = "index-ar"
 normalizer = "data/normalizers/es-latam.toml"
-ram_gb = 4
+ram_gb = 2
+
+[country.ar.osm]
+url = "https://download.geofabrik.de/south-america/argentina-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/south-america/argentina-updates/state.txt"
 
 [country.ar.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ar/photon-db-ar-250720.tar.bz2"
@@ -557,6 +595,10 @@ index_name = "index-az"
 normalizer = "data/normalizers/tr.toml"
 ram_gb = 2
 
+[country.az.osm]
+url = "https://download.geofabrik.de/asia/azerbaijan-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/azerbaijan-updates/state.txt"
+
 [country.az.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/az/photon-db-az-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/az/photon-db-az-250720.tar.bz2.md5"
@@ -566,6 +608,10 @@ name = "Bosnia and Herzegovina"
 index_name = "index-ba"
 normalizer = "data/normalizers/hr.toml"
 ram_gb = 2
+
+[country.ba.osm]
+url = "https://download.geofabrik.de/europe/bosnia-herzegovina-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/bosnia-herzegovina-updates/state.txt"
 
 [country.ba.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ba/photon-db-ba-250720.tar.bz2"
@@ -577,6 +623,11 @@ index_name = "index-bb"
 normalizer = "data/normalizers/en-caribbean.toml"
 ram_gb = 2
 
+# No individual Geofabrik PBF — uses regional Central America extract + bbox filtering
+[country.bb.osm]
+url = "https://download.geofabrik.de/central-america-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/central-america-updates/state.txt"
+
 [country.bb.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/bb/photon-db-bb-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/bb/photon-db-bb-250720.tar.bz2.md5"
@@ -586,6 +637,10 @@ name = "Bangladesh"
 index_name = "index-bd"
 normalizer = "data/normalizers/bn.toml"
 ram_gb = 2
+
+[country.bd.osm]
+url = "https://download.geofabrik.de/asia/bangladesh-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/bangladesh-updates/state.txt"
 
 [country.bd.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/bd/photon-db-bd-250720.tar.bz2"
@@ -597,6 +652,10 @@ index_name = "index-bf"
 normalizer = "data/normalizers/fr.toml"
 ram_gb = 2
 
+[country.bf.osm]
+url = "https://download.geofabrik.de/africa/burkina-faso-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/burkina-faso-updates/state.txt"
+
 [country.bf.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/bf/photon-db-bf-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/bf/photon-db-bf-250720.tar.bz2.md5"
@@ -606,6 +665,10 @@ name = "Bulgaria"
 index_name = "index-bg"
 normalizer = "data/normalizers/bg.toml"
 ram_gb = 2
+
+[country.bg.osm]
+url = "https://download.geofabrik.de/europe/bulgaria-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/bulgaria-updates/state.txt"
 
 [country.bg.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/bg/photon-db-bg-250720.tar.bz2"
@@ -617,6 +680,11 @@ index_name = "index-bh"
 normalizer = "data/normalizers/ar.toml"
 ram_gb = 2
 
+# Shared GCC States PBF — bbox filtering in detect_country() separates countries
+[country.bh.osm]
+url = "https://download.geofabrik.de/asia/gcc-states-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/gcc-states-updates/state.txt"
+
 [country.bh.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/bh/photon-db-bh-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/bh/photon-db-bh-250720.tar.bz2.md5"
@@ -626,6 +694,10 @@ name = "Burundi"
 index_name = "index-bi"
 normalizer = "data/normalizers/fr.toml"
 ram_gb = 2
+
+[country.bi.osm]
+url = "https://download.geofabrik.de/africa/burundi-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/burundi-updates/state.txt"
 
 [country.bi.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/bi/photon-db-bi-250720.tar.bz2"
@@ -637,6 +709,10 @@ index_name = "index-bj"
 normalizer = "data/normalizers/fr.toml"
 ram_gb = 2
 
+[country.bj.osm]
+url = "https://download.geofabrik.de/africa/benin-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/benin-updates/state.txt"
+
 [country.bj.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/bj/photon-db-bj-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/bj/photon-db-bj-250720.tar.bz2.md5"
@@ -646,6 +722,11 @@ name = "Bermuda"
 index_name = "index-bm"
 normalizer = "data/normalizers/en-caribbean.toml"
 ram_gb = 2
+
+# No individual Geofabrik PBF — uses regional Central America extract + bbox filtering
+[country.bm.osm]
+url = "https://download.geofabrik.de/central-america-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/central-america-updates/state.txt"
 
 [country.bm.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/bm/photon-db-bm-250720.tar.bz2"
@@ -657,6 +738,10 @@ index_name = "index-bo"
 normalizer = "data/normalizers/es-latam.toml"
 ram_gb = 2
 
+[country.bo.osm]
+url = "https://download.geofabrik.de/south-america/bolivia-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/south-america/bolivia-updates/state.txt"
+
 [country.bo.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/bo/photon-db-bo-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/bo/photon-db-bo-250720.tar.bz2.md5"
@@ -666,6 +751,10 @@ name = "Bahamas"
 index_name = "index-bs"
 normalizer = "data/normalizers/en-caribbean.toml"
 ram_gb = 2
+
+[country.bs.osm]
+url = "https://download.geofabrik.de/central-america/bahamas-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/central-america/bahamas-updates/state.txt"
 
 [country.bs.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/bs/photon-db-bs-250720.tar.bz2"
@@ -677,6 +766,10 @@ index_name = "index-bt"
 normalizer = "data/normalizers/dz.toml"
 ram_gb = 2
 
+[country.bt.osm]
+url = "https://download.geofabrik.de/asia/bhutan-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/bhutan-updates/state.txt"
+
 [country.bt.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/bt/photon-db-bt-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/bt/photon-db-bt-250720.tar.bz2.md5"
@@ -686,6 +779,10 @@ name = "Botswana"
 index_name = "index-bw"
 normalizer = "data/normalizers/en-africa.toml"
 ram_gb = 2
+
+[country.bw.osm]
+url = "https://download.geofabrik.de/africa/botswana-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/botswana-updates/state.txt"
 
 [country.bw.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/bw/photon-db-bw-250720.tar.bz2"
@@ -697,6 +794,10 @@ index_name = "index-by"
 normalizer = "data/normalizers/ru.toml"
 ram_gb = 1
 
+[country.by.osm]
+url = "https://download.geofabrik.de/europe/belarus-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/belarus-updates/state.txt"
+
 [country.by.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/by/photon-db-by-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/by/photon-db-by-250720.tar.bz2.md5"
@@ -706,6 +807,10 @@ name = "Belize"
 index_name = "index-bz"
 normalizer = "data/normalizers/en-caribbean.toml"
 ram_gb = 2
+
+[country.bz.osm]
+url = "https://download.geofabrik.de/central-america/belize-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/central-america/belize-updates/state.txt"
 
 [country.bz.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/bz/photon-db-bz-250720.tar.bz2"
@@ -717,6 +822,10 @@ index_name = "index-cd"
 normalizer = "data/normalizers/fr.toml"
 ram_gb = 2
 
+[country.cd.osm]
+url = "https://download.geofabrik.de/africa/congo-democratic-republic-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/congo-democratic-republic-updates/state.txt"
+
 [country.cd.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/cd/photon-db-cd-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/cd/photon-db-cd-250720.tar.bz2.md5"
@@ -726,6 +835,10 @@ name = "Central African Rep."
 index_name = "index-cf"
 normalizer = "data/normalizers/fr.toml"
 ram_gb = 2
+
+[country.cf.osm]
+url = "https://download.geofabrik.de/africa/central-african-republic-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/central-african-republic-updates/state.txt"
 
 [country.cf.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/cf/photon-db-cf-250720.tar.bz2"
@@ -737,6 +850,10 @@ index_name = "index-cg"
 normalizer = "data/normalizers/fr.toml"
 ram_gb = 2
 
+[country.cg.osm]
+url = "https://download.geofabrik.de/africa/congo-brazzaville-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/congo-brazzaville-updates/state.txt"
+
 [country.cg.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/cg/photon-db-cg-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/cg/photon-db-cg-250720.tar.bz2.md5"
@@ -746,6 +863,10 @@ name = "Cote d'Ivoire"
 index_name = "index-ci"
 normalizer = "data/normalizers/fr.toml"
 ram_gb = 2
+
+[country.ci.osm]
+url = "https://download.geofabrik.de/africa/ivory-coast-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/ivory-coast-updates/state.txt"
 
 [country.ci.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ci/photon-db-ci-250720.tar.bz2"
@@ -757,6 +878,10 @@ index_name = "index-cl"
 normalizer = "data/normalizers/es-latam.toml"
 ram_gb = 1
 
+[country.cl.osm]
+url = "https://download.geofabrik.de/south-america/chile-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/south-america/chile-updates/state.txt"
+
 [country.cl.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/cl/photon-db-cl-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/cl/photon-db-cl-250720.tar.bz2.md5"
@@ -766,6 +891,10 @@ name = "Cameroon"
 index_name = "index-cm"
 normalizer = "data/normalizers/fr.toml"
 ram_gb = 2
+
+[country.cm.osm]
+url = "https://download.geofabrik.de/africa/cameroon-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/cameroon-updates/state.txt"
 
 [country.cm.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/cm/photon-db-cm-250720.tar.bz2"
@@ -777,6 +906,10 @@ index_name = "index-co"
 normalizer = "data/normalizers/es-latam.toml"
 ram_gb = 2
 
+[country.co.osm]
+url = "https://download.geofabrik.de/south-america/colombia-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/south-america/colombia-updates/state.txt"
+
 [country.co.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/co/photon-db-co-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/co/photon-db-co-250720.tar.bz2.md5"
@@ -786,6 +919,10 @@ name = "Costa Rica"
 index_name = "index-cr"
 normalizer = "data/normalizers/es-latam.toml"
 ram_gb = 2
+
+[country.cr.osm]
+url = "https://download.geofabrik.de/central-america/costa-rica-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/central-america/costa-rica-updates/state.txt"
 
 [country.cr.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/cr/photon-db-cr-250720.tar.bz2"
@@ -797,6 +934,10 @@ index_name = "index-cu"
 normalizer = "data/normalizers/es-latam.toml"
 ram_gb = 2
 
+[country.cu.osm]
+url = "https://download.geofabrik.de/central-america/cuba-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/central-america/cuba-updates/state.txt"
+
 [country.cu.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/cu/photon-db-cu-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/cu/photon-db-cu-250720.tar.bz2.md5"
@@ -806,6 +947,10 @@ name = "Cape Verde"
 index_name = "index-cv"
 normalizer = "data/normalizers/pt-africa.toml"
 ram_gb = 2
+
+[country.cv.osm]
+url = "https://download.geofabrik.de/africa/cape-verde-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/cape-verde-updates/state.txt"
 
 [country.cv.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/cv/photon-db-cv-250720.tar.bz2"
@@ -817,6 +962,10 @@ index_name = "index-cy"
 normalizer = "data/normalizers/el.toml"
 ram_gb = 2
 
+[country.cy.osm]
+url = "https://download.geofabrik.de/europe/cyprus-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/cyprus-updates/state.txt"
+
 [country.cy.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/cy/photon-db-cy-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/cy/photon-db-cy-250720.tar.bz2.md5"
@@ -826,6 +975,10 @@ name = "Djibouti"
 index_name = "index-dj"
 normalizer = "data/normalizers/fr.toml"
 ram_gb = 2
+
+[country.dj.osm]
+url = "https://download.geofabrik.de/africa/djibouti-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/djibouti-updates/state.txt"
 
 [country.dj.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/dj/photon-db-dj-250720.tar.bz2"
@@ -837,6 +990,11 @@ index_name = "index-dm"
 normalizer = "data/normalizers/en-caribbean.toml"
 ram_gb = 2
 
+# No individual Geofabrik PBF — uses regional Central America extract + bbox filtering
+[country.dm.osm]
+url = "https://download.geofabrik.de/central-america-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/central-america-updates/state.txt"
+
 [country.dm.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/dm/photon-db-dm-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/dm/photon-db-dm-250720.tar.bz2.md5"
@@ -846,6 +1004,11 @@ name = "Dominican Republic"
 index_name = "index-do"
 normalizer = "data/normalizers/es-latam.toml"
 ram_gb = 2
+
+# Shared Haiti-DomRep PBF — bbox filtering separates countries
+[country.do.osm]
+url = "https://download.geofabrik.de/central-america/haiti-and-domrep-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/central-america/haiti-and-domrep-updates/state.txt"
 
 [country.do.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/do/photon-db-do-250720.tar.bz2"
@@ -857,6 +1020,10 @@ index_name = "index-dz"
 normalizer = "data/normalizers/ar.toml"
 ram_gb = 2
 
+[country.dz.osm]
+url = "https://download.geofabrik.de/africa/algeria-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/algeria-updates/state.txt"
+
 [country.dz.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/dz/photon-db-dz-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/dz/photon-db-dz-250720.tar.bz2.md5"
@@ -866,6 +1033,10 @@ name = "Ecuador"
 index_name = "index-ec"
 normalizer = "data/normalizers/es-latam.toml"
 ram_gb = 2
+
+[country.ec.osm]
+url = "https://download.geofabrik.de/south-america/ecuador-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/south-america/ecuador-updates/state.txt"
 
 [country.ec.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ec/photon-db-ec-250720.tar.bz2"
@@ -877,6 +1048,10 @@ index_name = "index-eg"
 normalizer = "data/normalizers/ar.toml"
 ram_gb = 1
 
+[country.eg.osm]
+url = "https://download.geofabrik.de/africa/egypt-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/egypt-updates/state.txt"
+
 [country.eg.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/eg/photon-db-eg-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/eg/photon-db-eg-250720.tar.bz2.md5"
@@ -887,6 +1062,10 @@ index_name = "index-er"
 normalizer = "data/normalizers/am.toml"
 ram_gb = 2
 
+[country.er.osm]
+url = "https://download.geofabrik.de/africa/eritrea-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/eritrea-updates/state.txt"
+
 [country.er.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/er/photon-db-er-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/er/photon-db-er-250720.tar.bz2.md5"
@@ -895,7 +1074,11 @@ md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/er/
 name = "Spain"
 index_name = "index-es"
 normalizer = "data/normalizers/es.toml"
-ram_gb = 1
+ram_gb = 4
+
+[country.es.osm]
+url = "https://download.geofabrik.de/europe/spain-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/spain-updates/state.txt"
 
 [country.es.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/es/photon-db-es-250720.tar.bz2"
@@ -907,6 +1090,10 @@ index_name = "index-et"
 normalizer = "data/normalizers/am.toml"
 ram_gb = 2
 
+[country.et.osm]
+url = "https://download.geofabrik.de/africa/ethiopia-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/ethiopia-updates/state.txt"
+
 [country.et.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/et/photon-db-et-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/et/photon-db-et-250720.tar.bz2.md5"
@@ -916,6 +1103,10 @@ name = "Gabon"
 index_name = "index-ga"
 normalizer = "data/normalizers/fr.toml"
 ram_gb = 2
+
+[country.ga.osm]
+url = "https://download.geofabrik.de/africa/gabon-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/gabon-updates/state.txt"
 
 [country.ga.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ga/photon-db-ga-250720.tar.bz2"
@@ -927,6 +1118,11 @@ index_name = "index-gd"
 normalizer = "data/normalizers/en-caribbean.toml"
 ram_gb = 2
 
+# No individual Geofabrik PBF — uses regional Central America extract + bbox filtering
+[country.gd.osm]
+url = "https://download.geofabrik.de/central-america-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/central-america-updates/state.txt"
+
 [country.gd.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/gd/photon-db-gd-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/gd/photon-db-gd-250720.tar.bz2.md5"
@@ -936,6 +1132,10 @@ name = "Georgia"
 index_name = "index-ge"
 normalizer = "data/normalizers/ka.toml"
 ram_gb = 2
+
+[country.ge.osm]
+url = "https://download.geofabrik.de/europe/georgia-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/georgia-updates/state.txt"
 
 [country.ge.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ge/photon-db-ge-250720.tar.bz2"
@@ -947,6 +1147,10 @@ index_name = "index-gh"
 normalizer = "data/normalizers/en-africa.toml"
 ram_gb = 2
 
+[country.gh.osm]
+url = "https://download.geofabrik.de/africa/ghana-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/ghana-updates/state.txt"
+
 [country.gh.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/gh/photon-db-gh-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/gh/photon-db-gh-250720.tar.bz2.md5"
@@ -956,6 +1160,11 @@ name = "Gambia"
 index_name = "index-gm"
 normalizer = "data/normalizers/en-africa.toml"
 ram_gb = 2
+
+# Shared Senegal-Gambia PBF — bbox filtering separates countries
+[country.gm.osm]
+url = "https://download.geofabrik.de/africa/senegal-and-gambia-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/senegal-and-gambia-updates/state.txt"
 
 [country.gm.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/gm/photon-db-gm-250720.tar.bz2"
@@ -967,6 +1176,10 @@ index_name = "index-gn"
 normalizer = "data/normalizers/fr.toml"
 ram_gb = 2
 
+[country.gn.osm]
+url = "https://download.geofabrik.de/africa/guinea-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/guinea-updates/state.txt"
+
 [country.gn.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/gn/photon-db-gn-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/gn/photon-db-gn-250720.tar.bz2.md5"
@@ -976,6 +1189,10 @@ name = "Equatorial Guinea"
 index_name = "index-gq"
 normalizer = "data/normalizers/fr.toml"
 ram_gb = 2
+
+[country.gq.osm]
+url = "https://download.geofabrik.de/africa/equatorial-guinea-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/equatorial-guinea-updates/state.txt"
 
 [country.gq.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/gq/photon-db-gq-250720.tar.bz2"
@@ -987,6 +1204,10 @@ index_name = "index-gr"
 normalizer = "data/normalizers/el.toml"
 ram_gb = 2
 
+[country.gr.osm]
+url = "https://download.geofabrik.de/europe/greece-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/greece-updates/state.txt"
+
 [country.gr.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/gr/photon-db-gr-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/gr/photon-db-gr-250720.tar.bz2.md5"
@@ -996,6 +1217,10 @@ name = "Guatemala"
 index_name = "index-gt"
 normalizer = "data/normalizers/es-latam.toml"
 ram_gb = 2
+
+[country.gt.osm]
+url = "https://download.geofabrik.de/central-america/guatemala-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/central-america/guatemala-updates/state.txt"
 
 [country.gt.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/gt/photon-db-gt-250720.tar.bz2"
@@ -1007,6 +1232,10 @@ index_name = "index-gw"
 normalizer = "data/normalizers/pt-africa.toml"
 ram_gb = 2
 
+[country.gw.osm]
+url = "https://download.geofabrik.de/africa/guinea-bissau-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/guinea-bissau-updates/state.txt"
+
 [country.gw.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/gw/photon-db-gw-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/gw/photon-db-gw-250720.tar.bz2.md5"
@@ -1016,6 +1245,10 @@ name = "Guyana"
 index_name = "index-gy"
 normalizer = "data/normalizers/en-caribbean.toml"
 ram_gb = 2
+
+[country.gy.osm]
+url = "https://download.geofabrik.de/south-america/guyana-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/south-america/guyana-updates/state.txt"
 
 [country.gy.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/gy/photon-db-gy-250720.tar.bz2"
@@ -1027,6 +1260,10 @@ index_name = "index-hn"
 normalizer = "data/normalizers/es-latam.toml"
 ram_gb = 2
 
+[country.hn.osm]
+url = "https://download.geofabrik.de/central-america/honduras-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/central-america/honduras-updates/state.txt"
+
 [country.hn.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/hn/photon-db-hn-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/hn/photon-db-hn-250720.tar.bz2.md5"
@@ -1036,6 +1273,10 @@ name = "Croatia"
 index_name = "index-hr"
 normalizer = "data/normalizers/hr.toml"
 ram_gb = 2
+
+[country.hr.osm]
+url = "https://download.geofabrik.de/europe/croatia-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/croatia-updates/state.txt"
 
 [country.hr.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/hr/photon-db-hr-250720.tar.bz2"
@@ -1047,6 +1288,11 @@ index_name = "index-ht"
 normalizer = "data/normalizers/ht.toml"
 ram_gb = 2
 
+# Shared Haiti-DomRep PBF — bbox filtering separates countries
+[country.ht.osm]
+url = "https://download.geofabrik.de/central-america/haiti-and-domrep-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/central-america/haiti-and-domrep-updates/state.txt"
+
 [country.ht.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ht/photon-db-ht-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ht/photon-db-ht-250720.tar.bz2.md5"
@@ -1056,6 +1302,10 @@ name = "Hungary"
 index_name = "index-hu"
 normalizer = "data/normalizers/hu.toml"
 ram_gb = 2
+
+[country.hu.osm]
+url = "https://download.geofabrik.de/europe/hungary-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/hungary-updates/state.txt"
 
 [country.hu.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/hu/photon-db-hu-250720.tar.bz2"
@@ -1067,6 +1317,10 @@ index_name = "index-ie"
 normalizer = "data/normalizers/ie.toml"
 ram_gb = 2
 
+[country.ie.osm]
+url = "https://download.geofabrik.de/europe/ireland-and-northern-ireland-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/ireland-and-northern-ireland-updates/state.txt"
+
 [country.ie.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ie/photon-db-ie-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ie/photon-db-ie-250720.tar.bz2.md5"
@@ -1077,6 +1331,11 @@ index_name = "index-il"
 normalizer = "data/normalizers/he.toml"
 ram_gb = 2
 
+# Shared Israel-Palestine PBF — bbox filtering separates countries
+[country.il.osm]
+url = "https://download.geofabrik.de/asia/israel-and-palestine-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/israel-and-palestine-updates/state.txt"
+
 [country.il.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/il/photon-db-il-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/il/photon-db-il-250720.tar.bz2.md5"
@@ -1085,7 +1344,11 @@ md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/il/
 name = "India"
 index_name = "index-in"
 normalizer = "data/normalizers/hi.toml"
-ram_gb = 2
+ram_gb = 4
+
+[country.in.osm]
+url = "https://download.geofabrik.de/asia/india-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/india-updates/state.txt"
 
 [country.in.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/in/photon-db-in-250720.tar.bz2"
@@ -1097,6 +1360,10 @@ index_name = "index-iq"
 normalizer = "data/normalizers/ar.toml"
 ram_gb = 2
 
+[country.iq.osm]
+url = "https://download.geofabrik.de/asia/iraq-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/iraq-updates/state.txt"
+
 [country.iq.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/iq/photon-db-iq-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/iq/photon-db-iq-250720.tar.bz2.md5"
@@ -1106,6 +1373,10 @@ name = "Iran"
 index_name = "index-ir"
 normalizer = "data/normalizers/fa.toml"
 ram_gb = 2
+
+[country.ir.osm]
+url = "https://download.geofabrik.de/asia/iran-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/iran-updates/state.txt"
 
 [country.ir.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ir/photon-db-ir-250720.tar.bz2"
@@ -1117,6 +1388,10 @@ index_name = "index-is"
 normalizer = "data/normalizers/is.toml"
 ram_gb = 2
 
+[country.is.osm]
+url = "https://download.geofabrik.de/europe/iceland-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/iceland-updates/state.txt"
+
 [country.is.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/is/photon-db-is-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/is/photon-db-is-250720.tar.bz2.md5"
@@ -1125,7 +1400,11 @@ md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/is/
 name = "Italy"
 index_name = "index-it"
 normalizer = "data/normalizers/it.toml"
-ram_gb = 2
+ram_gb = 4
+
+[country.it.osm]
+url = "https://download.geofabrik.de/europe/italy-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/italy-updates/state.txt"
 
 [country.it.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/it/photon-db-it-250720.tar.bz2"
@@ -1137,6 +1416,10 @@ index_name = "index-jm"
 normalizer = "data/normalizers/en-caribbean.toml"
 ram_gb = 2
 
+[country.jm.osm]
+url = "https://download.geofabrik.de/central-america/jamaica-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/central-america/jamaica-updates/state.txt"
+
 [country.jm.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/jm/photon-db-jm-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/jm/photon-db-jm-250720.tar.bz2.md5"
@@ -1146,6 +1429,10 @@ name = "Jordan"
 index_name = "index-jo"
 normalizer = "data/normalizers/ar.toml"
 ram_gb = 2
+
+[country.jo.osm]
+url = "https://download.geofabrik.de/asia/jordan-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/jordan-updates/state.txt"
 
 [country.jo.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/jo/photon-db-jo-250720.tar.bz2"
@@ -1157,6 +1444,10 @@ index_name = "index-ke"
 normalizer = "data/normalizers/en-africa.toml"
 ram_gb = 2
 
+[country.ke.osm]
+url = "https://download.geofabrik.de/africa/kenya-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/kenya-updates/state.txt"
+
 [country.ke.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ke/photon-db-ke-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ke/photon-db-ke-250720.tar.bz2.md5"
@@ -1166,6 +1457,10 @@ name = "Comoros"
 index_name = "index-km"
 normalizer = "data/normalizers/fr.toml"
 ram_gb = 2
+
+[country.km.osm]
+url = "https://download.geofabrik.de/africa/comores-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/comores-updates/state.txt"
 
 [country.km.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/km/photon-db-km-250720.tar.bz2"
@@ -1177,6 +1472,11 @@ index_name = "index-kn"
 normalizer = "data/normalizers/en-caribbean.toml"
 ram_gb = 2
 
+# No individual Geofabrik PBF — uses regional Central America extract + bbox filtering
+[country.kn.osm]
+url = "https://download.geofabrik.de/central-america-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/central-america-updates/state.txt"
+
 [country.kn.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/kn/photon-db-kn-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/kn/photon-db-kn-250720.tar.bz2.md5"
@@ -1186,6 +1486,11 @@ name = "Kuwait"
 index_name = "index-kw"
 normalizer = "data/normalizers/ar.toml"
 ram_gb = 2
+
+# Shared GCC States PBF — bbox filtering in detect_country() separates countries
+[country.kw.osm]
+url = "https://download.geofabrik.de/asia/gcc-states-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/gcc-states-updates/state.txt"
 
 [country.kw.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/kw/photon-db-kw-250720.tar.bz2"
@@ -1197,6 +1502,10 @@ index_name = "index-lb"
 normalizer = "data/normalizers/ar.toml"
 ram_gb = 2
 
+[country.lb.osm]
+url = "https://download.geofabrik.de/asia/lebanon-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/lebanon-updates/state.txt"
+
 [country.lb.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/lb/photon-db-lb-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/lb/photon-db-lb-250720.tar.bz2.md5"
@@ -1206,6 +1515,11 @@ name = "Saint Lucia"
 index_name = "index-lc"
 normalizer = "data/normalizers/en-caribbean.toml"
 ram_gb = 2
+
+# No individual Geofabrik PBF — uses regional Central America extract + bbox filtering
+[country.lc.osm]
+url = "https://download.geofabrik.de/central-america-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/central-america-updates/state.txt"
 
 [country.lc.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/lc/photon-db-lc-250720.tar.bz2"
@@ -1217,6 +1531,10 @@ index_name = "index-lk"
 normalizer = "data/normalizers/si.toml"
 ram_gb = 2
 
+[country.lk.osm]
+url = "https://download.geofabrik.de/asia/sri-lanka-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/sri-lanka-updates/state.txt"
+
 [country.lk.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/lk/photon-db-lk-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/lk/photon-db-lk-250720.tar.bz2.md5"
@@ -1226,6 +1544,10 @@ name = "Liberia"
 index_name = "index-lr"
 normalizer = "data/normalizers/en-africa.toml"
 ram_gb = 2
+
+[country.lr.osm]
+url = "https://download.geofabrik.de/africa/liberia-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/liberia-updates/state.txt"
 
 [country.lr.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/lr/photon-db-lr-250720.tar.bz2"
@@ -1237,6 +1559,10 @@ index_name = "index-ls"
 normalizer = "data/normalizers/en-africa.toml"
 ram_gb = 2
 
+[country.ls.osm]
+url = "https://download.geofabrik.de/africa/lesotho-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/lesotho-updates/state.txt"
+
 [country.ls.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ls/photon-db-ls-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ls/photon-db-ls-250720.tar.bz2.md5"
@@ -1246,6 +1572,10 @@ name = "Luxembourg"
 index_name = "index-lu"
 normalizer = "data/normalizers/lu.toml"
 ram_gb = 2
+
+[country.lu.osm]
+url = "https://download.geofabrik.de/europe/luxembourg-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/luxembourg-updates/state.txt"
 
 [country.lu.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/lu/photon-db-lu-250720.tar.bz2"
@@ -1257,6 +1587,10 @@ index_name = "index-ly"
 normalizer = "data/normalizers/ar.toml"
 ram_gb = 2
 
+[country.ly.osm]
+url = "https://download.geofabrik.de/africa/libya-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/libya-updates/state.txt"
+
 [country.ly.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ly/photon-db-ly-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ly/photon-db-ly-250720.tar.bz2.md5"
@@ -1266,6 +1600,10 @@ name = "Morocco"
 index_name = "index-ma"
 normalizer = "data/normalizers/ar.toml"
 ram_gb = 2
+
+[country.ma.osm]
+url = "https://download.geofabrik.de/africa/morocco-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/morocco-updates/state.txt"
 
 [country.ma.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ma/photon-db-ma-250720.tar.bz2"
@@ -1277,6 +1615,10 @@ index_name = "index-mc"
 normalizer = "data/normalizers/fr.toml"
 ram_gb = 2
 
+[country.mc.osm]
+url = "https://download.geofabrik.de/europe/monaco-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/monaco-updates/state.txt"
+
 [country.mc.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/mc/photon-db-mc-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/mc/photon-db-mc-250720.tar.bz2.md5"
@@ -1286,6 +1628,10 @@ name = "Moldova"
 index_name = "index-md"
 normalizer = "data/normalizers/ro.toml"
 ram_gb = 2
+
+[country.md.osm]
+url = "https://download.geofabrik.de/europe/moldova-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/moldova-updates/state.txt"
 
 [country.md.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/md/photon-db-md-250720.tar.bz2"
@@ -1297,6 +1643,10 @@ index_name = "index-me"
 normalizer = "data/normalizers/hr.toml"
 ram_gb = 2
 
+[country.me.osm]
+url = "https://download.geofabrik.de/europe/montenegro-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/montenegro-updates/state.txt"
+
 [country.me.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/me/photon-db-me-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/me/photon-db-me-250720.tar.bz2.md5"
@@ -1306,6 +1656,10 @@ name = "Madagascar"
 index_name = "index-mg"
 normalizer = "data/normalizers/fr.toml"
 ram_gb = 2
+
+[country.mg.osm]
+url = "https://download.geofabrik.de/africa/madagascar-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/madagascar-updates/state.txt"
 
 [country.mg.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/mg/photon-db-mg-250720.tar.bz2"
@@ -1317,6 +1671,10 @@ index_name = "index-mk"
 normalizer = "data/normalizers/hr.toml"
 ram_gb = 2
 
+[country.mk.osm]
+url = "https://download.geofabrik.de/europe/macedonia-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/macedonia-updates/state.txt"
+
 [country.mk.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/mk/photon-db-mk-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/mk/photon-db-mk-250720.tar.bz2.md5"
@@ -1326,6 +1684,10 @@ name = "Mali"
 index_name = "index-ml"
 normalizer = "data/normalizers/fr.toml"
 ram_gb = 2
+
+[country.ml.osm]
+url = "https://download.geofabrik.de/africa/mali-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/mali-updates/state.txt"
 
 [country.ml.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ml/photon-db-ml-250720.tar.bz2"
@@ -1337,6 +1699,10 @@ index_name = "index-mr"
 normalizer = "data/normalizers/ar.toml"
 ram_gb = 2
 
+[country.mr.osm]
+url = "https://download.geofabrik.de/africa/mauritania-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/mauritania-updates/state.txt"
+
 [country.mr.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/mr/photon-db-mr-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/mr/photon-db-mr-250720.tar.bz2.md5"
@@ -1346,6 +1712,10 @@ name = "Malta"
 index_name = "index-mt"
 normalizer = "data/normalizers/it.toml"
 ram_gb = 2
+
+[country.mt.osm]
+url = "https://download.geofabrik.de/europe/malta-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/malta-updates/state.txt"
 
 [country.mt.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/mt/photon-db-mt-250720.tar.bz2"
@@ -1357,6 +1727,10 @@ index_name = "index-mu"
 normalizer = "data/normalizers/en-africa.toml"
 ram_gb = 2
 
+[country.mu.osm]
+url = "https://download.geofabrik.de/africa/mauritius-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/mauritius-updates/state.txt"
+
 [country.mu.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/mu/photon-db-mu-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/mu/photon-db-mu-250720.tar.bz2.md5"
@@ -1366,6 +1740,10 @@ name = "Maldives"
 index_name = "index-mv"
 normalizer = "data/normalizers/dv.toml"
 ram_gb = 2
+
+[country.mv.osm]
+url = "https://download.geofabrik.de/asia/maldives-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/maldives-updates/state.txt"
 
 [country.mv.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/mv/photon-db-mv-250720.tar.bz2"
@@ -1377,6 +1755,10 @@ index_name = "index-mw"
 normalizer = "data/normalizers/en-africa.toml"
 ram_gb = 2
 
+[country.mw.osm]
+url = "https://download.geofabrik.de/africa/malawi-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/malawi-updates/state.txt"
+
 [country.mw.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/mw/photon-db-mw-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/mw/photon-db-mw-250720.tar.bz2.md5"
@@ -1385,7 +1767,11 @@ md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/mw/
 name = "Mexico"
 index_name = "index-mx"
 normalizer = "data/normalizers/es-latam.toml"
-ram_gb = 2
+ram_gb = 4
+
+[country.mx.osm]
+url = "https://download.geofabrik.de/north-america/mexico-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/north-america/mexico-updates/state.txt"
 
 [country.mx.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/mx/photon-db-mx-250720.tar.bz2"
@@ -1397,6 +1783,10 @@ index_name = "index-mz"
 normalizer = "data/normalizers/pt-africa.toml"
 ram_gb = 2
 
+[country.mz.osm]
+url = "https://download.geofabrik.de/africa/mozambique-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/mozambique-updates/state.txt"
+
 [country.mz.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/mz/photon-db-mz-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/mz/photon-db-mz-250720.tar.bz2.md5"
@@ -1406,6 +1796,10 @@ name = "Namibia"
 index_name = "index-na"
 normalizer = "data/normalizers/en-africa.toml"
 ram_gb = 2
+
+[country.na.osm]
+url = "https://download.geofabrik.de/africa/namibia-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/namibia-updates/state.txt"
 
 [country.na.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/na/photon-db-na-250720.tar.bz2"
@@ -1417,6 +1811,10 @@ index_name = "index-ne"
 normalizer = "data/normalizers/fr.toml"
 ram_gb = 2
 
+[country.ne.osm]
+url = "https://download.geofabrik.de/africa/niger-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/niger-updates/state.txt"
+
 [country.ne.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ne/photon-db-ne-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ne/photon-db-ne-250720.tar.bz2.md5"
@@ -1426,6 +1824,10 @@ name = "Nigeria"
 index_name = "index-ng"
 normalizer = "data/normalizers/en-africa.toml"
 ram_gb = 2
+
+[country.ng.osm]
+url = "https://download.geofabrik.de/africa/nigeria-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/nigeria-updates/state.txt"
 
 [country.ng.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ng/photon-db-ng-250720.tar.bz2"
@@ -1437,6 +1839,10 @@ index_name = "index-ni"
 normalizer = "data/normalizers/es-latam.toml"
 ram_gb = 2
 
+[country.ni.osm]
+url = "https://download.geofabrik.de/central-america/nicaragua-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/central-america/nicaragua-updates/state.txt"
+
 [country.ni.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ni/photon-db-ni-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ni/photon-db-ni-250720.tar.bz2.md5"
@@ -1446,6 +1852,10 @@ name = "Nepal"
 index_name = "index-np"
 normalizer = "data/normalizers/hi.toml"
 ram_gb = 2
+
+[country.np.osm]
+url = "https://download.geofabrik.de/asia/nepal-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/nepal-updates/state.txt"
 
 [country.np.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/np/photon-db-np-250720.tar.bz2"
@@ -1457,6 +1867,11 @@ index_name = "index-om"
 normalizer = "data/normalizers/ar.toml"
 ram_gb = 2
 
+# Shared GCC States PBF — bbox filtering in detect_country() separates countries
+[country.om.osm]
+url = "https://download.geofabrik.de/asia/gcc-states-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/gcc-states-updates/state.txt"
+
 [country.om.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/om/photon-db-om-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/om/photon-db-om-250720.tar.bz2.md5"
@@ -1466,6 +1881,10 @@ name = "Panama"
 index_name = "index-pa"
 normalizer = "data/normalizers/es-latam.toml"
 ram_gb = 2
+
+[country.pa.osm]
+url = "https://download.geofabrik.de/central-america/panama-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/central-america/panama-updates/state.txt"
 
 [country.pa.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/pa/photon-db-pa-250720.tar.bz2"
@@ -1477,6 +1896,10 @@ index_name = "index-pe"
 normalizer = "data/normalizers/es-latam.toml"
 ram_gb = 2
 
+[country.pe.osm]
+url = "https://download.geofabrik.de/south-america/peru-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/south-america/peru-updates/state.txt"
+
 [country.pe.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/pe/photon-db-pe-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/pe/photon-db-pe-250720.tar.bz2.md5"
@@ -1486,6 +1909,10 @@ name = "Pakistan"
 index_name = "index-pk"
 normalizer = "data/normalizers/ur.toml"
 ram_gb = 2
+
+[country.pk.osm]
+url = "https://download.geofabrik.de/asia/pakistan-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/pakistan-updates/state.txt"
 
 [country.pk.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/pk/photon-db-pk-250720.tar.bz2"
@@ -1497,6 +1924,11 @@ index_name = "index-ps"
 normalizer = "data/normalizers/ar.toml"
 ram_gb = 2
 
+# Shared Israel-Palestine PBF — bbox filtering separates countries
+[country.ps.osm]
+url = "https://download.geofabrik.de/asia/israel-and-palestine-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/israel-and-palestine-updates/state.txt"
+
 [country.ps.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ps/photon-db-ps-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ps/photon-db-ps-250720.tar.bz2.md5"
@@ -1506,6 +1938,10 @@ name = "Portugal"
 index_name = "index-pt"
 normalizer = "data/normalizers/pt.toml"
 ram_gb = 2
+
+[country.pt.osm]
+url = "https://download.geofabrik.de/europe/portugal-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/portugal-updates/state.txt"
 
 [country.pt.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/pt/photon-db-pt-250720.tar.bz2"
@@ -1517,6 +1953,10 @@ index_name = "index-py"
 normalizer = "data/normalizers/es-latam.toml"
 ram_gb = 2
 
+[country.py.osm]
+url = "https://download.geofabrik.de/south-america/paraguay-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/south-america/paraguay-updates/state.txt"
+
 [country.py.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/py/photon-db-py-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/py/photon-db-py-250720.tar.bz2.md5"
@@ -1526,6 +1966,11 @@ name = "Qatar"
 index_name = "index-qa"
 normalizer = "data/normalizers/ar.toml"
 ram_gb = 2
+
+# Shared GCC States PBF — bbox filtering in detect_country() separates countries
+[country.qa.osm]
+url = "https://download.geofabrik.de/asia/gcc-states-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/gcc-states-updates/state.txt"
 
 [country.qa.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/qa/photon-db-qa-250720.tar.bz2"
@@ -1537,6 +1982,10 @@ index_name = "index-ro"
 normalizer = "data/normalizers/ro.toml"
 ram_gb = 2
 
+[country.ro.osm]
+url = "https://download.geofabrik.de/europe/romania-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/romania-updates/state.txt"
+
 [country.ro.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ro/photon-db-ro-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ro/photon-db-ro-250720.tar.bz2.md5"
@@ -1547,6 +1996,10 @@ index_name = "index-rs"
 normalizer = "data/normalizers/hr.toml"
 ram_gb = 2
 
+[country.rs.osm]
+url = "https://download.geofabrik.de/europe/serbia-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/serbia-updates/state.txt"
+
 [country.rs.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/rs/photon-db-rs-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/rs/photon-db-rs-250720.tar.bz2.md5"
@@ -1555,7 +2008,11 @@ md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/rs/
 name = "Russia"
 index_name = "index-ru"
 normalizer = "data/normalizers/ru.toml"
-ram_gb = 2
+ram_gb = 8
+
+[country.ru.osm]
+url = "https://download.geofabrik.de/russia-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/russia-updates/state.txt"
 
 [country.ru.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ru/photon-db-ru-250720.tar.bz2"
@@ -1567,6 +2024,10 @@ index_name = "index-rw"
 normalizer = "data/normalizers/en-africa.toml"
 ram_gb = 2
 
+[country.rw.osm]
+url = "https://download.geofabrik.de/africa/rwanda-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/rwanda-updates/state.txt"
+
 [country.rw.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/rw/photon-db-rw-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/rw/photon-db-rw-250720.tar.bz2.md5"
@@ -1576,6 +2037,11 @@ name = "Saudi Arabia"
 index_name = "index-sa"
 normalizer = "data/normalizers/ar.toml"
 ram_gb = 2
+
+# Shared GCC States PBF — bbox filtering in detect_country() separates countries
+[country.sa.osm]
+url = "https://download.geofabrik.de/asia/gcc-states-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/gcc-states-updates/state.txt"
 
 [country.sa.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/sa/photon-db-sa-250720.tar.bz2"
@@ -1587,6 +2053,10 @@ index_name = "index-sc"
 normalizer = "data/normalizers/en-africa.toml"
 ram_gb = 2
 
+[country.sc.osm]
+url = "https://download.geofabrik.de/africa/seychelles-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/seychelles-updates/state.txt"
+
 [country.sc.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/sc/photon-db-sc-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/sc/photon-db-sc-250720.tar.bz2.md5"
@@ -1596,6 +2066,10 @@ name = "Sudan"
 index_name = "index-sd"
 normalizer = "data/normalizers/ar.toml"
 ram_gb = 2
+
+[country.sd.osm]
+url = "https://download.geofabrik.de/africa/sudan-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/sudan-updates/state.txt"
 
 [country.sd.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/sd/photon-db-sd-250720.tar.bz2"
@@ -1607,6 +2081,10 @@ index_name = "index-si"
 normalizer = "data/normalizers/hr.toml"
 ram_gb = 2
 
+[country.si.osm]
+url = "https://download.geofabrik.de/europe/slovenia-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/slovenia-updates/state.txt"
+
 [country.si.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/si/photon-db-si-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/si/photon-db-si-250720.tar.bz2.md5"
@@ -1616,6 +2094,10 @@ name = "Slovakia"
 index_name = "index-sk"
 normalizer = "data/normalizers/sk.toml"
 ram_gb = 2
+
+[country.sk.osm]
+url = "https://download.geofabrik.de/europe/slovakia-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/slovakia-updates/state.txt"
 
 [country.sk.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/sk/photon-db-sk-250720.tar.bz2"
@@ -1627,6 +2109,10 @@ index_name = "index-sl"
 normalizer = "data/normalizers/en-africa.toml"
 ram_gb = 2
 
+[country.sl.osm]
+url = "https://download.geofabrik.de/africa/sierra-leone-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/sierra-leone-updates/state.txt"
+
 [country.sl.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/sl/photon-db-sl-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/sl/photon-db-sl-250720.tar.bz2.md5"
@@ -1636,6 +2122,11 @@ name = "San Marino"
 index_name = "index-sm"
 normalizer = "data/normalizers/it.toml"
 ram_gb = 2
+
+# San Marino has no individual Geofabrik PBF — extracted from Italy PBF via bbox
+[country.sm.osm]
+url = "https://download.geofabrik.de/europe/italy-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/italy-updates/state.txt"
 
 [country.sm.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/sm/photon-db-sm-250720.tar.bz2"
@@ -1647,6 +2138,11 @@ index_name = "index-sn"
 normalizer = "data/normalizers/fr.toml"
 ram_gb = 2
 
+# Shared Senegal-Gambia PBF — bbox filtering separates countries
+[country.sn.osm]
+url = "https://download.geofabrik.de/africa/senegal-and-gambia-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/senegal-and-gambia-updates/state.txt"
+
 [country.sn.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/sn/photon-db-sn-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/sn/photon-db-sn-250720.tar.bz2.md5"
@@ -1656,6 +2152,10 @@ name = "Somalia"
 index_name = "index-so"
 normalizer = "data/normalizers/ar.toml"
 ram_gb = 2
+
+[country.so.osm]
+url = "https://download.geofabrik.de/africa/somalia-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/somalia-updates/state.txt"
 
 [country.so.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/so/photon-db-so-250720.tar.bz2"
@@ -1667,6 +2167,10 @@ index_name = "index-sr"
 normalizer = "data/normalizers/nl-sr.toml"
 ram_gb = 2
 
+[country.sr.osm]
+url = "https://download.geofabrik.de/south-america/suriname-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/south-america/suriname-updates/state.txt"
+
 [country.sr.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/sr/photon-db-sr-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/sr/photon-db-sr-250720.tar.bz2.md5"
@@ -1676,6 +2180,10 @@ name = "South Sudan"
 index_name = "index-ss"
 normalizer = "data/normalizers/en-africa.toml"
 ram_gb = 2
+
+[country.ss.osm]
+url = "https://download.geofabrik.de/africa/south-sudan-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/south-sudan-updates/state.txt"
 
 [country.ss.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ss/photon-db-ss-250720.tar.bz2"
@@ -1687,6 +2195,10 @@ index_name = "index-st"
 normalizer = "data/normalizers/pt-africa.toml"
 ram_gb = 2
 
+[country.st.osm]
+url = "https://download.geofabrik.de/africa/sao-tome-and-principe-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/sao-tome-and-principe-updates/state.txt"
+
 [country.st.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/st/photon-db-st-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/st/photon-db-st-250720.tar.bz2.md5"
@@ -1696,6 +2208,10 @@ name = "El Salvador"
 index_name = "index-sv"
 normalizer = "data/normalizers/es-latam.toml"
 ram_gb = 2
+
+[country.sv.osm]
+url = "https://download.geofabrik.de/central-america/el-salvador-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/central-america/el-salvador-updates/state.txt"
 
 [country.sv.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/sv/photon-db-sv-250720.tar.bz2"
@@ -1707,6 +2223,10 @@ index_name = "index-sy"
 normalizer = "data/normalizers/ar.toml"
 ram_gb = 2
 
+[country.sy.osm]
+url = "https://download.geofabrik.de/asia/syria-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/syria-updates/state.txt"
+
 [country.sy.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/sy/photon-db-sy-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/sy/photon-db-sy-250720.tar.bz2.md5"
@@ -1716,6 +2236,10 @@ name = "Eswatini"
 index_name = "index-sz"
 normalizer = "data/normalizers/en-africa.toml"
 ram_gb = 2
+
+[country.sz.osm]
+url = "https://download.geofabrik.de/africa/swaziland-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/swaziland-updates/state.txt"
 
 [country.sz.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/sz/photon-db-sz-250720.tar.bz2"
@@ -1727,6 +2251,10 @@ index_name = "index-td"
 normalizer = "data/normalizers/fr.toml"
 ram_gb = 2
 
+[country.td.osm]
+url = "https://download.geofabrik.de/africa/chad-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/chad-updates/state.txt"
+
 [country.td.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/td/photon-db-td-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/td/photon-db-td-250720.tar.bz2.md5"
@@ -1736,6 +2264,10 @@ name = "Togo"
 index_name = "index-tg"
 normalizer = "data/normalizers/fr.toml"
 ram_gb = 2
+
+[country.tg.osm]
+url = "https://download.geofabrik.de/africa/togo-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/togo-updates/state.txt"
 
 [country.tg.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/tg/photon-db-tg-250720.tar.bz2"
@@ -1747,6 +2279,10 @@ index_name = "index-tn"
 normalizer = "data/normalizers/ar.toml"
 ram_gb = 2
 
+[country.tn.osm]
+url = "https://download.geofabrik.de/africa/tunisia-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/tunisia-updates/state.txt"
+
 [country.tn.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/tn/photon-db-tn-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/tn/photon-db-tn-250720.tar.bz2.md5"
@@ -1756,6 +2292,10 @@ name = "Turkey"
 index_name = "index-tr"
 normalizer = "data/normalizers/tr.toml"
 ram_gb = 2
+
+[country.tr.osm]
+url = "https://download.geofabrik.de/europe/turkey-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/turkey-updates/state.txt"
 
 [country.tr.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/tr/photon-db-tr-250720.tar.bz2"
@@ -1767,6 +2307,11 @@ index_name = "index-tt"
 normalizer = "data/normalizers/en-caribbean.toml"
 ram_gb = 2
 
+# No individual Geofabrik PBF — uses regional Central America extract + bbox filtering
+[country.tt.osm]
+url = "https://download.geofabrik.de/central-america-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/central-america-updates/state.txt"
+
 [country.tt.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/tt/photon-db-tt-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/tt/photon-db-tt-250720.tar.bz2.md5"
@@ -1776,6 +2321,10 @@ name = "Tanzania"
 index_name = "index-tz"
 normalizer = "data/normalizers/en-africa.toml"
 ram_gb = 2
+
+[country.tz.osm]
+url = "https://download.geofabrik.de/africa/tanzania-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/tanzania-updates/state.txt"
 
 [country.tz.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/tz/photon-db-tz-250720.tar.bz2"
@@ -1787,6 +2336,10 @@ index_name = "index-ua"
 normalizer = "data/normalizers/uk.toml"
 ram_gb = 2
 
+[country.ua.osm]
+url = "https://download.geofabrik.de/europe/ukraine-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/ukraine-updates/state.txt"
+
 [country.ua.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ua/photon-db-ua-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ua/photon-db-ua-250720.tar.bz2.md5"
@@ -1797,6 +2350,10 @@ index_name = "index-ug"
 normalizer = "data/normalizers/en-africa.toml"
 ram_gb = 2
 
+[country.ug.osm]
+url = "https://download.geofabrik.de/africa/uganda-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/uganda-updates/state.txt"
+
 [country.ug.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ug/photon-db-ug-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ug/photon-db-ug-250720.tar.bz2.md5"
@@ -1806,6 +2363,10 @@ name = "Uruguay"
 index_name = "index-uy"
 normalizer = "data/normalizers/es-latam.toml"
 ram_gb = 2
+
+[country.uy.osm]
+url = "https://download.geofabrik.de/south-america/uruguay-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/south-america/uruguay-updates/state.txt"
 
 [country.uy.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/uy/photon-db-uy-250720.tar.bz2"
@@ -1818,6 +2379,11 @@ index_name = "index-vc"
 normalizer = "data/normalizers/en-caribbean.toml"
 ram_gb = 2
 
+# No individual Geofabrik PBF — uses regional Central America extract + bbox filtering
+[country.vc.osm]
+url = "https://download.geofabrik.de/central-america-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/central-america-updates/state.txt"
+
 [country.vc.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/vc/photon-db-vc-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/vc/photon-db-vc-250720.tar.bz2.md5"
@@ -1827,6 +2393,10 @@ name = "Venezuela"
 index_name = "index-ve"
 normalizer = "data/normalizers/es-latam.toml"
 ram_gb = 2
+
+[country.ve.osm]
+url = "https://download.geofabrik.de/south-america/venezuela-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/south-america/venezuela-updates/state.txt"
 
 [country.ve.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ve/photon-db-ve-250720.tar.bz2"
@@ -1838,6 +2408,10 @@ index_name = "index-xk"
 normalizer = "data/normalizers/hr.toml"
 ram_gb = 2
 
+[country.xk.osm]
+url = "https://download.geofabrik.de/europe/kosovo-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/kosovo-updates/state.txt"
+
 [country.xk.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/xk/photon-db-xk-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/xk/photon-db-xk-250720.tar.bz2.md5"
@@ -1847,6 +2421,10 @@ name = "Yemen"
 index_name = "index-ye"
 normalizer = "data/normalizers/ar.toml"
 ram_gb = 2
+
+[country.ye.osm]
+url = "https://download.geofabrik.de/asia/yemen-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/yemen-updates/state.txt"
 
 [country.ye.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ye/photon-db-ye-250720.tar.bz2"
@@ -1858,6 +2436,10 @@ index_name = "index-za"
 normalizer = "data/normalizers/en-africa.toml"
 ram_gb = 2
 
+[country.za.osm]
+url = "https://download.geofabrik.de/africa/south-africa-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/south-africa-updates/state.txt"
+
 [country.za.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/za/photon-db-za-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/za/photon-db-za-250720.tar.bz2.md5"
@@ -1867,6 +2449,10 @@ name = "Zambia"
 index_name = "index-zm"
 normalizer = "data/normalizers/en-africa.toml"
 ram_gb = 2
+
+[country.zm.osm]
+url = "https://download.geofabrik.de/africa/zambia-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/zambia-updates/state.txt"
 
 [country.zm.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/zm/photon-db-zm-250720.tar.bz2"
@@ -1878,6 +2464,10 @@ index_name = "index-zw"
 normalizer = "data/normalizers/en-africa.toml"
 ram_gb = 2
 
+[country.zw.osm]
+url = "https://download.geofabrik.de/africa/zimbabwe-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/africa/zimbabwe-updates/state.txt"
+
 [country.zw.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/zw/photon-db-zw-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/zw/photon-db-zw-250720.tar.bz2.md5"
@@ -1886,7 +2476,11 @@ md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/zw/
 name = "China"
 index_name = "index-cn"
 normalizer = "data/normalizers/zh.toml"
-ram_gb = 2
+ram_gb = 8
+
+[country.cn.osm]
+url = "https://download.geofabrik.de/asia/china-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/china-updates/state.txt"
 
 [country.cn.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/cn/photon-db-cn-250720.tar.bz2"
@@ -1898,6 +2492,10 @@ index_name = "index-tw"
 normalizer = "data/normalizers/zh.toml"
 ram_gb = 2
 
+[country.tw.osm]
+url = "https://download.geofabrik.de/asia/taiwan-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/taiwan-updates/state.txt"
+
 [country.tw.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/tw/photon-db-tw-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/tw/photon-db-tw-250720.tar.bz2.md5"
@@ -1907,6 +2505,10 @@ name = "Mongolia"
 index_name = "index-mn"
 normalizer = "data/normalizers/mn.toml"
 ram_gb = 2
+
+[country.mn.osm]
+url = "https://download.geofabrik.de/asia/mongolia-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/mongolia-updates/state.txt"
 
 [country.mn.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/mn/photon-db-mn-250720.tar.bz2"
@@ -1918,6 +2520,11 @@ index_name = "index-bn"
 normalizer = "data/normalizers/ms.toml"
 ram_gb = 2
 
+# Shared Malaysia-Singapore-Brunei PBF — bbox filtering separates countries
+[country.bn.osm]
+url = "https://download.geofabrik.de/asia/malaysia-singapore-brunei-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/malaysia-singapore-brunei-updates/state.txt"
+
 [country.bn.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/bn/photon-db-bn-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/bn/photon-db-bn-250720.tar.bz2.md5"
@@ -1926,7 +2533,11 @@ md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/bn/
 name = "Indonesia"
 index_name = "index-id"
 normalizer = "data/normalizers/ms.toml"
-ram_gb = 2
+ram_gb = 4
+
+[country.id.osm]
+url = "https://download.geofabrik.de/asia/indonesia-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/indonesia-updates/state.txt"
 
 [country.id.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/id/photon-db-id-250720.tar.bz2"
@@ -1938,6 +2549,10 @@ index_name = "index-kh"
 normalizer = "data/normalizers/km.toml"
 ram_gb = 2
 
+[country.kh.osm]
+url = "https://download.geofabrik.de/asia/cambodia-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/cambodia-updates/state.txt"
+
 [country.kh.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/kh/photon-db-kh-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/kh/photon-db-kh-250720.tar.bz2.md5"
@@ -1947,6 +2562,10 @@ name = "Laos"
 index_name = "index-la"
 normalizer = "data/normalizers/lo.toml"
 ram_gb = 2
+
+[country.la.osm]
+url = "https://download.geofabrik.de/asia/laos-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/laos-updates/state.txt"
 
 [country.la.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/la/photon-db-la-250720.tar.bz2"
@@ -1958,6 +2577,10 @@ index_name = "index-mm"
 normalizer = "data/normalizers/my.toml"
 ram_gb = 2
 
+[country.mm.osm]
+url = "https://download.geofabrik.de/asia/myanmar-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/myanmar-updates/state.txt"
+
 [country.mm.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/mm/photon-db-mm-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/mm/photon-db-mm-250720.tar.bz2.md5"
@@ -1967,6 +2590,11 @@ name = "Malaysia"
 index_name = "index-my"
 normalizer = "data/normalizers/ms.toml"
 ram_gb = 2
+
+# Shared Malaysia-Singapore-Brunei PBF — bbox filtering separates countries
+[country.my.osm]
+url = "https://download.geofabrik.de/asia/malaysia-singapore-brunei-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/malaysia-singapore-brunei-updates/state.txt"
 
 [country.my.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/my/photon-db-my-250720.tar.bz2"
@@ -1978,6 +2606,10 @@ index_name = "index-ph"
 normalizer = "data/normalizers/tl.toml"
 ram_gb = 2
 
+[country.ph.osm]
+url = "https://download.geofabrik.de/asia/philippines-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/philippines-updates/state.txt"
+
 [country.ph.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ph/photon-db-ph-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/ph/photon-db-ph-250720.tar.bz2.md5"
@@ -1987,6 +2619,11 @@ name = "Singapore"
 index_name = "index-sg"
 normalizer = "data/normalizers/ms.toml"
 ram_gb = 2
+
+# Shared Malaysia-Singapore-Brunei PBF — bbox filtering separates countries
+[country.sg.osm]
+url = "https://download.geofabrik.de/asia/malaysia-singapore-brunei-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/malaysia-singapore-brunei-updates/state.txt"
 
 [country.sg.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/sg/photon-db-sg-250720.tar.bz2"
@@ -1998,6 +2635,10 @@ index_name = "index-th"
 normalizer = "data/normalizers/th.toml"
 ram_gb = 2
 
+[country.th.osm]
+url = "https://download.geofabrik.de/asia/thailand-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/thailand-updates/state.txt"
+
 [country.th.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/th/photon-db-th-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/th/photon-db-th-250720.tar.bz2.md5"
@@ -2007,6 +2648,10 @@ name = "Timor-Leste"
 index_name = "index-tl"
 normalizer = "data/normalizers/tl.toml"
 ram_gb = 2
+
+[country.tl.osm]
+url = "https://download.geofabrik.de/asia/east-timor-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/east-timor-updates/state.txt"
 
 [country.tl.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/tl/photon-db-tl-250720.tar.bz2"
@@ -2018,6 +2663,10 @@ index_name = "index-vn"
 normalizer = "data/normalizers/vi.toml"
 ram_gb = 2
 
+[country.vn.osm]
+url = "https://download.geofabrik.de/asia/vietnam-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/asia/vietnam-updates/state.txt"
+
 [country.vn.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/vn/photon-db-vn-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/vn/photon-db-vn-250720.tar.bz2.md5"
@@ -2027,6 +2676,10 @@ name = "Cook Islands"
 index_name = "index-ck"
 normalizer = "data/normalizers/en-oceania.toml"
 ram_gb = 2
+
+[country.ck.osm]
+url = "https://download.geofabrik.de/australia-oceania/cook-islands-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/australia-oceania/cook-islands-updates/state.txt"
 
 [country.ck.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ck/photon-db-ck-250720.tar.bz2"
@@ -2038,6 +2691,10 @@ index_name = "index-fj"
 normalizer = "data/normalizers/en-oceania.toml"
 ram_gb = 2
 
+[country.fj.osm]
+url = "https://download.geofabrik.de/australia-oceania/fiji-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/australia-oceania/fiji-updates/state.txt"
+
 [country.fj.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/fj/photon-db-fj-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/fj/photon-db-fj-250720.tar.bz2.md5"
@@ -2047,6 +2704,10 @@ name = "Micronesia"
 index_name = "index-fm"
 normalizer = "data/normalizers/en-oceania.toml"
 ram_gb = 2
+
+[country.fm.osm]
+url = "https://download.geofabrik.de/australia-oceania/micronesia-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/australia-oceania/micronesia-updates/state.txt"
 
 [country.fm.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/fm/photon-db-fm-250720.tar.bz2"
@@ -2058,6 +2719,10 @@ name = "Marshall Islands"
 index_name = "index-mh"
 normalizer = "data/normalizers/en-oceania.toml"
 ram_gb = 2
+
+[country.mh.osm]
+url = "https://download.geofabrik.de/australia-oceania/marshall-islands-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/australia-oceania/marshall-islands-updates/state.txt"
 
 [country.mh.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/mh/photon-db-mh-250720.tar.bz2"
@@ -2099,6 +2764,10 @@ index_name = "index-pg"
 normalizer = "data/normalizers/en-oceania.toml"
 ram_gb = 2
 
+[country.pg.osm]
+url = "https://download.geofabrik.de/australia-oceania/papua-new-guinea-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/australia-oceania/papua-new-guinea-updates/state.txt"
+
 [country.pg.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/pg/photon-db-pg-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/pg/photon-db-pg-250720.tar.bz2.md5"
@@ -2119,6 +2788,10 @@ index_name = "index-sb"
 normalizer = "data/normalizers/en-oceania.toml"
 ram_gb = 2
 
+[country.sb.osm]
+url = "https://download.geofabrik.de/australia-oceania/solomon-islands-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/australia-oceania/solomon-islands-updates/state.txt"
+
 [country.sb.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/sb/photon-db-sb-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/sb/photon-db-sb-250720.tar.bz2.md5"
@@ -2128,6 +2801,10 @@ name = "Tonga"
 index_name = "index-to"
 normalizer = "data/normalizers/en-oceania.toml"
 ram_gb = 2
+
+[country.to.osm]
+url = "https://download.geofabrik.de/australia-oceania/tonga-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/australia-oceania/tonga-updates/state.txt"
 
 [country.to.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/to/photon-db-to-250720.tar.bz2"
@@ -2149,6 +2826,10 @@ index_name = "index-vu"
 normalizer = "data/normalizers/en-oceania.toml"
 ram_gb = 2
 
+[country.vu.osm]
+url = "https://download.geofabrik.de/australia-oceania/vanuatu-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/australia-oceania/vanuatu-updates/state.txt"
+
 [country.vu.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/vu/photon-db-vu-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/vu/photon-db-vu-250720.tar.bz2.md5"
@@ -2158,6 +2839,10 @@ name = "Samoa"
 index_name = "index-ws"
 normalizer = "data/normalizers/en-oceania.toml"
 ram_gb = 2
+
+[country.ws.osm]
+url = "https://download.geofabrik.de/australia-oceania/samoa-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/australia-oceania/samoa-updates/state.txt"
 
 [country.ws.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/ws/photon-db-ws-250720.tar.bz2"

@@ -194,6 +194,14 @@ impl HeimdallIndex {
         distance: u8,
         context: &GeoQuery,
     ) -> Result<Vec<GeoResult>, HeimdallError> {
+        // Guard: the fst crate's Levenshtein DFA builder can panic on short
+        // multi-byte UTF-8 inputs (e.g. 3-char Cyrillic = 6 bytes, distance 1).
+        // Require enough bytes so the DFA stays within its internal limits.
+        let min_bytes = (distance as usize + 1) * 4;
+        if query.len() < min_bytes {
+            return Ok(vec![]);
+        }
+
         let lev = Levenshtein::new(query, distance as u32)
             .map_err(|e| HeimdallError::Build(e.to_string()))?;
 
