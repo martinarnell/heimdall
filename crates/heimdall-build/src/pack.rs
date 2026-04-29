@@ -178,7 +178,7 @@ pub fn pack(
                 let population = if populations.is_null(i) { None } else { Some(populations.value(i)) };
                 let is_relation = osm_types.as_ref().map_or(false, |t| t.value(i) == 2);
 
-                let importance = compute_importance_inline(place_type, population);
+                let importance = compute_importance_inline(place_type, population, has_wikidata);
 
                 let mut flags: u8 = 0;
                 if population.is_some() { flags |= 0x01; }
@@ -446,7 +446,10 @@ fn build_fst_from_disk(tsv_path: &Path, fst_path: &Path) -> Result<usize> {
 /// Scale: 0-65535 (u16).
 /// - Population component: log10(pop) * 4000 (max ~29K for 10M+ cities)
 /// - Place type base: City=10000, Town=6000, Village=2000, POI=500
-fn compute_importance_inline(place_type: PlaceType, population: Option<u32>) -> u16 {
+/// - Wikidata bonus: +8000 (notable enough to have a Wikipedia article).
+///   Lifts famous-but-tiny places (Gamla stan, Skansen, Drottningholm) above
+///   anonymous suburbs/villages of similar size.
+fn compute_importance_inline(place_type: PlaceType, population: Option<u32>, has_wikidata: bool) -> u16 {
     let mut score: u32 = 0;
     if let Some(pop) = population {
         if pop > 0 {
@@ -469,6 +472,12 @@ fn compute_importance_inline(place_type: PlaceType, population: Option<u32>) -> 
         PlaceType::Country => 8000,
         _ => 300,
     };
+    // Wikidata = notable. A place with a Wikidata entry is at least
+    // "notable enough to have a Wikipedia article." Boost it ahead of
+    // similar-typed places without a Wikidata tag.
+    if has_wikidata {
+        score += 8000;
+    }
     score.min(65535) as u16
 }
 
