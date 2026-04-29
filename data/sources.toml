@@ -112,10 +112,10 @@ index_name = "index-gb"
 normalizer = "data/normalizers/en-gb.toml"
 ram_gb = 4
 
-# GB — OSM PBF extraction + Photon for enrichment
+# GB — uses United Kingdom PBF (includes Northern Ireland, not just Great Britain)
 [country.gb.osm]
-url = "https://download.geofabrik.de/europe/great-britain-latest.osm.pbf"
-state_url = "https://download.geofabrik.de/europe/great-britain-updates/state.txt"
+url = "https://download.geofabrik.de/europe/united-kingdom-latest.osm.pbf"
+state_url = "https://download.geofabrik.de/europe/united-kingdom-updates/state.txt"
 
 [country.gb.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/gb/photon-db-gb-250720.tar.bz2"

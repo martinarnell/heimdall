@@ -247,6 +247,14 @@ pub fn pack(
                             if !part.is_empty() && part != primary_lower {
                                 write!(exact_writer, "{}\t{}\t{}\t{}\n", part, id, importance, pop_flag)?;
                                 exact_count += 1;
+                                // Also write normalized (diacritics-stripped) variants of each split part
+                                // so that e.g. "san sebastián" also generates "san sebastian"
+                                for norm_part in normalizer.normalize(part) {
+                                    if !norm_part.is_empty() && norm_part != part {
+                                        write!(exact_writer, "{}\t{}\t{}\t{}\n", norm_part, id, importance, pop_flag)?;
+                                        exact_count += 1;
+                                    }
+                                }
                             }
                         }
                     }
