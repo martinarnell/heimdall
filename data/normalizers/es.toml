@@ -106,5 +106,26 @@ words = [
 "jaen" = "jaén"
 "la coruna" = "a coruña"
 "corunna" = "a coruña"
+# Castilian alternate spellings (pre-autonomy official names)
+"gerona" = "girona"
+"lerida" = "lleida"
+"lérida" = "lleida"
+"orense" = "ourense"
+"la coruña" = "a coruña"
+"san sebastian" = "donostia"
+"vitoria" = "vitoria-gasteiz"
+"pamplona" = "iruña"
+"iruña" = "iruña"
+# Basque alternate names
+"bilbo" = "bilbao"
+"donostia" = "donostia"
+"gasteiz" = "vitoria-gasteiz"
+# Catalan cities — Castilian alternates
+"gerunda" = "girona"
+"lerida" = "lleida"
+"hospitalet" = "l'hospitalet de llobregat"
+# Canary Islands
+"las palmas" = "las palmas de gran canaria"
+"santa cruz" = "santa cruz de tenerife"
 # Andorra
 "andorra la vella" = "andorra la vella"

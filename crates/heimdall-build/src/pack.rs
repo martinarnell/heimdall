@@ -207,14 +207,18 @@ pub fn pack(
                 let old_strs: Vec<&str> = if old_names_arr.is_null(i) { vec![] } else {
                     old_names_arr.value(i).split(';').filter(|s| !s.is_empty() && s.len() < 255).collect()
                 };
-                let intl_strs: Vec<&str> = if name_intl_arr.is_null(i) { vec![] } else {
-                    name_intl_arr.value(i).split(';').filter(|s| !s.is_empty() && s.len() < 255).collect()
+                let intl_names: Vec<String> = if name_intl_arr.is_null(i) { vec![] } else {
+                    name_intl_arr.value(i).split(';')
+                        .filter(|s| !s.is_empty())
+                        .filter_map(|s| s.split_once('=').map(|(_, name)| name.to_string()))
+                        .filter(|s| !s.is_empty() && s.len() < 255)
+                        .collect()
                 };
 
                 let mut all_alts: Vec<&str> = Vec::new();
                 all_alts.extend(&alt_strs);
                 all_alts.extend(&old_strs);
-                all_alts.extend(&intl_strs);
+                all_alts.extend(intl_names.iter().map(|s| s.as_str()));
 
                 let id = record_builder.add(record, name, &all_alts);
                 records_added += 1;
@@ -234,6 +238,27 @@ pub fn pack(
                 let primary_lower = name.to_lowercase();
                 write!(exact_writer, "{}\t{}\t{}\t{}\n", primary_lower, id, importance, pop_flag)?;
                 exact_count += 1;
+
+                // Split compound bilingual names (e.g. "Casteddu/Cagliari", "Bolzano - Bozen")
+                for sep in [" / ", " - ", "/"] {
+                    if primary_lower.contains(sep) {
+                        for part in primary_lower.split(sep) {
+                            let part = part.trim();
+                            if !part.is_empty() && part != primary_lower {
+                                write!(exact_writer, "{}\t{}\t{}\t{}\n", part, id, importance, pop_flag)?;
+                                exact_count += 1;
+                                // Also write normalized (diacritics-stripped) variants of each split part
+                                // so that e.g. "san sebastián" also generates "san sebastian"
+                                for norm_part in normalizer.normalize(part) {
+                                    if !norm_part.is_empty() && norm_part != part {
+                                        write!(exact_writer, "{}\t{}\t{}\t{}\n", norm_part, id, importance, pop_flag)?;
+                                        exact_count += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
 
                 for alt in &all_alts {
                     let key = alt.to_lowercase();
@@ -413,27 +438,36 @@ fn build_fst_from_disk(tsv_path: &Path, fst_path: &Path) -> Result<usize> {
 }
 
 /// Compute importance from individual fields (avoids needing full RawPlace).
+///
+/// Scoring is designed to create large gaps between place types so that
+/// cross-country name collisions resolve correctly (e.g. "Pamplona" Spain
+/// 200K population should always outrank a Mexican village of the same name).
+///
+/// Scale: 0-65535 (u16).
+/// - Population component: log10(pop) * 4000 (max ~29K for 10M+ cities)
+/// - Place type base: City=10000, Town=6000, Village=2000, POI=500
 fn compute_importance_inline(place_type: PlaceType, population: Option<u32>) -> u16 {
     let mut score: u32 = 0;
     if let Some(pop) = population {
         if pop > 0 {
-            score += ((pop as f64).log10() * 3000.0) as u32;
+            score += ((pop as f64).log10() * 4000.0) as u32;
         }
     }
     score += match place_type {
-        PlaceType::City => 2000,
-        PlaceType::Town => 1500,
-        PlaceType::Village => 1000,
-        PlaceType::Suburb | PlaceType::Quarter => 900,
-        PlaceType::Hamlet | PlaceType::Farm => 500,
-        PlaceType::Island => 800,
-        PlaceType::Airport | PlaceType::Station => 700,
-        PlaceType::Lake | PlaceType::River => 600,
-        PlaceType::Mountain | PlaceType::Forest => 500,
-        PlaceType::County => 300,
-        PlaceType::State => 200,
-        PlaceType::Country => 100,
-        _ => 200,
+        PlaceType::City => 10000,
+        PlaceType::Town => 6000,
+        PlaceType::Village => 2000,
+        PlaceType::Suburb | PlaceType::Quarter => 1500,
+        PlaceType::Hamlet | PlaceType::Farm => 800,
+        PlaceType::Island => 3000,
+        PlaceType::Airport => 1000,
+        PlaceType::Station => 500,
+        PlaceType::Lake | PlaceType::River => 1000,
+        PlaceType::Mountain | PlaceType::Forest => 800,
+        PlaceType::County => 4000,
+        PlaceType::State => 5000,
+        PlaceType::Country => 8000,
+        _ => 300,
     };
     score.min(65535) as u16
 }

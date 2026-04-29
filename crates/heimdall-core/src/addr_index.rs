@@ -465,6 +465,7 @@ impl AddressIndex {
 /// Returns true for patterns matching: A[A]9[9A] 9AA
 pub fn is_uk_postcode(s: &str) -> bool {
     let s = s.trim().to_uppercase();
+    if !s.is_ascii() { return false; }
     let clean: String = s.chars().filter(|c| !c.is_whitespace()).collect();
     if clean.len() < 5 || clean.len() > 7 { return false; }
 

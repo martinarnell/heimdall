@@ -103,12 +103,8 @@ pub fn enrich(parquet_path: &Path, output_dir: &Path) -> Result<EnrichResult> {
             // Collect all places for assignment
             places.push((osm_id, lat, lon));
 
-            // Accept admin regions in the supported bbox (Nordic + Germany + UK + US)
-            let is_in_supported = (lat >= 47.0 && lat <= 81.0 && lon >= 4.0 && lon <= 32.0)   // Nordic + Germany
-                || (lat >= 49.8 && lat <= 60.9 && lon >= -8.7 && lon <= 1.8)                  // UK
-                || (lat >= 17.0 && lat <= 72.0 && lon >= -180.0 && lon <= -64.0);             // US (CONUS + AK + HI + PR)
-
-            if !admin_levels.is_null(i) && is_in_supported {
+            // Accept admin regions from any country — is_valid_admin_for_country() handles cross-border filtering
+            if !admin_levels.is_null(i) {
                 let level = admin_levels.value(i);
                 let population = if populations.is_null(i) { None } else { Some(populations.value(i)) };
                 let has_wikidata = !wikidatas.is_null(i);
@@ -124,8 +120,12 @@ pub fn enrich(parquet_path: &Path, output_dir: &Path) -> Result<EnrichResult> {
                 };
 
                 match level {
-                    3..=4 => counties.push(region),      // län (state/county/region)
-                    5..=7 => municipalities.push(region), // kommun (municipality)
+                    // admin1: state/region/province/federal subject
+                    // Level 3 = federal districts (RU), level 4 = states/regions (universal)
+                    3..=4 => counties.push(region),
+                    // admin2: district/county/municipality
+                    // Level 5-6 = districts/provinces, level 7-8 = municipalities/communes
+                    5..=8 => municipalities.push(region),
                     _ => {}
                 }
             }
@@ -544,7 +544,7 @@ fn is_valid_admin_for_country(name: &str, admin_level: u8, dir_name: &str) -> bo
             // Danish regions: "Region Hovedstaden", "Region Sjælland", etc.
             3..=4 => name.starts_with("Region "),
             // Danish municipalities: "Københavns Kommune", "Bornholms Regionskommune"
-            5..=7 => name.ends_with(" Kommune") || name.ends_with("kommune"),
+            5..=8 => name.ends_with(" Kommune") || name.ends_with("kommune"),
             _ => false,
         }
     } else if dir_name.contains("sweden") || dir_name.contains("-se") {
@@ -552,7 +552,7 @@ fn is_valid_admin_for_country(name: &str, admin_level: u8, dir_name: &str) -> bo
             // Swedish counties: "Skåne län", "Stockholms län"
             3..=4 => name.ends_with(" län"),
             // Swedish municipalities: "Malmö kommun", "Stockholms kommun"
-            5..=7 => name.ends_with(" kommun"),
+            5..=8 => name.ends_with(" kommun"),
             _ => false,
         }
     } else if dir_name.contains("finland") || dir_name.contains("-fi") {
@@ -565,7 +565,7 @@ fn is_valid_admin_for_country(name: &str, admin_level: u8, dir_name: &str) -> bo
             }
             // Finnish municipalities: "Helsingin kaupunki", "Tampereen kaupunki", "Espoon kaupunki"
             // or just the name itself without suffix in many cases
-            5..=7 => {
+            5..=8 => {
                 // Reject Swedish/Norwegian municipality names
                 !name.ends_with(" kommun") && !name.ends_with(" kommune")
             }
@@ -608,8 +608,8 @@ fn is_valid_admin_for_country(name: &str, admin_level: u8, dir_name: &str) -> bo
                     || name == "Česko";                          // Czechia
                 !is_foreign
             }
-            // Landkreis/Stadtkreis (districts): admin_level 5-7
-            5..=7 => {
+            // Landkreis/Stadtkreis/Gemeinde (districts + municipalities): admin_level 5-8
+            5..=8 => {
                 // German Landkreis names typically end with specific patterns
                 // but city-states (Berlin, Hamburg, Bremen) are plain names.
                 // Reject obvious foreign admin names.
@@ -637,7 +637,7 @@ fn is_valid_admin_for_country(name: &str, admin_level: u8, dir_name: &str) -> bo
                     || name.starts_with("Département ");
                 !is_foreign
             }
-            5..=7 => {
+            5..=8 => {
                 let is_foreign = name.ends_with(" kommun")
                     || name.ends_with(" Kommune")
                     || name.ends_with(" län")
@@ -665,6 +665,30 @@ fn is_valid_admin_for_country(name: &str, admin_level: u8, dir_name: &str) -> bo
                 // US counties and cities — reject Mexican/Canadian patterns
                 let is_foreign = name.starts_with("Municipio ")
                     || name.starts_with("Provincia ");
+                !is_foreign
+            }
+            _ => false,
+        }
+    } else if dir_name.contains("russia") || dir_name.contains("-ru") {
+        // Russian admin hierarchy (from OSM):
+        //   admin_level 3 = Federal district (8 macro-regions, e.g. "Приволжский федеральный округ")
+        //   admin_level 4 = Federal subject (85 oblasts/republics/krais/autonomous okrugs/federal cities)
+        //   admin_level 5 = Administrative district within a subject
+        //   admin_level 6 = City/town district
+        //   admin_level 8 = Municipality
+        //
+        // We want admin_level 4 as admin1 (federal subject) — not admin_level 3 (federal district).
+        // Federal districts are macro-regions grouping multiple subjects; they're not useful as admin1.
+        match admin_level {
+            // Federal districts: reject (only 8, too coarse for admin1)
+            3 => false,
+            // Federal subjects (oblasts, republics, krais, etc.): accept as admin1
+            4 => true,
+            // Districts and municipalities: accept, reject obvious foreign patterns
+            5..=8 => {
+                let is_foreign = name.ends_with(" län")       // Swedish county
+                    || name.ends_with(" kommun")              // Swedish municipality
+                    || name.ends_with(" maakunta");           // Finnish region
                 !is_foreign
             }
             _ => false,
