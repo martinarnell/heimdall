@@ -2297,6 +2297,27 @@ fn build_global_fst(data_dir: &Path, output_dir: &Path) -> Result<()> {
 
     println!("Building global FST from {} country indices...", index_dirs.len());
 
+    // Decode a posting list at `value` from a sidecar blob.
+    // Sidecar layout: at every offset, [u16 count][u32 rec_id]*count.
+    // Returns rec_ids in importance-desc order. When `sidecar` is `None`
+    // (legacy v2 per-country index), `value` is itself a record_id.
+    fn decode_postings(sidecar: Option<&[u8]>, value: u64) -> Vec<u32> {
+        let bytes = match sidecar {
+            Some(b) => b,
+            None => return vec![value as u32],
+        };
+        let off = value as usize;
+        if off + 2 > bytes.len() { return vec![]; }
+        let count = u16::from_le_bytes([bytes[off], bytes[off + 1]]) as usize;
+        let mut out = Vec::with_capacity(count);
+        for i in 0..count {
+            let p = off + 2 + i * 4;
+            if p + 4 > bytes.len() { break; }
+            out.push(u32::from_le_bytes([bytes[p], bytes[p + 1], bytes[p + 2], bytes[p + 3]]));
+        }
+        out
+    }
+
     for (country_id, dir) in index_dirs.iter().enumerate() {
         let cc = dir.file_name().unwrap().to_str().unwrap()
             .strip_prefix("index-").unwrap_or("??");
@@ -2304,6 +2325,8 @@ fn build_global_fst(data_dir: &Path, output_dir: &Path) -> Result<()> {
         let records_path = dir.join("records.bin");
         let fst_exact_path = dir.join("fst_exact.fst");
         let fst_phonetic_path = dir.join("fst_phonetic.fst");
+        let record_lists_exact_path = dir.join("record_lists.bin");
+        let record_lists_phonetic_path = dir.join("record_lists_phonetic.bin");
 
         if !records_path.exists() || !fst_exact_path.exists() {
             println!("  Skipping {} (missing files)", cc.to_uppercase());
@@ -2313,34 +2336,55 @@ fn build_global_fst(data_dir: &Path, output_dir: &Path) -> Result<()> {
         let records = RecordStore::open(&records_path)
             .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        // Read exact FST
+        // Read exact FST and (optionally) the posting-list sidecar so we
+        // pick up same-name alternates that share an FST key.
         let fst_data = compressed_io::read_maybe_compressed(&fst_exact_path)?;
         let fst_exact = Map::new(fst_data)
             .map_err(|e| anyhow::anyhow!("FST: {}", e))?;
+        let exact_sidecar: Option<Vec<u8>> = if record_lists_exact_path.exists()
+            && std::fs::metadata(&record_lists_exact_path).map(|m| m.len()).unwrap_or(0) > 0
+        {
+            Some(compressed_io::read_maybe_compressed(&record_lists_exact_path)?)
+        } else {
+            None
+        };
 
         let mut exact_count = 0u64;
         let mut stream = fst_exact.into_stream();
         while let Some((key, value)) = stream.next() {
-            let record_id = value as u32;
-            if let Ok(record) = records.get(record_id) {
-                let name = std::str::from_utf8(key).unwrap_or("").to_owned();
-                builder.add_exact(name, country_id as u16, record_id, record.importance);
-                exact_count += 1;
+            let name_bytes = key.to_owned();
+            let postings = decode_postings(exact_sidecar.as_deref(), value);
+            for record_id in postings {
+                if let Ok(record) = records.get(record_id) {
+                    let name = std::str::from_utf8(&name_bytes).unwrap_or("").to_owned();
+                    builder.add_exact(name, country_id as u16, record_id, record.importance);
+                    exact_count += 1;
+                }
             }
         }
 
-        // Read phonetic FST
+        // Read phonetic FST + sidecar
         if fst_phonetic_path.exists() {
             let fst_data = compressed_io::read_maybe_compressed(&fst_phonetic_path)?;
             let fst_phonetic = Map::new(fst_data)
                 .map_err(|e| anyhow::anyhow!("FST: {}", e))?;
+            let phonetic_sidecar: Option<Vec<u8>> = if record_lists_phonetic_path.exists()
+                && std::fs::metadata(&record_lists_phonetic_path).map(|m| m.len()).unwrap_or(0) > 0
+            {
+                Some(compressed_io::read_maybe_compressed(&record_lists_phonetic_path)?)
+            } else {
+                None
+            };
 
             let mut stream = fst_phonetic.into_stream();
             while let Some((key, value)) = stream.next() {
-                let record_id = value as u32;
-                if let Ok(record) = records.get(record_id) {
-                    let name = std::str::from_utf8(key).unwrap_or("").to_owned();
-                    builder.add_phonetic(name, country_id as u16, record_id, record.importance);
+                let name_bytes = key.to_owned();
+                let postings = decode_postings(phonetic_sidecar.as_deref(), value);
+                for record_id in postings {
+                    if let Ok(record) = records.get(record_id) {
+                        let name = std::str::from_utf8(&name_bytes).unwrap_or("").to_owned();
+                        builder.add_phonetic(name, country_id as u16, record_id, record.importance);
+                    }
                 }
             }
         }

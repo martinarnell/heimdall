@@ -512,6 +512,7 @@ fn write_admin_bin(
                 lon: (state.lon * 1e6) as i32,
             },
             place_type: heimdall_core::types::PlaceType::State,
+            population: 0, // TIGER doesn't carry state population in this schema
         });
     }
 
@@ -537,6 +538,7 @@ fn write_admin_bin(
                 lon: (county.lon * 1e6) as i32,
             },
             place_type: heimdall_core::types::PlaceType::County,
+            population: 0, // TIGER doesn't carry county population in this schema
         });
     }
 

@@ -338,6 +338,18 @@ impl Normalizer {
             }
         }
 
+        // Step 8: universal ASCII fallback. The config diacritic map
+        // and the Nordic table only cover their language family — but
+        // OSM data carries borrowings (Stockholm "Grand Hôtel", "Café
+        // Opera", "Restaurant Élysée") whose users still type the
+        // ASCII form. Generate a fully-decomposed-and-stripped variant
+        // alongside, so the FST has a key for "grand hotel" pointing at
+        // the Hôtel record.
+        let universal = to_ascii_universal(&base);
+        if universal != base && !candidates.contains(&universal) {
+            candidates.push(universal);
+        }
+
         candidates.into_iter().filter(|s| !s.is_empty()).collect()
     }
 
@@ -544,6 +556,33 @@ pub fn to_ascii_nordic(s: &str) -> String {
             'Å' | 'Ä' | 'Æ' => 'A',
             'Ö' | 'Ø' => 'O',
             c => c,
+        })
+        .collect()
+}
+
+/// Strip ALL Latin diacritics (å→a, ô→o, é→e, ç→c, ü→u, ñ→n …) — broader
+/// than `to_ascii_nordic`. Lets foreign-character-bearing names like
+/// "Grand Hôtel" → "grand hotel" land in the FST under the ASCII-only key
+/// users actually type. Uses Unicode NFD decomposition + drop combining
+/// marks, with a few extra rules for non-decomposable characters.
+pub fn to_ascii_universal(s: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    let decomposed: String = s.nfd().collect();
+    decomposed.chars()
+        .filter_map(|c| match c {
+            // Skip combining marks (the "˝", "´", "¸" parts of decomposed
+            // characters)
+            c if unicode_normalization::char::is_combining_mark(c) => None,
+            // Special cases that don't decompose: ð/Ð/þ/Þ/æ/œ/ø/ß/etc.
+            'æ' | 'Æ' => Some('a'),
+            'œ' | 'Œ' => Some('o'),
+            'ø' | 'Ø' => Some('o'),
+            'ß' => Some('s'),
+            'ð' | 'Ð' => Some('d'),
+            'þ' | 'Þ' => Some('t'),
+            'ł' | 'Ł' => Some('l'),
+            'đ' | 'Đ' => Some('d'),
+            c => Some(c),
         })
         .collect()
 }

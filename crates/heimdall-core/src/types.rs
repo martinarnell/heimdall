@@ -253,6 +253,14 @@ pub struct AdminEntry {
     pub parent_id: Option<u16>,
     pub coord: Coord,
     pub place_type: PlaceType,
+    /// Population of the admin entity (kommun/län), if tagged in OSM.
+    /// Used by pack.rs as a centrality signal — places inside a populous
+    /// parent kommun get a small importance bonus so a hotel in Stockholm
+    /// (kommun pop 970K) outranks a same-name hotel in Jönköping (141K).
+    /// Field is bincode-appended at the end so admin.bin v2 readers see
+    /// it but v1 readers (older binaries) decode as 0 if absent.
+    #[serde(default)]
+    pub population: u32,
 }
 
 // ---------------------------------------------------------------------------

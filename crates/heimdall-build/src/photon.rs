@@ -897,6 +897,7 @@ pub fn import(input: &Path, output: &Path) -> Result<PhotonImportResult> {
             parent_id: None,
             coord: Coord::new(*lat, *lon),
             place_type: PlaceType::State,
+            population: 0, // Photon extracts don't carry admin population
         });
     }
 
@@ -915,6 +916,7 @@ pub fn import(input: &Path, output: &Path) -> Result<PhotonImportResult> {
             parent_id: Some(*parent_state_id),
             coord: Coord::new(*lat, *lon),
             place_type: PlaceType::County,
+            population: 0, // Photon extracts don't carry admin population
         });
     }
 

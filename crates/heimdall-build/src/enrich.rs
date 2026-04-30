@@ -36,7 +36,7 @@ struct AdminRegion {
     lat: f64,
     lon: f64,
     _admin_level: u8,
-    _population: Option<u32>,
+    population: Option<u32>,
     _wikidata: bool,
 }
 
@@ -115,7 +115,7 @@ pub fn enrich(parquet_path: &Path, output_dir: &Path) -> Result<EnrichResult> {
                     lat,
                     lon,
                     _admin_level: level,
-                    _population: population,
+                    population,
                     _wikidata: has_wikidata,
                 };
 
@@ -201,6 +201,7 @@ pub fn enrich(parquet_path: &Path, output_dir: &Path) -> Result<EnrichResult> {
             parent_id: None, // Counties have no parent (country level is implicit)
             coord: Coord::new(county.lat, county.lon),
             place_type: PlaceType::State,
+            population: county.population.unwrap_or(0),
         });
     }
 
@@ -227,6 +228,7 @@ pub fn enrich(parquet_path: &Path, output_dir: &Path) -> Result<EnrichResult> {
             parent_id: Some(parent_id),
             coord: Coord::new(muni.lat, muni.lon),
             place_type: PlaceType::County,
+            population: muni.population.unwrap_or(0),
         });
     }
 

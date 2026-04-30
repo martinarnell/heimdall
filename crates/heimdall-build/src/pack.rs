@@ -53,6 +53,32 @@ pub fn pack(
         HashMap::new()
     };
 
+    // Load admin entries to build a (admin_id → population) lookup. Used
+    // as a centrality signal in compute_importance_inline — a Locality
+    // inside Stockholms kommun (970K pop) outranks the same-name Locality
+    // in a small kommun.
+    let admin_bin_path = output_dir.join("admin.bin");
+    let admin_population: HashMap<u16, u32> = if admin_bin_path.exists() {
+        // admin.bin is written by enrich.rs as postcard, then zstd-
+        // compressed in place. Match the runtime reader in index.rs:
+        // decompress first, then postcard with bincode fallback.
+        let bytes = heimdall_core::compressed_io::read_maybe_compressed(&admin_bin_path)
+            .unwrap_or_default();
+        let entries: Vec<heimdall_core::types::AdminEntry> = postcard::from_bytes(&bytes)
+            .or_else(|_| bincode::deserialize::<Vec<heimdall_core::types::AdminEntry>>(&bytes))
+            .unwrap_or_default();
+        entries.into_iter()
+            .filter(|e| e.population > 0)
+            .map(|e| (e.id, e.population))
+            .collect()
+    } else {
+        HashMap::new()
+    };
+    if !admin_population.is_empty() {
+        info!("Loaded admin population for {} admin entries (centrality signal)",
+            admin_population.len());
+    }
+
     // Load normalizer config — try sv.toml in output dir first, then detect country
     let mut geohash_builder = GeohashIndexBuilder::new();
 
@@ -190,8 +216,19 @@ pub fn pack(
                         .filter(|s| !s.trim().is_empty())
                         .count()
                 };
+
+                let (admin1_id, admin2_id) = admin_map.get(&osm_id).copied().unwrap_or((0, 0));
+                // Centrality: how populous is this place's parent admin?
+                // Use the larger of admin1 (län) and admin2 (kommun) — kommun
+                // is finer-grained and more relevant. A Locality in
+                // Stockholms kommun (970K) outranks one in a 5K rural kommun.
+                let parent_population = std::cmp::max(
+                    admin_population.get(&admin1_id).copied().unwrap_or(0),
+                    admin_population.get(&admin2_id).copied().unwrap_or(0),
+                );
                 let importance = compute_importance_inline(
                     place_type, population, has_wikidata, intl_translation_count,
+                    parent_population,
                 );
 
                 let mut flags: u8 = 0;
@@ -199,8 +236,6 @@ pub fn pack(
                 if !alt_names_arr.is_null(i) && !alt_names_arr.value(i).is_empty() { flags |= 0x02; }
                 if !old_names_arr.is_null(i) && !old_names_arr.value(i).is_empty() { flags |= 0x04; }
                 if is_relation { flags |= 0x08; }
-
-                let (admin1_id, admin2_id) = admin_map.get(&osm_id).copied().unwrap_or((0, 0));
                 let coord = Coord::new(lat, lon);
 
                 let record = PlaceRecord {
@@ -348,17 +383,30 @@ pub fn pack(
     let fst_exact_path = output_dir.join("fst_exact.fst");
     let fst_phonetic_path = output_dir.join("fst_phonetic.fst");
     let fst_ngram_path = output_dir.join("fst_ngram.fst");
+    // Sidecar posting-list files. Hold up to N=8 record_ids per key
+    // (sorted by importance desc) so same-name alternates can survive
+    // FST collision resolution. The FST value becomes the byte offset
+    // into the sidecar; if the sidecar is missing, the FST value is
+    // treated as a record_id directly (backwards compatibility).
+    let record_lists_exact_path = output_dir.join("record_lists.bin");
+    let record_lists_phonetic_path = output_dir.join("record_lists_phonetic.bin");
 
     let (res_exact, (res_phonetic, res_ngram)) = rayon::join(
         || -> Result<usize> {
-            let bytes = build_fst_from_disk(&exact_tsv, &fst_exact_path)?;
+            let bytes = build_fst_from_disk(&exact_tsv, &fst_exact_path, Some(&record_lists_exact_path))?;
             heimdall_core::compressed_io::compress_file(&fst_exact_path, 19)?;
+            if record_lists_exact_path.exists() {
+                heimdall_core::compressed_io::compress_file(&record_lists_exact_path, 19)?;
+            }
             Ok(bytes)
         },
         || rayon::join(
             || -> Result<usize> {
-                let bytes = build_fst_from_disk(&phonetic_tsv, &fst_phonetic_path)?;
+                let bytes = build_fst_from_disk(&phonetic_tsv, &fst_phonetic_path, Some(&record_lists_phonetic_path))?;
                 heimdall_core::compressed_io::compress_file(&fst_phonetic_path, 19)?;
+                if record_lists_phonetic_path.exists() {
+                    heimdall_core::compressed_io::compress_file(&record_lists_phonetic_path, 19)?;
+                }
                 Ok(bytes)
             },
             || -> Result<usize> {
@@ -392,17 +440,35 @@ pub fn pack(
     })
 }
 
-/// Build FST from a disk TSV file: external sort → dedup (keep best) → stream into FST.
-/// TSV format: key\trecord_id\timportance\tis_populated
+/// Maximum number of record_ids stored per posting list. Same-name
+/// alternates beyond this are dropped (sorted by importance desc, so the
+/// least-important ones go first). Eight is enough to disambiguate
+/// "Sätra", "Husby", "Domkyrkan" etc. without bloating the index.
+const MAX_POSTINGS_PER_KEY: usize = 8;
+
+/// Build FST from a disk TSV file: external sort → group by key → write top-N postings
+/// to sidecar → stream offsets into FST.
+///
+/// TSV format: `key\trecord_id\timportance\tis_populated`
+///
+/// When `sidecar_path` is `Some`, each FST value is the byte offset of a posting list
+/// in the sidecar. Each posting list begins with a `u16` count followed by
+/// `count × u32` record_ids, sorted by importance descending and capped at
+/// `MAX_POSTINGS_PER_KEY`. When `sidecar_path` is `None`, the legacy single-id
+/// format is written (FST value = record_id) — used for the empty-ngram path.
+///
 /// Memory: ~sort_chunk_size (auto-tuned) + FST builder streaming buffer.
-fn build_fst_from_disk(tsv_path: &Path, fst_path: &Path) -> Result<usize> {
+fn build_fst_from_disk(tsv_path: &Path, fst_path: &Path, sidecar_path: Option<&Path>) -> Result<usize> {
     use std::io::{BufRead, Write};
 
     if !tsv_path.exists() || std::fs::metadata(tsv_path)?.len() == 0 {
-        // Empty — write empty FST
+        // Empty — write empty FST and (optionally) empty sidecar
         let file = std::io::BufWriter::new(std::fs::File::create(fst_path)?);
         let mut builder = MapBuilder::new(file)?;
         builder.finish()?;
+        if let Some(p) = sidecar_path {
+            std::fs::write(p, &[][..])?;
+        }
         return Ok(std::fs::metadata(fst_path)?.len() as usize);
     }
 
@@ -419,14 +485,68 @@ fn build_fst_from_disk(tsv_path: &Path, fst_path: &Path) -> Result<usize> {
         anyhow::bail!("sort command failed for {}", tsv_path.display());
     }
 
-    // Stream sorted file → dedup → FST
+    // Stream sorted file → group by key → write postings → FST
     let reader = std::io::BufReader::new(std::fs::File::open(&sorted_path)?);
     let file = std::io::BufWriter::new(std::fs::File::create(fst_path)?);
     let mut builder = MapBuilder::new(file)?;
 
+    // Sidecar writer (optional). When `None` we emit single-id values
+    // (legacy path, used only for the empty ngram FST).
+    let mut sidecar_writer: Option<std::io::BufWriter<std::fs::File>> = match sidecar_path {
+        Some(p) => Some(std::io::BufWriter::with_capacity(
+            4 * 1024 * 1024,
+            std::fs::File::create(p)?,
+        )),
+        None => None,
+    };
+    let mut sidecar_offset: u64 = 0;
+
     let mut prev_key = String::new();
-    let mut best_id: u32 = 0;
-    let mut best_importance: u16 = 0;
+    // Buffered postings for the current key: (record_id, importance).
+    // Sorted by importance desc on group close, deduped by record_id
+    // (highest importance wins), then truncated to MAX_POSTINGS_PER_KEY.
+    let mut group: Vec<(u32, u16)> = Vec::new();
+
+    let flush_group = |builder: &mut MapBuilder<std::io::BufWriter<std::fs::File>>,
+                       sidecar_writer: &mut Option<std::io::BufWriter<std::fs::File>>,
+                       sidecar_offset: &mut u64,
+                       key: &str,
+                       group: &mut Vec<(u32, u16)>|
+     -> Result<()> {
+        if key.is_empty() || group.is_empty() {
+            return Ok(());
+        }
+        // Sort by importance desc, then by record_id for determinism.
+        group.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        // Dedup by record_id — same record may appear under multiple
+        // importance values if it was inserted via multiple variants.
+        // Highest importance comes first after the sort, so dedup_by_key
+        // keeps that one.
+        group.dedup_by_key(|(id, _)| *id);
+        if group.len() > MAX_POSTINGS_PER_KEY {
+            group.truncate(MAX_POSTINGS_PER_KEY);
+        }
+
+        match sidecar_writer.as_mut() {
+            Some(w) => {
+                let count = group.len() as u16;
+                let offset = *sidecar_offset;
+                w.write_all(&count.to_le_bytes())?;
+                for &(id, _) in group.iter() {
+                    w.write_all(&id.to_le_bytes())?;
+                }
+                *sidecar_offset += 2 + (group.len() as u64) * 4;
+                builder.insert(key.as_bytes(), offset)?;
+            }
+            None => {
+                // Legacy single-id path. Pick the first (highest-importance) entry.
+                builder.insert(key.as_bytes(), group[0].0 as u64)?;
+            }
+        }
+
+        group.clear();
+        Ok(())
+    };
 
     for line in reader.lines() {
         let line = line?;
@@ -436,33 +556,20 @@ fn build_fst_from_disk(tsv_path: &Path, fst_path: &Path) -> Result<usize> {
         let key = parts[0];
         let id: u32 = parts[1].parse().unwrap_or(0);
         let importance: u16 = parts[2].parse().unwrap_or(0);
-        // is_pop tag still written but no longer the primary collision key.
-        // Importance already accounts for population, place type, and
-        // wikidata, so an is_populated tiebreak forced same-name landmarks
-        // to lose to no-population suburbs (Skansen suburb beat the
-        // Skansen theme park even though importance was 1500 vs 9100).
 
-        if key == prev_key {
-            if importance > best_importance {
-                best_id = id;
-                best_importance = importance;
-            }
-        } else {
-            // Emit previous key
-            if !prev_key.is_empty() {
-                builder.insert(prev_key.as_bytes(), best_id as u64)?;
-            }
+        if key != prev_key {
+            flush_group(&mut builder, &mut sidecar_writer, &mut sidecar_offset, &prev_key, &mut group)?;
             prev_key = key.to_owned();
-            best_id = id;
-            best_importance = importance;
         }
+        group.push((id, importance));
     }
-    // Emit last key
-    if !prev_key.is_empty() {
-        builder.insert(prev_key.as_bytes(), best_id as u64)?;
-    }
+    // Flush the last group
+    flush_group(&mut builder, &mut sidecar_writer, &mut sidecar_offset, &prev_key, &mut group)?;
 
     builder.finish()?;
+    if let Some(mut w) = sidecar_writer {
+        w.flush()?;
+    }
 
     // Clean up
     std::fs::remove_file(&sorted_path).ok();
@@ -502,7 +609,13 @@ fn strip_stopwords(s: &str) -> String {
         .join(" ")
 }
 
-fn compute_importance_inline(place_type: PlaceType, population: Option<u32>, has_wikidata: bool, intl_translations: usize) -> u16 {
+fn compute_importance_inline(
+    place_type: PlaceType,
+    population: Option<u32>,
+    has_wikidata: bool,
+    intl_translations: usize,
+    parent_admin_population: u32,
+) -> u16 {
     let mut score: u32 = 0;
     // Population bonus: only counts for major settlements (City and
     // Town). Village/Hamlet/Farm population in OSM is wildly unreliable
@@ -573,6 +686,20 @@ fn compute_importance_inline(place_type: PlaceType, population: Option<u32>, has
     // obscure same-name nature reserve, but small enough that a place
     // with 5 translations doesn't suddenly outrank a tier-up category.
     score += (intl_translations as u32).min(5) * 1500;
+    // Centrality: places inside a populous parent admin (e.g. a hotel in
+    // Stockholms kommun, pop ~970K) get a small bonus over same-name
+    // places in tiny rural kommuner. Threshold at 10K population so
+    // village-scale parent admins contribute nothing — only real city
+    // and metropolitan kommuner activate it.
+    //
+    //   pop=10K  → 0
+    //   pop=50K  → ~1000
+    //   pop=200K → ~2000
+    //   pop=970K → ~3000 (Stockholms kommun)
+    if parent_admin_population > 10_000 {
+        let lp = (parent_admin_population as f64).log10();
+        score += ((lp - 4.0).max(0.0) * 1500.0) as u32;
+    }
     score.min(65535) as u16
 }
 

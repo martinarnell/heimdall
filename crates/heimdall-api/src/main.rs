@@ -854,7 +854,11 @@ async fn search(
         let candidates = country.normalizer.normalize(&query_text);
 
         let mut geo_query = GeoQuery::new(&query_text);
-        geo_query.limit = limit;
+        // When a city context is in play, look at a wider candidate pool
+        // so the city-context filter can pick the contextually-correct
+        // alternate over the globally-most-important one (matches the
+        // posting_window expansion used on the global-FST path).
+        geo_query.limit = if city_context.is_some() { (limit * 8).max(32) } else { limit };
         geo_query.country_code = country_codes.first().copied();
         geo_query.bbox = bbox;
 
@@ -1174,7 +1178,10 @@ async fn search(
                     let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
                     let sub_candidates = country.normalizer.normalize(sub);
                     let mut geo_q = GeoQuery::new(sub);
-                    geo_q.limit = limit;
+                    // Mirror the main place-name path: widen the candidate
+                    // pool when a city context is set so the city-context
+                    // filter can pick the contextually-correct alternate.
+                    geo_q.limit = if city_context.is_some() { (limit * 8).max(32) } else { limit };
 
                     for candidate in &sub_candidates {
                         let results = country.index.geocode_normalized(candidate, &geo_q);
