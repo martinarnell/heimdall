@@ -355,12 +355,34 @@ fn resolve_city_full(
     normalizer: &Normalizer,
     global_index: Option<&GlobalIndex>,
 ) -> (Option<u16>, Option<u16>, Option<Coord>) {
+    resolve_city_full_filtered(city, country, country_idx, normalizer, global_index, false)
+}
+
+/// Like `resolve_city_full` but with `settlement_only` mode: only matches
+/// records that are actually settlements (City, Town, Village, Hamlet,
+/// Suburb). Used for whitespace-disambiguation queries like "stortorget
+/// göteborg" where treating "slottet" as a city would mean any random
+/// Locality named "slottet" sets a misleading city context.
+fn resolve_city_full_filtered(
+    city: &str,
+    country: &CountryIndex,
+    country_idx: usize,
+    normalizer: &Normalizer,
+    global_index: Option<&GlobalIndex>,
+    settlement_only: bool,
+) -> (Option<u16>, Option<u16>, Option<Coord>) {
     let city_candidates = normalizer.normalize(city);
+    let is_settlement = |pt: PlaceType| matches!(pt,
+        PlaceType::City | PlaceType::Town | PlaceType::Village
+            | PlaceType::Hamlet | PlaceType::Suburb | PlaceType::Quarter
+            | PlaceType::Neighbourhood
+    );
 
     // Try per-country FST first (populated in full mode)
     for candidate in &city_candidates {
         if let Some(record_id) = country.index.exact_lookup(candidate) {
             if let Ok(record) = country.index.record_store().get(record_id) {
+                if settlement_only && !is_settlement(record.place_type) { continue; }
                 let a1 = if record.admin1_id > 0 { Some(record.admin1_id) } else { None };
                 let a2 = if record.admin2_id > 0 { Some(record.admin2_id) } else { None };
                 return (a1, a2, Some(record.coord));
@@ -375,6 +397,7 @@ fn resolve_city_full(
             for posting in &postings {
                 if posting.country_id as usize == country_idx {
                     if let Ok(record) = country.index.record_store().get(posting.record_id) {
+                        if settlement_only && !is_settlement(record.place_type) { continue; }
                         let a1 = if record.admin1_id > 0 { Some(record.admin1_id) } else { None };
                         let a2 = if record.admin2_id > 0 { Some(record.admin2_id) } else { None };
                         return (a1, a2, Some(record.coord));
@@ -719,14 +742,37 @@ async fn search(
     // ------------------------------------------------------------------
     let city_context: Option<(Option<u16>, Option<u16>, Option<Coord>)> = {
         let mut ctx = None;
-        if let Some((_head, last)) = split_disambiguation_query(&query_text) {
+        // Two patterns produce a city context:
+        //   "X, Y"  — explicit comma disambiguation (Slussen, Stockholm).
+        //             Y can be any place — "Drottninggatan, Stockholm"
+        //             still works even though Stockholm is a City.
+        //   "X Y"   — bare whitespace (stortorget göteborg). For these
+        //             we *require* the last token to actually be a
+        //             settlement. Otherwise queries like "kungliga slottet"
+        //             treat "slottet" as a city (matching some random
+        //             Locality named "Slottet") and misleadingly hard-
+        //             filter the real Royal Palace out.
+        let (last_token, settlement_only) = if let Some((_, l)) = split_disambiguation_query(&query_text) {
+            (Some(l), false)
+        } else {
+            let words: Vec<&str> = query_text.split_whitespace().collect();
+            if words.len() >= 2
+                && words.last().map(|w| w.chars().next().map(|c| c.is_alphabetic()).unwrap_or(false)).unwrap_or(false)
+            {
+                (Some(words.last().unwrap().to_string()), true)
+            } else {
+                (None, false)
+            }
+        };
+        if let Some(last) = last_token {
             for &(ci, country) in &target_countries {
-                let (a1, a2, coord) = resolve_city_full(
+                let (a1, a2, coord) = resolve_city_full_filtered(
                     &last,
                     country,
                     ci,
                     &country.normalizer,
                     state.global_index.as_ref(),
+                    settlement_only,
                 );
                 if a1.is_some() || a2.is_some() || coord.is_some() {
                     ctx = Some((a1, a2, coord));
@@ -1100,7 +1146,11 @@ async fn search(
             }
 
             'word_drop: for sub in &subqueries {
-                // Try global FST
+                // Try global FST. Use "word_drop" as match_type so the
+                // city-context filter (which exempts "exact" matches —
+                // verbatim FST hits on the full query — from hard
+                // filtering) doesn't accidentally let through results
+                // that came from a partial subquery.
                 if let Some(ref global) = state.global_index {
                     if let Some(norm) = target_countries.first().map(|&(_, c)| &c.normalizer) {
                         let sub_candidates = norm.normalize(sub);
@@ -1108,7 +1158,7 @@ async fn search(
                             let postings = global.exact_lookup(candidate);
                             let filtered = filter_postings_by_country(&postings, &country_codes, &state.countries);
                             for posting in filtered.iter().take(limit) {
-                                if let Some(result) = posting_to_nominatim(posting, &state.countries, "exact", params.addressdetails > 0) {
+                                if let Some(result) = posting_to_nominatim(posting, &state.countries, "word_drop", params.addressdetails > 0) {
                                     response.push(result);
                                 }
                             }
@@ -1117,7 +1167,9 @@ async fn search(
                     }
                 }
 
-                // Try per-country FST
+                // Try per-country FST. Same caveat — relabel to
+                // "word_drop" so city-context filtering treats it as a
+                // fallback hit, not a verbatim one.
                 for &(ci, country) in &target_countries {
                     let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
                     let sub_candidates = country.normalizer.normalize(sub);
@@ -1127,7 +1179,9 @@ async fn search(
                     for candidate in &sub_candidates {
                         let results = country.index.geocode_normalized(candidate, &geo_q);
                         for r in results {
-                            response.push(to_nominatim_enriched(ci, r, params.addressdetails > 0, &cc, &country.name, country));
+                            let mut result = to_nominatim_enriched(ci, r, params.addressdetails > 0, &cc, &country.name, country);
+                            result.match_type = Some("word_drop".to_string());
+                            response.push(result);
                         }
                         if !response.is_empty() { break 'word_drop; }
                     }
@@ -1193,12 +1247,30 @@ async fn search(
 
     // Rank: city-context tier (highest first) > high-confidence match types
     // (exact/address/street) > importance. The city-context tier dominates
-    // when q="X, Y" — a candidate in Y's municipality outranks a more
-    // important candidate elsewhere. Without city context, all tiers are 0
-    // and the sort behaves exactly as before.
+    // when q="X, Y" or q="X Y" with Y a known city — a candidate in Y's
+    // municipality outranks a more important candidate elsewhere.
+    // Without city context, all tiers are 0 and the sort behaves exactly
+    // as before.
+    //
+    // When city_context resolved, drop results that don't match the
+    // city — even if no candidate matches. The user explicitly said
+    // "in city X"; returning a same-name result from elsewhere
+    // (Stockholm's Stortorget for "stortorget göteborg") is misleading.
+    //
+    // Exception: "exact" / "address" / "street" match types always
+    // pass through. The whole-string FST already matched character-
+    // for-character, so the user typed the full name of a real place
+    // (Nacka Strand, Skara Sommarland, Höga Kusten) — not "place IN
+    // city". The whitespace city-context heuristic shouldn't override
+    // a verbatim hit.
     let mut paired: Vec<(NominatimResult, u8)> = response
         .into_iter()
         .zip(response_tiers.into_iter())
+        .filter(|(r, t)| {
+            if city_context.is_none() { return true; }
+            if *t > 0 { return true; }
+            matches!(r.match_type.as_deref(), Some("exact" | "address" | "street"))
+        })
         .collect();
     paired.sort_by(|(ra, ta), (rb, tb)| {
         let high_confidence = |r: &NominatimResult| {
