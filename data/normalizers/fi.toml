@@ -1,96 +1,138 @@
 # Finnish place name normalizer
-# Covers Finnish, Swedish (bilingual), Sami names, and case suffix stripping
+# Covers Finnish, Swedish (bilingual exonyms), Sami names, and the
+# language's defining feature: ~15 grammatical case suffixes that get
+# attached to place names ("Helsingissä" = "in Helsinki").
+#
+# No [diacritics] section: Finnish ä/ö are full letters (not umlauts of
+# a/o), but for fuzzy ASCII fallback the Nordic default (ä→a, ö→o) is
+# what we want and is applied automatically by lib.rs Step 7 when this
+# section is absent. Adding [diacritics] would override that fallback.
+#
+# No [definite_suffixes]: Finnish has no definite article. Definiteness
+# is expressed through case + word order. The case_suffixes block does
+# the morphological work instead.
 
 [abbreviations]
-# Street types
-"k." = "katu"
-"t." = "tie"
-"kj." = "kuja"
-"p." = "polku"
+# Finnish street types — only real, widely-used short forms.
+# No identity no-ops ("katu" = "katu") — those are noise.
+"k."   = "katu"      # katu = street
+"t."   = "tie"       # tie  = road
+"kj."  = "kuja"      # kuja = lane / alley
+"p."   = "polku"     # polku = path
+"pst." = "puistikko" # puistikko = little park / promenade
+"r."   = "raitti"    # raitti = village street / lane
 
-# Directional
-"pohj." = "pohjoinen"
-"et." = "etelä"
-"it." = "itä"
-"länt." = "länsi"
+# Directional modifiers (common in compound place names)
+"pohj." = "pohjoinen" # north
+"et."   = "etelä"     # south
+"it."   = "itä"       # east
+"länt." = "länsi"     # west
 
 [stopwords]
+# Country / admin words callers tack on. Stripped at query time.
 words = [
-    "kunta",
-    "kaupunki",
-    "kommun",
-    "stad",
+    "kunta",       # municipality
+    "kaupunki",    # city
+    "maakunta",    # region
+    "lääni",       # historical province (pre-2010)
+    "kommun",      # Swedish equivalent (bilingual municipalities)
+    "stad",        # Swedish "city"
     "finland",
     "suomi",
+    "fi",
 ]
 
 [known_variants]
-# Finnish ↔ Swedish city name pairs (CRITICAL for bilingual support)
-"helsingfors" = "helsinki"
-"tammerfors" = "tampere"
-"abo" = "turku"
-"uleaborg" = "oulu"
-"uleåborg" = "oulu"
-"esbo" = "espoo"
-"vasa" = "vaasa"
-"bjorneborg" = "pori"
-"björneborg" = "pori"
-"karleby" = "kokkola"
-"jakobstad" = "pietarsaari"
-"nyslott" = "savonlinna"
-"nykarleby" = "uusikaarlepyy"
+# ── Finnish ↔ Swedish bilingual city pairs ──────────────────────────
+# Finland is officially bilingual. Swedish names dominate in
+# coastal/Åland regions and appear on signage and in Swedish-language
+# media. OSM canonical is Finnish, so we map Swedish → Finnish.
+"helsingfors"  = "helsinki"
+"esbo"         = "espoo"
+"vanda"        = "vantaa"
+"åbo"          = "turku"
+"abo"          = "turku"
+"tammerfors"   = "tampere"
+"vasa"         = "vaasa"
+"uleåborg"     = "oulu"
+"uleaborg"     = "oulu"
+"björneborg"   = "pori"
+"bjorneborg"   = "pori"
+"tavastehus"   = "hämeenlinna"
+"karleby"      = "kokkola"
+"jakobstad"    = "pietarsaari"
+"nyslott"      = "savonlinna"
+"nystad"       = "uusikaupunki"
+"nykarleby"    = "uusikaarlepyy"
 "kristinestad" = "kristiinankaupunki"
+"borgå"        = "porvoo"
+"borga"        = "porvoo"
+"ekenäs"       = "tammisaari"
+"ekenas"       = "tammisaari"
+"hangö"        = "hanko"
+"hango"        = "hanko"
+"lovisa"       = "loviisa"
+"karis"        = "karjaa"
+"sibbo"        = "sipoo"
+"raseborg"     = "raasepori"
 
-# Åland Islands
-"mariehamn" = "maarianhamina"
+# ── Åland (autonomous, Swedish-speaking — OSM uses Swedish here) ────
+# Map Finnish → Swedish (opposite of mainland) so Finnish-speaking
+# users still find the place.
 "maarianhamina" = "mariehamn"
-"aland" = "ahvenanmaa"
-"ahvenanmaa" = "åland"
+"ahvenanmaa"    = "åland"
 
-# Sami names (northern Finland)
-"aanaar" = "inari"
-"ohcejohka" = "utsjoki"
-"eanodat" = "enontekiö"
-"enontekio" = "enontekiö"
-"anár" = "inari"
+# ── English exonyms ────────────────────────────────────────────────
+"lapland"        = "lappi"
+"karelia"        = "karjala"
+"finland proper" = "varsinais-suomi"
 
-# English
-"lapland" = "lappi"
-"jyvaskyla" = "jyväskylä"
-"hameenlinna" = "hämeenlinna"
+# ── Landmark exonyms (Swedish historical names + English aliases) ───
+# Suomenlinna's original 18th-century Swedish name is Sveaborg —
+# both still appear in tourism copy, signage, Finlandization-era texts.
+"sveaborg"          = "suomenlinna"
+"st. olaf's castle" = "olavinlinna"
+"st olafs castle"   = "olavinlinna"
+"olofsborg"         = "olavinlinna"   # Swedish historical name
 
-# Common case-inflected forms of major cities
-"helsingissa" = "helsinki"
-"helsingistä" = "helsinki"
-"helsingissä" = "helsinki"
-"tampereella" = "tampere"
-"tampereelta" = "tampere"
-"tampereelle" = "tampere"
-"turussa" = "turku"
-"turusta" = "turku"
-"turkuun" = "turku"
-"oulussa" = "oulu"
-"oulusta" = "oulu"
-"ouluun" = "oulu"
-"espoossa" = "espoo"
-"espoosta" = "espoo"
-"espooseen" = "espoo"
-"vantaalla" = "vantaa"
-"vantaalta" = "vantaa"
+# ── Sami exonyms (Northern Sami is a recognised minority language) ──
+"anár"        = "inari"
+"aanaar"      = "inari"
+"ohcejohka"   = "utsjoki"
+"eanodat"     = "enontekiö"
+"avvil"       = "ivalo"
 
 [case_suffixes]
-# Finnish grammatical case suffixes — ordered longest-first
-# Stripping these from single-word queries helps match inflected place names
+# Finnish grammatical cases. Place names are routinely inflected:
+#   "Helsingissä" (in)        "Helsinkiin" (to)
+#   "Tampereella" (at)        "Tampereelta" (from)
+#   "Turkuun" (to)            "Turusta" (from)
+#
+# strip_case_suffix() fires only on single-word queries and only when
+# the stripped stem is ≥ 3 chars. Suffixes are sorted longest-first by
+# the loader so "ssä" matches before "n".
+#
+# We deliberately do NOT include known city stems ("helsingissä"
+# → "helsinki") in known_variants — that was hand-written redundancy.
+# The case stripper produces "helsing" which the FST + Lev-1 + phonetic
+# layers resolve to "helsinki".
 suffixes = [
-    "ssä", "ssa",       # inessive: Helsingissä
-    "stä", "sta",       # elative: Helsingistä
-    "ltä", "lta",       # ablative: Tampereelta
-    "llä", "lla",       # adessive: Tampereella
-    "ään", "aan",       # illative: Helsinkiin (irregular)
-    "lle",              # allative: Tampereelle
-    "iin", "hun", "hen", "hin",  # illative variants
-    "jen", "ien",       # genitive plural
-    "in",               # genitive
-    "un", "on", "en",   # genitive variants
-    "n",                # genitive singular
+    # Locative cases (most common in place-name queries)
+    "ssä", "ssa",       # inessive: "in X" — Helsingissä, Turussa
+    "stä", "sta",       # elative:  "from X" — Helsingistä, Turusta
+    "seen",             # illative (vowel-final stems): Espooseen
+    "ään", "aan",       # illative (long-vowel form): Helsinkiin
+    "lle",              # allative: "to X" — Tampereelle
+    "ltä", "lta",       # ablative: "from X" — Tampereelta
+    "llä", "lla",       # adessive: "at X" — Tampereella
+
+    # Illative variants for short / consonant stems
+    "iin", "hin", "hen", "hun", "hön",
+
+    # Genitive plural / partitive plural
+    "jen", "ien", "den",
+
+    # Genitive / accusative singular
+    "in", "un", "yn", "on", "ön", "en", "än",
+    "n",                # bare genitive: ordered last so longer matches win
 ]

@@ -1994,6 +1994,10 @@ pub(crate) fn read_osm_places(parquet_path: &Path) -> Result<Vec<heimdall_core::
 
 fn place_type_from_u8(v: u8) -> heimdall_core::types::PlaceType {
     use heimdall_core::types::PlaceType;
+    // Keep this in sync with the canonical numeric values in
+    // `heimdall_core::types::PlaceType`. Missing arms here silently
+    // collapse the type to `Unknown` when read_osm_places loads parquet,
+    // and pack.rs then drops the record (Unknown without wikidata gate).
     match v {
         0 => PlaceType::Country,
         1 => PlaceType::State,
@@ -2009,6 +2013,8 @@ fn place_type_from_u8(v: u8) -> heimdall_core::types::PlaceType {
         12 => PlaceType::Neighbourhood,
         13 => PlaceType::Island,
         14 => PlaceType::Islet,
+        15 => PlaceType::Square,
+        16 => PlaceType::Street,
         20 => PlaceType::Lake,
         21 => PlaceType::River,
         22 => PlaceType::Mountain,
@@ -2017,6 +2023,11 @@ fn place_type_from_u8(v: u8) -> heimdall_core::types::PlaceType {
         25 => PlaceType::Cape,
         30 => PlaceType::Airport,
         31 => PlaceType::Station,
+        32 => PlaceType::Landmark,
+        33 => PlaceType::University,
+        34 => PlaceType::Hospital,
+        35 => PlaceType::PublicBuilding,
+        36 => PlaceType::Park,
         _ => PlaceType::Unknown,
     }
 }
