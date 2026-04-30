@@ -495,17 +495,22 @@ impl Normalizer {
     }
 
     fn expand_abbreviations(&self, input: &str) -> String {
-        let mut result = input.to_owned();
-        for (abbrev, expanded) in &self.abbreviations {
-            let pattern = format!(" {} ", abbrev);
-            let replacement = format!(" {} ", expanded);
-            result = result.replace(&pattern, &replacement);
-
-            if result.starts_with(abbrev.as_str()) {
-                result = format!("{}{}", expanded, &result[abbrev.len()..]);
-            }
-        }
-        result
+        // Token-by-token replacement — splits on whitespace, expands any
+        // exact word matches. This avoids the previous start-of-string
+        // hazard ("ki" would have eaten the leading two chars of "kista"
+        // and turned it into "karolinska institutet sta"). Now an
+        // abbreviation only expands when it stands alone as a token —
+        // "ki solna" → "karolinska institutet solna", "kista" stays put.
+        input.split_whitespace()
+            .map(|tok| {
+                let lower = tok.to_lowercase();
+                self.abbreviations.iter()
+                    .find(|(a, _)| a == &lower)
+                    .map(|(_, e)| e.clone())
+                    .unwrap_or_else(|| tok.to_owned())
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     /// Apply configured diacritic replacements (multi-char aware).

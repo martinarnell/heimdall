@@ -457,6 +457,32 @@ fn city_context_tier(
     0
 }
 
+/// Normalise punctuation in the user query so commas, slashes, and
+/// stray whitespace don't break the rest of the pipeline. Keeps a
+/// single comma where the user used one (so the comma-disambiguation
+/// path can still see "X, Y") but adds the missing space.
+fn normalize_punctuation(input: &str) -> String {
+    // Replace structural separators with spaces, then collapse runs of
+    // whitespace. The comma case is special — we want to preserve it as
+    // a marker for "X, Y" disambiguation, but normalise the surrounding
+    // whitespace to ", ". Slash, semicolon, and similar are pure
+    // separators with no semantic meaning.
+    let with_comma_normed = input
+        .replace(['/', ';', '|'], " ")
+        .split(',')
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join(", ");
+    // Collapse internal whitespace runs.
+    with_comma_normed
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        // restore the ", " (the .join(" ") collapsed it)
+        .replace(" , ", ", ")
+}
+
 /// Detect a postcode-shaped query. Matches:
 ///   - 4-7 ASCII digits ("11122", "21100", "75221", "1010", "1234567")
 ///   - 5-digit Swedish split form "NNN NN" ("11 122", "114 56")
@@ -470,6 +496,30 @@ fn is_postcode_shaped(s: &str) -> bool {
     let compact: String = trimmed.chars().filter(|c| !c.is_whitespace()).collect();
     if compact.len() < 4 || compact.len() > 7 { return false; }
     compact.chars().all(|c| c.is_ascii_digit())
+}
+
+/// Detect a "postcode + city" query like "111 22 Stockholm" or "11122 Malmö".
+/// Returns (postcode_string, city_string). The postcode is whatever shape
+/// `is_postcode_shaped` accepts; the city is the rest of the query.
+fn split_postcode_city(s: &str) -> Option<(String, String)> {
+    let trimmed = s.trim();
+    let words: Vec<&str> = trimmed.split_whitespace().collect();
+    if words.len() < 2 { return None; }
+    // Try the first one or two tokens as a postcode prefix.
+    // Two-token form: "111 22 Stockholm" — postcode is "111 22".
+    if words.len() >= 3 {
+        let two = format!("{} {}", words[0], words[1]);
+        if is_postcode_shaped(&two) {
+            let rest = words[2..].join(" ");
+            return Some((two, rest));
+        }
+    }
+    // One-token form: "11122 Stockholm" — postcode is "11122".
+    if is_postcode_shaped(words[0]) {
+        let rest = words[1..].join(" ");
+        return Some((words[0].to_owned(), rest));
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------
@@ -512,6 +562,14 @@ async fn search(
     } else {
         query_text
     };
+
+    // Punctuation tolerance: users type "Stockholm,Sweden" (no space) or
+    // "Göteborg/Sweden" or "Drottninggatan,Stockholm". Replace common
+    // separator punctuation with spaces so the rest of the pipeline sees
+    // a uniform whitespace-delimited input. Comma is preserved as a
+    // soft separator for the "X, Y" disambiguation pattern by re-joining
+    // with ", " when the original used commas.
+    let query_text = normalize_punctuation(&query_text);
 
     // For postalcode-only structured queries, try postcode FSTs first
     let postalcode_only = structured && is_postalcode_only(&params);
@@ -682,6 +740,55 @@ async fn search(
     // found we push it as a `postcode` result; we keep going so place-name
     // results from the global FST below can still be returned alongside.
     let mut postcode_match_found = false;
+    // First try a leading-postcode-then-city pattern: "111 22 Stockholm"
+    // → look up "111 22" via the postcode FST, then prefer the postcode
+    // result if it sits in/near the named city. Otherwise fall through
+    // to the bare-postcode path.
+    if let Some((pc, _city_part)) = split_postcode_city(&query_text) {
+        for (_ci, country) in &target_countries {
+            if let Some(ref addr_index) = country.addr_index {
+                if let Some(r) = addr_index.lookup_postcode(&pc) {
+                    let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
+                    let display = if r.street.is_empty() {
+                        pc.clone()
+                    } else {
+                        r.street.clone()
+                    };
+                    response.push(NominatimResult {
+                        place_id: 0,
+                        osm_type: None,
+                        osm_id: None,
+                        display_name: display,
+                        lat: format!("{:.7}", r.coord.lat_f64()),
+                        lon: format!("{:.7}", r.coord.lon_f64()),
+                        place_type: "postcode".to_owned(),
+                        importance: 0.6,
+                        match_type: Some("postcode".to_owned()),
+                        address: if params.addressdetails > 0 {
+                            Some(AddressDetails {
+                                house_number: None,
+                                road: None,
+                                suburb: None,
+                                city: None,
+                                town: None,
+                                village: None,
+                                county: None,
+                                state: None,
+                                postcode: Some(pc.clone()),
+                                country: Some(country.name.clone()),
+                                country_code: Some(cc),
+                            })
+                        } else { None },
+                    });
+                    postcode_match_found = true;
+                    break;
+                }
+            }
+        }
+        if postcode_match_found {
+            return Ok(Json(response));
+        }
+    }
     if is_postcode_shaped(&query_text) {
         for (_ci, country) in &target_countries {
             if let Some(ref addr_index) = country.addr_index {
@@ -765,18 +872,30 @@ async fn search(
             }
         };
         if let Some(last) = last_token {
-            for &(ci, country) in &target_countries {
-                let (a1, a2, coord) = resolve_city_full_filtered(
-                    &last,
-                    country,
-                    ci,
-                    &country.normalizer,
-                    state.global_index.as_ref(),
-                    settlement_only,
-                );
-                if a1.is_some() || a2.is_some() || coord.is_some() {
-                    ctx = Some((a1, a2, coord));
-                    break;
+            // Skip when the trailing token is a country/admin stopword
+            // ("Sweden", "Sverige", "kommun" …). Without this, "Stockholm,
+            // Sweden" treats "Sweden" as a city and tries to filter
+            // Stockholm into Sverige Country's polygon — empty result.
+            // Stopwords are language-specific so we read them from the
+            // first target country's normaliser.
+            let last_lower = last.to_lowercase();
+            let is_stop = target_countries.first()
+                .map(|(_, c)| c.normalizer.stopwords().iter().any(|s| s == &last_lower))
+                .unwrap_or(false);
+            if !is_stop {
+                for &(ci, country) in &target_countries {
+                    let (a1, a2, coord) = resolve_city_full_filtered(
+                        &last,
+                        country,
+                        ci,
+                        &country.normalizer,
+                        state.global_index.as_ref(),
+                        settlement_only,
+                    );
+                    if a1.is_some() || a2.is_some() || coord.is_some() {
+                        ctx = Some((a1, a2, coord));
+                        break;
+                    }
                 }
             }
         }
@@ -1140,6 +1259,13 @@ async fn search(
     // city-filtered to empty, never running word-drop.
     let response_has_city_match = if let Some((ctx_a1, ctx_a2, ctx_coord)) = city_context {
         response.iter().any(|r| {
+            // Verbatim full-string FST hits are always considered a
+            // match regardless of admin — "Hammarby Sjöstad" should
+            // win even though the trailing "Sjöstad" word resolves to
+            // a settlement in another county.
+            if matches!(r.match_type.as_deref(), Some("exact" | "address" | "street")) {
+                return true;
+            }
             if r.place_id == 0 { return false; }
             let (ci, rid) = decode_place_id(r.place_id);
             if let Some(country) = state.countries.get(ci) {
