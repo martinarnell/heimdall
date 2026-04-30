@@ -461,10 +461,18 @@ fn compute_importance_inline(place_type: PlaceType, population: Option<u32>, has
         PlaceType::Town => 6000,
         PlaceType::Village => 2000,
         PlaceType::Suburb | PlaceType::Quarter => 1500,
+        PlaceType::Neighbourhood => 1400,
         PlaceType::Hamlet | PlaceType::Farm => 800,
         PlaceType::Island => 3000,
         PlaceType::Airport => 1000,
-        PlaceType::Station => 500,
+        PlaceType::Station => 700,
+        PlaceType::Square => 1200,
+        // Notable POIs — set below Town/Village so a famous landmark
+        // never outranks a city of the same name. Modest additive bias
+        // over generic Locality so e.g. Vasa Museum beats a random rural locality.
+        PlaceType::Landmark => 1100,
+        PlaceType::University | PlaceType::Hospital | PlaceType::PublicBuilding => 900,
+        PlaceType::Park => 600,
         PlaceType::Lake | PlaceType::River => 1000,
         PlaceType::Mountain | PlaceType::Forest => 800,
         PlaceType::County => 4000,

@@ -77,6 +77,7 @@ pub enum PlaceType {
     Neighbourhood = 12,
     Island = 13,
     Islet = 14,
+    Square = 15,   // place=square (e.g. Sergels torg, Stortorget)
 
     // Natural features (often geocoded)
     Lake = 20,
@@ -88,7 +89,14 @@ pub enum PlaceType {
 
     // POI categories
     Airport = 30,
-    Station = 31,  // railway/bus
+    Station = 31,  // railway/bus / public_transport=station
+
+    // Notable POIs / cultural sights
+    Landmark = 32,    // tourism=attraction|museum|gallery|viewpoint|theme_park|zoo|aquarium, historic=*
+    University = 33,  // amenity=university|college
+    Hospital = 34,    // amenity=hospital
+    PublicBuilding = 35, // amenity=townhall|library|theatre|arts_centre
+    Park = 36,        // leisure=park (only with notability signal)
 
     Unknown = 255,
 }
@@ -110,6 +118,7 @@ impl PlaceType {
             "neighbourhood" | "neighborhood" => Self::Neighbourhood,
             "island" => Self::Island,
             "islet" => Self::Islet,
+            "square" => Self::Square,
             _ => Self::Unknown,
         }
     }
@@ -128,6 +137,11 @@ impl PlaceType {
             Self::Locality => 35,
             Self::Island => 50,
             Self::Airport | Self::Station => 65,
+            Self::Square => 50,
+            Self::Neighbourhood => 50,
+            Self::Landmark => 55,
+            Self::University | Self::Hospital | Self::PublicBuilding => 50,
+            Self::Park => 35,
             _ => 20,
         }
     }
@@ -377,9 +391,14 @@ pub fn compute_importance(place: &RawPlace) -> u16 {
         PlaceType::Town => 1500,
         PlaceType::Village => 1000,
         PlaceType::Suburb | PlaceType::Quarter => 900,
+        PlaceType::Neighbourhood => 850,
         PlaceType::Hamlet | PlaceType::Farm => 500,
         PlaceType::Island => 800,
         PlaceType::Airport | PlaceType::Station => 700,
+        PlaceType::Square => 750,
+        PlaceType::Landmark => 700,
+        PlaceType::University | PlaceType::Hospital | PlaceType::PublicBuilding => 600,
+        PlaceType::Park => 400,
         PlaceType::Lake | PlaceType::River => 600,
         PlaceType::Mountain | PlaceType::Forest => 500,
         PlaceType::County => 300,

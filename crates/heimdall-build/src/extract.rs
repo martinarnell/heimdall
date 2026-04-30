@@ -41,6 +41,8 @@ pub(crate) const MEANINGFUL_NODE_TAGS: &[&str] = &[
     "railway",
     "aeroway",
     "mountain_pass",
+    "public_transport",
+    "leisure",
 ];
 
 /// Tags that make a way worth indexing (with name)
@@ -54,7 +56,56 @@ pub(crate) const MEANINGFUL_WAY_TAGS: &[&str] = &[
     "tourism",
     "historic",
     "aeroway",
+    "public_transport",
 ];
+
+/// Filter: is this (key, value) a notable POI worth indexing?
+///
+/// Conservative whitelist — we don't want every roadside bench to flood the
+/// place index. Returns true only for value-restricted POIs that have
+/// genuine search demand (landmarks, transit hubs, civic buildings, named
+/// parks/squares).
+///
+/// Tags like `natural=*`, `landuse=*`, `waterway=*`, `aeroway=*`,
+/// `railway=station|halt`, `mountain_pass=*` are accepted unconditionally
+/// because they were already in the pre-existing extraction path.
+pub(crate) fn is_qualifying_poi(key: &str, value: &str) -> bool {
+    match key {
+        // Tourism — only well-known categories
+        "tourism" => matches!(
+            value,
+            "attraction" | "museum" | "gallery" | "viewpoint"
+            | "theme_park" | "zoo" | "aquarium"
+        ),
+        // Historic — all (memorial, monument, castle, ruins, fort, archaeological_site, etc.)
+        "historic" => true,
+        // Amenity — only civic/cultural categories
+        "amenity" => matches!(
+            value,
+            "townhall" | "university" | "college" | "hospital"
+            | "library" | "theatre" | "arts_centre" | "courthouse"
+            | "place_of_worship"
+        ),
+        // public_transport — only stations (not stops, platforms, etc.)
+        "public_transport" => matches!(value, "station"),
+        // Leisure — only named parks, nature_reserves; tiny things filtered out
+        // by requiring a notability signal (wikidata) at extraction site.
+        "leisure" => matches!(value, "park" | "nature_reserve" | "garden"),
+        // Other categories — allow through (existing behaviour)
+        "natural" | "landuse" | "waterway" | "aeroway" | "mountain_pass" => true,
+        "railway" => matches!(value, "station" | "halt"),
+        "place" => true, // place=* always allowed (square, neighbourhood, etc.)
+        _ => false,
+    }
+}
+
+/// Does this leisure POI need a notability signal (wikidata) to qualify?
+/// Returns true for leisure=park/garden/nature_reserve — these are extremely
+/// numerous in OSM and we don't want every neighborhood pocket-park flooding
+/// the place index. Only major named parks (with wikidata) are kept.
+pub(crate) fn leisure_needs_notability(key: &str, value: &str) -> bool {
+    key == "leisure" && matches!(value, "park" | "garden" | "nature_reserve")
+}
 
 // ---------------------------------------------------------------------------
 // Intermediate structs for pass 1 (before we have coordinates)
@@ -135,7 +186,10 @@ pub fn extract_places(
                         _ => {
                             if !is_qualifying_mp {
                                 for &mt in MEANINGFUL_WAY_TAGS {
-                                    if k == mt { is_qualifying_mp = true; break; }
+                                    if k == mt && is_qualifying_poi(k, v) {
+                                        is_qualifying_mp = true;
+                                        break;
+                                    }
                                 }
                             }
                         }
@@ -680,6 +734,9 @@ fn scan_way(way: &osmpbf::Way) -> Option<PendingWay> {
             "name" => name = Some(v.to_owned()),
             "place" => place_tag = Some(v.to_owned()),
             "alt_name" => alt_names.extend(v.split(';').map(|s| s.trim().to_owned())),
+            "loc_name" | "short_name" | "nat_name" | "reg_name" => {
+                alt_names.extend(v.split(';').map(|s| s.trim().to_owned()));
+            }
             "old_name" => old_names.extend(v.split(';').map(|s| s.trim().to_owned())),
             "population" => population = v.parse().ok(),
             "admin_level" => admin_level = v.parse().ok(),
@@ -695,7 +752,7 @@ fn scan_way(way: &osmpbf::Way) -> Option<PendingWay> {
             _ => {
                 if qualifying_tag.is_none() {
                     for &mt in MEANINGFUL_WAY_TAGS {
-                        if k == mt {
+                        if k == mt && is_qualifying_poi(k, v) {
                             qualifying_tag = Some((k.to_owned(), v.to_owned()));
                             break;
                         }
@@ -709,6 +766,17 @@ fn scan_way(way: &osmpbf::Way) -> Option<PendingWay> {
     let name = name?;
     if is_highway || is_building {
         return None;
+    }
+
+    // Notability gate: leisure=park / garden / nature_reserve are extremely
+    // numerous (every pocket park gets one). Require a wikidata signal so
+    // only regionally-known parks (Liseberg, Skansen, Slottsskogen) are kept.
+    if place_tag.is_none() {
+        if let Some((ref tk, ref tv)) = qualifying_tag {
+            if leisure_needs_notability(tk, tv) && wikidata.is_none() {
+                return None;
+            }
+        }
     }
 
     // Must have a qualifying tag
@@ -760,6 +828,9 @@ fn scan_relation(relation: &osmpbf::Relation) -> Option<PendingRelation> {
             "type" => rel_type = Some(v.to_owned()),
             "population" => population = v.parse().ok(),
             "alt_name" => alt_names.extend(v.split(';').map(|s| s.trim().to_owned())),
+            "loc_name" | "short_name" | "nat_name" | "reg_name" => {
+                alt_names.extend(v.split(';').map(|s| s.trim().to_owned()));
+            }
             "old_name" => old_names.extend(v.split(';').map(|s| s.trim().to_owned())),
             k if k.starts_with("name:") => {
                 let lang = &k[5..];
@@ -770,7 +841,7 @@ fn scan_relation(relation: &osmpbf::Relation) -> Option<PendingRelation> {
             _ => {
                 if qualifying_tag.is_none() {
                     for &mt in MEANINGFUL_WAY_TAGS {
-                        if k == mt {
+                        if k == mt && is_qualifying_poi(k, v) {
                             qualifying_tag = Some((k.to_owned(), v.to_owned()));
                             break;
                         }
@@ -794,6 +865,15 @@ fn scan_relation(relation: &osmpbf::Relation) -> Option<PendingRelation> {
     if is_admin {
         if let Some(level) = admin_level {
             if level < 2 || level > 10 {
+                return None;
+            }
+        }
+    }
+
+    // Notability gate for leisure=park / garden / nature_reserve relations
+    if !is_admin && place_tag.is_none() {
+        if let Some((ref tk, ref tv)) = qualifying_tag {
+            if leisure_needs_notability(tk, tv) && wikidata.is_none() {
                 return None;
             }
         }
@@ -860,6 +940,16 @@ fn extract_named_node<'a>(
     let parsed = parse_tags(tags);
 
     let name = parsed.name?;
+
+    // Notability gate for leisure=park / garden / nature_reserve nodes —
+    // require wikidata so neighborhood pocket parks don't flood the index.
+    if parsed.place_tag.is_none() {
+        if let Some((ref tk, ref tv)) = parsed.qualifying_tag {
+            if leisure_needs_notability(tk, tv) && parsed.wikidata.is_none() {
+                return None;
+            }
+        }
+    }
 
     let place_type = if let Some(ref place_tag) = parsed.place_tag {
         PlaceType::from_osm(place_tag)
@@ -935,6 +1025,11 @@ pub(crate) fn parse_tags<'a>(tags: impl Iterator<Item = (&'a str, &'a str)>) -> 
             "alt_name" => {
                 parsed.alt_names.extend(v.split(';').map(|s| s.trim().to_owned()));
             }
+            // loc_name = local/colloquial name (e.g. Avenyn for Kungsportsavenyen).
+            // Treat it as an alt_name so the FST index resolves it.
+            "loc_name" | "short_name" | "nat_name" | "reg_name" => {
+                parsed.alt_names.extend(v.split(';').map(|s| s.trim().to_owned()));
+            }
             "old_name" => {
                 parsed.old_names.extend(v.split(';').map(|s| s.trim().to_owned()));
             }
@@ -950,7 +1045,7 @@ pub(crate) fn parse_tags<'a>(tags: impl Iterator<Item = (&'a str, &'a str)>) -> 
             _ => {
                 if parsed.qualifying_tag.is_none() {
                     for &mt in MEANINGFUL_NODE_TAGS {
-                        if k == mt {
+                        if k == mt && is_qualifying_poi(k, v) {
                             parsed.qualifying_tag = Some((k.to_owned(), v.to_owned()));
                             break;
                         }
@@ -1154,8 +1249,25 @@ pub(crate) fn place_type_from_tag(key: &str, value: &str) -> PlaceType {
         ("waterway", "river") | ("waterway", "stream") | ("waterway", "canal") => PlaceType::River,
         ("aeroway", "aerodrome") => PlaceType::Airport,
         ("railway", "station") | ("railway", "halt") => PlaceType::Station,
+        ("public_transport", "station") => PlaceType::Station,
         ("landuse", "residential") | ("place", "suburb") => PlaceType::Suburb,
-        ("leisure", "park") | ("leisure", "nature_reserve") => PlaceType::Forest,
+        ("place", "neighbourhood") | ("place", "neighborhood") => PlaceType::Neighbourhood,
+        ("place", "square") => PlaceType::Square,
+        ("place", "locality") => PlaceType::Locality,
+        ("leisure", "park") | ("leisure", "garden") => PlaceType::Park,
+        ("leisure", "nature_reserve") => PlaceType::Park,
+        // Tourism — mostly visitor-attraction landmarks
+        ("tourism", "attraction") | ("tourism", "museum") | ("tourism", "gallery")
+        | ("tourism", "viewpoint") | ("tourism", "theme_park") | ("tourism", "zoo")
+        | ("tourism", "aquarium") => PlaceType::Landmark,
+        // Historic — castles, monuments, ruins, memorials, archaeological sites
+        ("historic", _) => PlaceType::Landmark,
+        // Civic / cultural amenities
+        ("amenity", "university") | ("amenity", "college") => PlaceType::University,
+        ("amenity", "hospital") => PlaceType::Hospital,
+        ("amenity", "townhall") | ("amenity", "library") | ("amenity", "theatre")
+        | ("amenity", "arts_centre") | ("amenity", "courthouse")
+        | ("amenity", "place_of_worship") => PlaceType::PublicBuilding,
         _ => PlaceType::Locality,
     }
 }
@@ -1202,7 +1314,7 @@ fn way_qualifies(way: &osmpbf::Way) -> bool {
     let mut is_building = false;
     let mut has_qualifying = false;
 
-    for (k, _) in way.tags() {
+    for (k, v) in way.tags() {
         match k {
             "name" => has_name = true,
             "highway" => is_highway = true,
@@ -1210,7 +1322,10 @@ fn way_qualifies(way: &osmpbf::Way) -> bool {
             _ => {
                 if !has_qualifying {
                     for &mt in MEANINGFUL_WAY_TAGS {
-                        if k == mt { has_qualifying = true; break; }
+                        if k == mt && is_qualifying_poi(k, v) {
+                            has_qualifying = true;
+                            break;
+                        }
                     }
                 }
             }

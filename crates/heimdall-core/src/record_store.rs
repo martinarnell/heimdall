@@ -735,6 +735,7 @@ fn place_type_from_u8(v: u8) -> PlaceType {
         12 => PlaceType::Neighbourhood,
         13 => PlaceType::Island,
         14 => PlaceType::Islet,
+        15 => PlaceType::Square,
         20 => PlaceType::Lake,
         21 => PlaceType::River,
         22 => PlaceType::Mountain,
@@ -743,6 +744,11 @@ fn place_type_from_u8(v: u8) -> PlaceType {
         25 => PlaceType::Cape,
         30 => PlaceType::Airport,
         31 => PlaceType::Station,
+        32 => PlaceType::Landmark,
+        33 => PlaceType::University,
+        34 => PlaceType::Hospital,
+        35 => PlaceType::PublicBuilding,
+        36 => PlaceType::Park,
         _ => PlaceType::Unknown,
     }
 }
