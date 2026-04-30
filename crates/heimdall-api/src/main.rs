@@ -15,7 +15,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 use clap::{Parser, Subcommand};
 
@@ -2269,44 +2269,32 @@ fn runtime_index_size(path: &std::path::Path) -> u64 {
 fn discover_indices(extra_dirs: &[PathBuf]) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
 
-    // Check ./data/index-*
-    if let Ok(entries) = std::fs::read_dir("data") {
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            if let Some(n) = name.to_str() {
-                if n.starts_with("index-") && entry.path().is_dir() {
-                    dirs.push(entry.path());
-                }
-            }
-        }
-    }
-
-    // Check ~/.heimdall/indices/index-*
-    let default_dir = fetch::default_data_dir();
-    if default_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(&default_dir) {
-            for entry in entries.flatten() {
-                let name = entry.file_name();
-                if let Some(n) = name.to_str() {
-                    if n.starts_with("index-") && entry.path().is_dir() {
-                        dirs.push(entry.path());
-                    }
-                }
-            }
-        }
-    }
-
-    // Extra dirs
-    for dir in extra_dirs {
+    let scan = |dir: &Path, out: &mut Vec<PathBuf>| {
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let name = entry.file_name();
                 if let Some(n) = name.to_str() {
                     if n.starts_with("index-") && entry.path().is_dir() {
-                        dirs.push(entry.path());
+                        out.push(entry.path());
                     }
                 }
             }
+        }
+    };
+
+    if extra_dirs.is_empty() {
+        // No explicit --data-dir: fall back to ./data and ~/.heimdall/indices.
+        scan(Path::new("data"), &mut dirs);
+        let default_dir = fetch::default_data_dir();
+        if default_dir.exists() {
+            scan(&default_dir, &mut dirs);
+        }
+    } else {
+        // Explicit --data-dir is authoritative — ignore implicit locations so
+        // stray ./data/index-* dirs can't shift the country vec out of sync
+        // with the global FST's country_order.json.
+        for dir in extra_dirs {
+            scan(dir, &mut dirs);
         }
     }
 
