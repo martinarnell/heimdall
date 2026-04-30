@@ -39,6 +39,15 @@ words = [
     "sweden",
 ]
 
+# Swedish definite-article suffixes. Stripped per-word at query time so
+# "domkyrkan" finds "Uppsala domkyrka", "stadsbiblioteket" finds
+# "Stockholms stadsbibliotek", "torget" finds "Sergels torg".
+# Order longest-first; each only fires when the stripped word stays
+# ≥ 4 chars. The "n" suffix catches en-noun definites where the stem
+# ends in a vowel (kyrka → kyrkan, gata → gatan).
+[definite_suffixes]
+suffixes = ["arna", "orna", "et", "en", "n"]
+
 [known_variants]
 # Explicit name → canonical name mappings
 # For cases where normalization alone isn't enough

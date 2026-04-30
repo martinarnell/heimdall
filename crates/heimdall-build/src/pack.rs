@@ -288,6 +288,23 @@ pub fn pack(
                 write!(exact_writer, "{}\t{}\t{}\t{}\n", primary_lower, id, importance, pop_flag)?;
                 exact_count += 1;
 
+                // Per-word indexing: multi-word names also get an FST key
+                // for each individual word, with a *demoted* importance so
+                // exact full-string matches still beat per-word matches.
+                // Combined with the multi-record FST sidecar, "domkyrkan"
+                // becomes a key whose posting list contains Uppsala
+                // domkyrka, Lunds domkyrka, Linköpings domkyrka — the
+                // city-context filter then picks the right one.
+                //
+                // Skip stopwords (kommun, stad, län, …) and very short
+                // tokens (≤ 2 chars) — those would create noisy posting
+                // lists where the right record drowns in 1000s of
+                // unrelated hits.
+                index_per_word_keys(
+                    &mut exact_writer, &mut exact_count, &primary_lower,
+                    id, importance, pop_flag, normalizer.stopwords(),
+                )?;
+
                 // Split compound bilingual names (e.g. "Casteddu/Cagliari", "Bolzano - Bozen")
                 for sep in [" / ", " - ", "/"] {
                     if primary_lower.contains(sep) {
@@ -314,6 +331,13 @@ pub fn pack(
                     if !key.is_empty() {
                         write!(exact_writer, "{}\t{}\t{}\t{}\n", key, id, importance, pop_flag)?;
                         exact_count += 1;
+                        // Per-word entries for the alt too, so individual
+                        // words from name:* / old_name / official_name
+                        // also resolve.
+                        index_per_word_keys(
+                            &mut exact_writer, &mut exact_count, &key,
+                            id, importance, pop_flag, normalizer.stopwords(),
+                        )?;
                         // Also write a stop-word-stripped variant. "ABBA
                         // The Museum" → "abba museum" so the canonical
                         // English query for the place lands on the
@@ -442,9 +466,11 @@ pub fn pack(
 
 /// Maximum number of record_ids stored per posting list. Same-name
 /// alternates beyond this are dropped (sorted by importance desc, so the
-/// least-important ones go first). Eight is enough to disambiguate
-/// "Sätra", "Husby", "Domkyrkan" etc. without bloating the index.
-const MAX_POSTINGS_PER_KEY: usize = 8;
+/// least-important ones go first). 16 leaves room for ~10 full-importance
+/// hits on keys that collide between definite-form ("Stadsbiblioteket")
+/// and per-word ("X stadsbibliotek") indexing — small enough that the
+/// sidecar stays under a few MB.
+const MAX_POSTINGS_PER_KEY: usize = 16;
 
 /// Build FST from a disk TSV file: external sort → group by key → write top-N postings
 /// to sidecar → stream offsets into FST.
@@ -516,13 +542,15 @@ fn build_fst_from_disk(tsv_path: &Path, fst_path: &Path, sidecar_path: Option<&P
         if key.is_empty() || group.is_empty() {
             return Ok(());
         }
-        // Sort by importance desc, then by record_id for determinism.
-        group.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
         // Dedup by record_id — same record may appear under multiple
-        // importance values if it was inserted via multiple variants.
-        // Highest importance comes first after the sort, so dedup_by_key
-        // keeps that one.
+        // importance values if it was inserted via multiple variants
+        // (primary name + per-word + alt-name). `Vec::dedup_by_key` only
+        // removes *consecutive* duplicates, so we must sort by id first,
+        // then collapse keeping the highest importance per id, then
+        // re-sort by importance desc for the final posting order.
+        group.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
         group.dedup_by_key(|(id, _)| *id);
+        group.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
         if group.len() > MAX_POSTINGS_PER_KEY {
             group.truncate(MAX_POSTINGS_PER_KEY);
         }
@@ -590,6 +618,53 @@ fn build_fst_from_disk(tsv_path: &Path, fst_path: &Path, sidecar_path: Option<&P
 /// - Wikidata bonus: +8000 (notable enough to have a Wikipedia article).
 ///   Lifts famous-but-tiny places (Gamla stan, Skansen, Drottningholm) above
 ///   anonymous suburbs/villages of similar size.
+/// Per-word indexing for multi-word place names. Writes one TSV line
+/// per content-bearing word so the FST has a key for each individual
+/// word that appears in the name. Combined with the multi-record FST
+/// sidecar this lets `domkyrkan uppsala` find Uppsala domkyrka, and
+/// `operan` find Kungliga Operan.
+///
+/// Demoting via `importance / 4` keeps full-string exact matches above
+/// per-word matches so a query that exactly matches a record's primary
+/// name still wins on ranking.
+///
+/// Skipped:
+/// - Single-word names (already indexed as the full name).
+/// - Stopwords from the language config (kommun, län, stad, sverige …).
+/// - Tokens of 2 chars or shorter (i, av, …) — too dense to be useful.
+/// - The compound-bilingual sep tokens already handled by the slash
+///   loop above are NOT excluded here; per-word indexing is additive.
+fn index_per_word_keys<W: std::io::Write>(
+    writer: &mut W,
+    counter: &mut usize,
+    primary_lower: &str,
+    record_id: u32,
+    importance: u16,
+    pop_flag: u8,
+    stopwords: &[String],
+) -> std::io::Result<()> {
+    let words: Vec<&str> = primary_lower.split_whitespace().collect();
+    if words.len() < 2 { return Ok(()); }
+    // Heavy demotion. Per-word entries must never outrank a full-name
+    // exact match — otherwise a query like "Bergen" returns "Vita
+    // bergen" (per-word demoted ~2000) instead of any record named
+    // *exactly* "Bergen" (full importance ~300). With /128, the demoted
+    // score sits below the lowest typical exact-record floor (~300 for
+    // Locality without wd) for all but the most-important records, so
+    // exact hits dominate the top-8 cap. Tie-breaks within per-word
+    // entries (for keys with no exact hits, e.g. "domkyrka" alone)
+    // still respect relative importance via the residual division.
+    let demoted = ((importance as u32 / 128).max(1)) as u16;
+    for word in &words {
+        let w = word.trim_matches(|c: char| !c.is_alphanumeric());
+        if w.len() <= 2 { continue; }
+        if stopwords.iter().any(|sw| sw == w) { continue; }
+        write!(writer, "{}\t{}\t{}\t{}\n", w, record_id, demoted, pop_flag)?;
+        *counter += 1;
+    }
+    Ok(())
+}
+
 /// Strip common articles/conjunctions so "ABBA The Museum" → "abba museum"
 /// and "Universitetet i Stockholm" → "universitetet stockholm".
 /// Operates on lowercased input. Conservative list — only words that

@@ -806,7 +806,7 @@ async fn search(
         };
 
         if let Some(norm) = normalizer {
-            let candidates = norm.normalize(&query_text);
+            let candidates = norm.normalize_for_query(&query_text);
 
             // --- Exact lookup via global FST ---
             for candidate in &candidates {
@@ -851,7 +851,7 @@ async fn search(
     // Address/street results break out of this loop and fall through to the
     // final sort, so they get properly ranked against global FST results.
     for &(ci, country) in &target_countries {
-        let candidates = country.normalizer.normalize(&query_text);
+        let candidates = country.normalizer.normalize_for_query(&query_text);
 
         let mut geo_query = GeoQuery::new(&query_text);
         // When a city context is in play, look at a wider candidate pool
@@ -1131,10 +1131,34 @@ async fn search(
     // -----------------------------------------------------------------------
     // Word-dropping fallback for multi-word queries
     // -----------------------------------------------------------------------
-    // If the full query returned no results and has 3+ words, try progressively
-    // shorter prefixes. E.g. "Santa Cruz de Tenerife" → "Santa Cruz de" → "Santa Cruz".
-    // Also try dropping from the front for qualifier patterns like "Richmond Yorkshire".
-    if response.is_empty() {
+    // If the full query returned no results — OR if a city context is set
+    // and none of the current results sit in/near that city — try
+    // progressively shorter prefixes. E.g. "Santa Cruz de Tenerife" →
+    // "Santa Cruz de" → "Santa Cruz". Without the second condition,
+    // queries like "stadsbiblioteket stockholm" would short-circuit on
+    // a phonetic-fallback match in some other city, then get
+    // city-filtered to empty, never running word-drop.
+    let response_has_city_match = if let Some((ctx_a1, ctx_a2, ctx_coord)) = city_context {
+        response.iter().any(|r| {
+            if r.place_id == 0 { return false; }
+            let (ci, rid) = decode_place_id(r.place_id);
+            if let Some(country) = state.countries.get(ci) {
+                if let Ok(rec) = country.index.record_store().get(rid) {
+                    return city_context_tier(rec.admin1_id, rec.admin2_id, rec.coord,
+                                             ctx_a1, ctx_a2, ctx_coord) > 0;
+                }
+            }
+            false
+        })
+    } else {
+        true
+    };
+    if response.is_empty() || (city_context.is_some() && !response_has_city_match) {
+        if city_context.is_some() && !response.is_empty() {
+            // Clear out the irrelevant phonetic/lev matches before running
+            // word-drop so we don't carry them into the final ranking.
+            response.clear();
+        }
         let words: Vec<&str> = query_text.split_whitespace().collect();
         if words.len() >= 2 {
             let mut subqueries: Vec<String> = Vec::new();
@@ -1157,7 +1181,7 @@ async fn search(
                 // that came from a partial subquery.
                 if let Some(ref global) = state.global_index {
                     if let Some(norm) = target_countries.first().map(|&(_, c)| &c.normalizer) {
-                        let sub_candidates = norm.normalize(sub);
+                        let sub_candidates = norm.normalize_for_query(sub);
                         for candidate in &sub_candidates {
                             let postings = global.exact_lookup(candidate);
                             let filtered = filter_postings_by_country(&postings, &country_codes, &state.countries);
@@ -1166,7 +1190,13 @@ async fn search(
                                     response.push(result);
                                 }
                             }
-                            if !response.is_empty() { break 'word_drop; }
+                            // Same rule as the per-country branch below —
+                            // keep iterating candidates when a city
+                            // context is set so the city-tier filter can
+                            // pick the contextually-correct alternate.
+                            if !response.is_empty() && city_context.is_none() {
+                                break 'word_drop;
+                            }
                         }
                     }
                 }
@@ -1176,7 +1206,7 @@ async fn search(
                 // fallback hit, not a verbatim one.
                 for &(ci, country) in &target_countries {
                     let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
-                    let sub_candidates = country.normalizer.normalize(sub);
+                    let sub_candidates = country.normalizer.normalize_for_query(sub);
                     let mut geo_q = GeoQuery::new(sub);
                     // Mirror the main place-name path: widen the candidate
                     // pool when a city context is set so the city-context
@@ -1190,7 +1220,18 @@ async fn search(
                             result.match_type = Some("word_drop".to_string());
                             response.push(result);
                         }
-                        if !response.is_empty() { break 'word_drop; }
+                        // When a city context is set, KEEP iterating
+                        // candidates — the first candidate's results may
+                        // all get filtered out by the city tier filter,
+                        // and a definite-suffix-stripped variant
+                        // ("domkyrka" from "domkyrkan") might find the
+                        // right record under a different per-word key.
+                        // Without a city context, break on first hit
+                        // (existing behaviour) since the filter won't
+                        // remove anything anyway.
+                        if !response.is_empty() && city_context.is_none() {
+                            break 'word_drop;
+                        }
                     }
                 }
             }

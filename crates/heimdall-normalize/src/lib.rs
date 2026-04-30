@@ -72,6 +72,8 @@ struct NormConfig {
     #[serde(default)]
     case_suffixes: CaseSuffixConfig,
     #[serde(default)]
+    definite_suffixes: DefiniteSuffixConfig,
+    #[serde(default)]
     diacritics: HashMap<String, String>,
     #[serde(default)]
     char_equivalences: HashMap<String, String>,
@@ -102,6 +104,17 @@ struct CaseSuffixConfig {
     suffixes: Vec<String>,
 }
 
+#[derive(serde::Deserialize, Default)]
+struct DefiniteSuffixConfig {
+    /// Definite-article suffixes that turn nouns into their "the" form,
+    /// applied per-word in multi-word queries. For Swedish: et, en, arna,
+    /// orna ("torget" ↔ "torg", "domkyrkan" ↔ "domkyrka",
+    /// "stadsbiblioteket" ↔ "stadsbibliotek"). Order longest-first so the
+    /// stripper picks the best match.
+    #[serde(default)]
+    suffixes: Vec<String>,
+}
+
 // ---------------------------------------------------------------------------
 // Normalizer
 // ---------------------------------------------------------------------------
@@ -113,6 +126,10 @@ pub struct Normalizer {
     known_variants: HashMap<String, String>,
     /// Finnish case suffixes to strip (empty for non-Finnish normalizers)
     case_suffixes: Vec<String>,
+    /// Swedish/Norwegian definite-article suffixes (et/en/arna/…) applied
+    /// per-word so a query "domkyrkan uppsala" generates a candidate
+    /// "domkyrka uppsala" matching the indefinite-form OSM names.
+    definite_suffixes: Vec<String>,
     /// Which phonetic encoder to use
     phonetic_engine: PhoneticEngine,
     /// Diacritic replacements (e.g. ä→ae for German, ä→a for Nordic)
@@ -138,6 +155,13 @@ impl Normalizer {
             stopwords: DEFAULT_STOPWORDS_SV.iter().map(|s| s.to_string()).collect(),
             known_variants: HashMap::new(),
             case_suffixes: Vec::new(),
+            // Swedish definite-article suffixes default. Longest first.
+            definite_suffixes: vec![
+                "arna".to_string(),
+                "orna".to_string(),
+                "et".to_string(),
+                "en".to_string(),
+            ],
             phonetic_engine: PhoneticEngine::SwedishMetaphone,
             diacritics: Vec::new(),
             char_equivalences: Vec::new(),
@@ -169,6 +193,13 @@ impl Normalizer {
         &self.known_variants
     }
 
+    /// Access the configured stopwords (lowercased). Used by the build
+    /// pipeline's per-word indexing to skip filler tokens like "kommun"
+    /// that would otherwise create dense, noisy posting lists.
+    pub fn stopwords(&self) -> &[String] {
+        &self.stopwords
+    }
+
     fn from_parsed_config(config: NormConfig) -> Self {
         let abbreviations: Vec<(String, String)> = if config.abbreviations.is_empty() {
             DEFAULT_ABBREVIATIONS_SV
@@ -196,6 +227,9 @@ impl Normalizer {
         let mut case_suffixes = config.case_suffixes.suffixes;
         case_suffixes.sort_by(|a, b| b.len().cmp(&a.len()));
 
+        let mut definite_suffixes = config.definite_suffixes.suffixes;
+        definite_suffixes.sort_by(|a, b| b.len().cmp(&a.len()));
+
         // Phonetic engine selection
         let phonetic_engine = match config.phonetic.engine.as_deref() {
             Some("cologne") | Some("koelner") => PhoneticEngine::Cologne,
@@ -222,6 +256,7 @@ impl Normalizer {
             stopwords,
             known_variants,
             case_suffixes,
+            definite_suffixes,
             phonetic_engine,
             diacritics,
             char_equivalences,
@@ -338,6 +373,13 @@ impl Normalizer {
             }
         }
 
+        // Swedish definite-article stripping is intentionally NOT applied
+        // here — that would pollute the FST at *index* time, indexing
+        // every "Stadsbiblioteket" record under the "stadsbibliotek" key
+        // at full importance, drowning out the per-word entries. The
+        // stripping is exposed via `normalize_for_query` which the API
+        // layer calls when interpreting user input only.
+
         // Step 8: universal ASCII fallback for Latin-script names. The
         // config diacritic map and the Nordic table only cover their
         // language family — but OSM data carries borrowings (Stockholm
@@ -388,6 +430,51 @@ impl Normalizer {
             .filter(|w| !self.stopwords.iter().any(|s| s == w))
             .collect();
         words.join(" ")
+    }
+
+    /// Like `normalize`, plus per-word definite-article suffix stripping.
+    /// Used by the API for user-input candidates; the build pipeline uses
+    /// the plain `normalize` so the FST doesn't get an inflected variant
+    /// at full importance for every "Xet" record.
+    pub fn normalize_for_query(&self, input: &str) -> Vec<String> {
+        let mut candidates = self.normalize(input);
+        if self.definite_suffixes.is_empty() {
+            return candidates;
+        }
+        let new_candidates: Vec<String> = candidates.iter()
+            .filter_map(|c| {
+                let stripped = self.strip_definite_per_word(c);
+                if stripped != *c { Some(stripped) } else { None }
+            })
+            .collect();
+        for c in new_candidates {
+            if !candidates.contains(&c) {
+                candidates.push(c);
+            }
+        }
+        candidates
+    }
+
+    /// Strip Swedish/Norwegian definite-article suffixes from each word.
+    /// Conservative: only strips when the resulting word is ≥ 4 chars
+    /// (so "Bergen" → "Bergen", not "Berg") and the suffix is one of
+    /// the configured longest-first list.
+    fn strip_definite_per_word(&self, input: &str) -> String {
+        input.split_whitespace()
+            .map(|word| self.strip_definite_one(word))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn strip_definite_one(&self, word: &str) -> String {
+        for suffix in &self.definite_suffixes {
+            if word.ends_with(suffix.as_str())
+                && word.len() - suffix.len() >= 4
+            {
+                return word[..word.len() - suffix.len()].to_owned();
+            }
+        }
+        word.to_owned()
     }
 
     /// Strip Finnish grammatical case suffixes from a word.

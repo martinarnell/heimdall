@@ -196,10 +196,10 @@ impl HeimdallIndex {
         };
         let off = value as usize;
         if off + 2 > bytes.len() { return vec![]; }
-        // Cap the count to the build-time MAX_POSTINGS_PER_KEY (8) — a
+        // Cap the count to the build-time MAX_POSTINGS_PER_KEY (16) — a
         // sane builder will never write more, and clamping prevents
         // unbounded Vec allocation if the sidecar were ever corrupted.
-        const MAX_POSTINGS_PER_KEY: usize = 8;
+        const MAX_POSTINGS_PER_KEY: usize = 16;
         let count = (u16::from_le_bytes([bytes[off], bytes[off + 1]]) as usize)
             .min(MAX_POSTINGS_PER_KEY);
         let mut out = Vec::with_capacity(count);
