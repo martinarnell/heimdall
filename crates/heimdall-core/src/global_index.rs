@@ -150,14 +150,20 @@ impl GlobalIndex {
     /// Returns all matching entries deduplicated by (country_id, record_id),
     /// sorted by importance descending.
     pub fn fuzzy_lookup(&self, query: &str, max_distance: u32) -> Vec<PostingEntry> {
-        // Guard: the fst crate's Levenshtein DFA builder can panic on short
-        // multi-byte UTF-8 inputs (e.g. 3-char Cyrillic = 6 bytes, distance 1).
-        // Require enough bytes so the DFA stays within its internal limits.
-        let min_bytes = (max_distance as usize + 1) * 4;
-        if query.len() < min_bytes {
+        // Guard: the fst crate's Levenshtein DFA builder may explode on very
+        // short multi-byte UTF-8 inputs (e.g. 3-char Cyrillic). Require enough
+        // *characters* (not bytes) for a meaningful fuzzy match. The previous
+        // byte-based check `query.len() < (max_distance + 1) * 4` rejected
+        // legitimate short ASCII queries like "upsala" (6 bytes) at distance 1.
+        let char_count = query.chars().count();
+        if char_count <= max_distance as usize + 1 {
+            // Need at least max_distance + 2 chars for the match to be useful;
+            // otherwise the entire query could be edited away.
             return vec![];
         }
 
+        // Construction returns Err on TooManyStates, so a panic here is
+        // unlikely; we still defensively unwrap_or_else into an empty result.
         let lev = match Levenshtein::new(query, max_distance) {
             Ok(l) => l,
             Err(_) => return vec![],
@@ -511,6 +517,39 @@ mod tests {
         let hits = idx.exact_lookup("oslo");
         assert_eq!(hits.len(), 1, "should be deduplicated");
         assert_eq!(hits[0].importance, 90, "should keep highest importance");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Short ASCII fuzzy lookup: 6-char queries like "upsala" must reach the
+    /// FST instead of being short-circuited by an over-strict byte-length
+    /// guard. Regression test for the Upsala→Uppsala bug.
+    #[test]
+    fn test_fuzzy_lookup_short_ascii() {
+        let tmp =
+            std::env::temp_dir().join("heimdall_global_index_short_fuzzy_test");
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        let mut builder = GlobalIndexBuilder::new();
+        builder.add_exact("uppsala".into(), 0, 1, 100);
+        builder.add_phonetic("APSL".into(), 0, 1, 100);
+        builder.write(&tmp).expect("write failed");
+
+        let idx = GlobalIndex::open(&tmp).expect("open failed");
+
+        // "upsala" (6 chars / 6 bytes) is Lev-1 from "uppsala" (7 chars).
+        let hits = idx.fuzzy_lookup("upsala", 1);
+        assert_eq!(hits.len(), 1, "short ASCII fuzzy should not be skipped");
+        assert_eq!(hits[0].record_id, 1);
+
+        // 3-char Cyrillic at distance 1 — too short, must return [].
+        // (Original guard's purpose: avoid panics on tiny multi-byte queries.)
+        let hits = idx.fuzzy_lookup("мск", 1);
+        assert!(hits.is_empty(), "3-char query at distance 1 should be skipped");
+
+        // Single ASCII char at distance 1 — also too short.
+        let hits = idx.fuzzy_lookup("a", 1);
+        assert!(hits.is_empty());
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
