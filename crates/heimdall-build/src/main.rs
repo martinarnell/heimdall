@@ -2308,7 +2308,9 @@ fn build_global_fst(data_dir: &Path, output_dir: &Path) -> Result<()> {
         };
         let off = value as usize;
         if off + 2 > bytes.len() { return vec![]; }
-        let count = u16::from_le_bytes([bytes[off], bytes[off + 1]]) as usize;
+        // Clamp to MAX_POSTINGS_PER_KEY (8) so a corrupted sidecar can't
+        // request unbounded allocation. Builders never write more.
+        let count = (u16::from_le_bytes([bytes[off], bytes[off + 1]]) as usize).min(8);
         let mut out = Vec::with_capacity(count);
         for i in 0..count {
             let p = off + 2 + i * 4;

@@ -146,8 +146,20 @@ impl HeimdallIndex {
 
         let admin: Vec<AdminEntry> = {
             let bytes = compressed_io::read_maybe_compressed(&paths.admin())?;
-            postcard::from_bytes(&bytes)
-                .unwrap_or_else(|_| bincode::deserialize(&bytes).expect("admin.bin deserialize failed"))
+            // Try the current schema first (postcard, then bincode). If
+            // both fail it's most likely a pre-population v2 index that
+            // doesn't carry the trailing field — try the legacy schema
+            // and lift entries into the new shape with population=0.
+            // Without this fallback the new binary would panic on every
+            // unrebuilt v2 index already deployed in production.
+            postcard::from_bytes::<Vec<AdminEntry>>(&bytes)
+                .or_else(|_| bincode::deserialize::<Vec<AdminEntry>>(&bytes))
+                .or_else(|_| {
+                    postcard::from_bytes::<Vec<AdminEntryV2>>(&bytes)
+                        .or_else(|_| bincode::deserialize::<Vec<AdminEntryV2>>(&bytes))
+                        .map(|v2| v2.into_iter().map(AdminEntry::from).collect())
+                })
+                .expect("admin.bin deserialize failed (neither v3 nor v2 schema matched)")
         };
 
         Ok(Self {
@@ -184,7 +196,12 @@ impl HeimdallIndex {
         };
         let off = value as usize;
         if off + 2 > bytes.len() { return vec![]; }
-        let count = u16::from_le_bytes([bytes[off], bytes[off + 1]]) as usize;
+        // Cap the count to the build-time MAX_POSTINGS_PER_KEY (8) — a
+        // sane builder will never write more, and clamping prevents
+        // unbounded Vec allocation if the sidecar were ever corrupted.
+        const MAX_POSTINGS_PER_KEY: usize = 8;
+        let count = (u16::from_le_bytes([bytes[off], bytes[off + 1]]) as usize)
+            .min(MAX_POSTINGS_PER_KEY);
         let mut out = Vec::with_capacity(count);
         for i in 0..count {
             let p = off + 2 + i * 4;

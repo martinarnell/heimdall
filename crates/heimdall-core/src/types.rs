@@ -257,10 +257,39 @@ pub struct AdminEntry {
     /// Used by pack.rs as a centrality signal — places inside a populous
     /// parent kommun get a small importance bonus so a hotel in Stockholm
     /// (kommun pop 970K) outranks a same-name hotel in Jönköping (141K).
-    /// Field is bincode-appended at the end so admin.bin v2 readers see
-    /// it but v1 readers (older binaries) decode as 0 if absent.
-    #[serde(default)]
+    /// Note: postcard / bincode-1 do not honour `#[serde(default)]` for
+    /// trailing fields, so v2 indices without this field would fail to
+    /// deserialise as `AdminEntry`. The runtime reader falls back to
+    /// `AdminEntryV2` and lifts those records with population=0; the
+    /// build pipeline writes the new shape going forward.
     pub population: u32,
+}
+
+/// The pre-centrality v2 layout of `AdminEntry` — everything except
+/// `population`. Used **only** as a deserialisation fallback in
+/// `HeimdallIndex::open` so the new binary can still load index
+/// directories built before this change. New indices always serialise
+/// the v3 (current) layout.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminEntryV2 {
+    pub id: u16,
+    pub name: String,
+    pub parent_id: Option<u16>,
+    pub coord: Coord,
+    pub place_type: PlaceType,
+}
+
+impl From<AdminEntryV2> for AdminEntry {
+    fn from(v: AdminEntryV2) -> Self {
+        Self {
+            id: v.id,
+            name: v.name,
+            parent_id: v.parent_id,
+            coord: v.coord,
+            place_type: v.place_type,
+            population: 0,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

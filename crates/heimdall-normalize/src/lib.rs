@@ -338,16 +338,16 @@ impl Normalizer {
             }
         }
 
-        // Step 8: universal ASCII fallback. The config diacritic map
-        // and the Nordic table only cover their language family — but
-        // OSM data carries borrowings (Stockholm "Grand Hôtel", "Café
-        // Opera", "Restaurant Élysée") whose users still type the
-        // ASCII form. Generate a fully-decomposed-and-stripped variant
-        // alongside, so the FST has a key for "grand hotel" pointing at
-        // the Hôtel record.
-        let universal = to_ascii_universal(&base);
-        if universal != base && !candidates.contains(&universal) {
-            candidates.push(universal);
+        // Step 8: universal ASCII fallback for Latin-script names. The
+        // config diacritic map and the Nordic table only cover their
+        // language family — but OSM data carries borrowings (Stockholm
+        // "Grand Hôtel", "Café Opera") whose users still type the
+        // ASCII form. The Latin-only gate avoids stripping combining
+        // marks from Devanagari/Thai/etc. where they carry vowels.
+        if let Some(universal) = to_ascii_universal(&base) {
+            if universal != base && !candidates.contains(&universal) {
+                candidates.push(universal);
+            }
         }
 
         candidates.into_iter().filter(|s| !s.is_empty()).collect()
@@ -560,15 +560,24 @@ pub fn to_ascii_nordic(s: &str) -> String {
         .collect()
 }
 
-/// Strip ALL Latin diacritics (å→a, ô→o, é→e, ç→c, ü→u, ñ→n …) — broader
+/// Strip Latin diacritics (å→a, ô→o, é→e, ç→c, ü→u, ñ→n …) — broader
 /// than `to_ascii_nordic`. Lets foreign-character-bearing names like
 /// "Grand Hôtel" → "grand hotel" land in the FST under the ASCII-only key
 /// users actually type. Uses Unicode NFD decomposition + drop combining
-/// marks, with a few extra rules for non-decomposable characters.
-pub fn to_ascii_universal(s: &str) -> String {
+/// marks, with a few extra rules for non-decomposable Latin characters.
+///
+/// Returns `None` when the input contains characters from non-Latin
+/// scripts (Devanagari, Thai, Arabic, CJK, …). Their combining marks
+/// carry semantic vowels and tones — stripping them yields garbage like
+/// "नई दिल्ली" → "नई दलल". The script-specific normalizers
+/// (`strip_combining_marks`, etc.) handle those separately.
+pub fn to_ascii_universal(s: &str) -> Option<String> {
+    if !is_latin_script(s) {
+        return None;
+    }
     use unicode_normalization::UnicodeNormalization;
     let decomposed: String = s.nfd().collect();
-    decomposed.chars()
+    let result: String = decomposed.chars()
         .filter_map(|c| match c {
             // Skip combining marks (the "˝", "´", "¸" parts of decomposed
             // characters)
@@ -584,7 +593,29 @@ pub fn to_ascii_universal(s: &str) -> String {
             'đ' | 'Đ' => Some('d'),
             c => Some(c),
         })
-        .collect()
+        .collect();
+    Some(result)
+}
+
+/// Returns true iff every alphabetic character in `s` belongs to the
+/// Latin script. Non-alphabetic characters (digits, whitespace,
+/// punctuation, common CJK punctuation) are ignored. Used to gate
+/// `to_ascii_universal` so it doesn't mangle Devanagari/Thai/etc.
+fn is_latin_script(s: &str) -> bool {
+    s.chars().all(|c| {
+        if !c.is_alphabetic() { return true; }
+        // Latin Unicode blocks — Basic Latin, Latin-1 Supplement,
+        // Latin Extended-A/B/C/D/E, IPA Extensions, Latin Extended
+        // Additional. Anything outside these is a non-Latin script.
+        matches!(c as u32,
+            0x0041..=0x005A     // A-Z
+            | 0x0061..=0x007A   // a-z
+            | 0x00C0..=0x024F   // Latin-1 Supplement + Latin Extended-A/B
+            | 0x1E00..=0x1EFF   // Latin Extended Additional
+            | 0x2C60..=0x2C7F   // Latin Extended-C
+            | 0xA720..=0xA7FF   // Latin Extended-D
+            | 0xAB30..=0xAB6F)  // Latin Extended-E
+    })
 }
 
 /// Alias for backwards compatibility
