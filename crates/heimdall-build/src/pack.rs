@@ -546,10 +546,13 @@ fn compute_importance_inline(place_type: PlaceType, population: Option<u32>, has
         // Town/Village so a small village never loses to a same-name POI.
         PlaceType::Landmark => 2500,
         PlaceType::University | PlaceType::Hospital | PlaceType::PublicBuilding => 1000,
-        // Park base bumped (was 800) so a famous park (Slottsskogen,
-        // Hagaparken) reliably beats a random village of the same
-        // name.
-        PlaceType::Park => 3500,
+        // Park base — same level as Landmark. Beats Village (2000)
+        // by a hair (with wd bonus, Park 10500 vs Village 10000) so
+        // Slottsskogen-the-park outranks Slottsskogen-the-village,
+        // but doesn't dwarf a real Suburb of the same name when the
+        // suburb is famous enough to have a `name:*` translation
+        // (Stockholm Djurgården).
+        PlaceType::Park => 2500,
         PlaceType::Lake | PlaceType::River => 1000,
         PlaceType::Mountain | PlaceType::Forest => 700,
         PlaceType::County => 4000,
@@ -564,10 +567,12 @@ fn compute_importance_inline(place_type: PlaceType, population: Option<u32>, has
         score += 8000;
     }
     // Each name:* translation is editorial attention from a foreign-language
-    // mapper. Caps at +2000 (10 translations) so it can't dwarf wikidata,
-    // but breaks ties between same-type same-wikidata places of the same
-    // name (Stockholm Stortorget has 8 translations, Växjö has 0).
-    score += (intl_translations as u32).min(10) * 200;
+    // mapper — a strong proxy for how known the place is internationally.
+    // +1500 per translation, capped at 5 (so ≤ +7500 total) — enough to
+    // lift famous suburbs (Stockholm Djurgården has name:ru) over an
+    // obscure same-name nature reserve, but small enough that a place
+    // with 5 translations doesn't suddenly outrank a tier-up category.
+    score += (intl_translations as u32).min(5) * 1500;
     score.min(65535) as u16
 }
 

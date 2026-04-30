@@ -50,3 +50,4 @@ rebuild*.log
 
 # ── Local dev notes ──────────────────────────────────────────────────
 /CLAUDE.local.md
+data/index-se-dev
