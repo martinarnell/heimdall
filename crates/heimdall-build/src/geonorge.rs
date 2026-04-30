@@ -1,7 +1,13 @@
 /// geonorge.rs — Parse Kartverket/Geonorge address CSV data
 ///
-/// The Norwegian Matrikkelen address dataset is a semicolon-separated CSV
-/// in EPSG:4258 (ETRS89 geographic ≈ WGS84). No coordinate transform needed.
+/// The Norwegian Matrikkelen address dataset distributed by Kartverket comes
+/// in EPSG:25833 (ETRS89 / UTM zone 33N, metric). The CSV's `Nord` and `Øst`
+/// columns are UTM northing/easting in metres — NOT lat/lon — and we transform
+/// to WGS84 here. UTM33 with central meridian 15°E shares all parameters with
+/// SWEREF99TM (same ellipsoid GRS80, same scale 0.9996, same false easting
+/// 500000), so we reuse `sweref99tm_to_wgs84`. Norway forces zone 33 onto its
+/// whole territory, which means west-coast points have negative easting
+/// (Bergen ~ -28000 m) — the inverse projection handles those correctly.
 ///
 /// Key fields: adressenavn (street), nummer (number), bokstav (suffix),
 /// postnummer (postcode), poststed (city), Nord (lat), Øst (lon)
@@ -12,6 +18,7 @@ use anyhow::Result;
 use tracing::info;
 
 use crate::extract::RawAddress;
+use crate::lantmateriet::sweref99tm_to_wgs84;
 
 /// Parse the Kartverket address CSV into RawAddress records.
 pub fn read_kartverket_addresses(csv_path: &Path) -> Result<Vec<RawAddress>> {
@@ -62,17 +69,21 @@ pub fn read_kartverket_addresses(csv_path: &Path) -> Result<Vec<RawAddress>> {
             continue;
         }
 
-        let lat: f64 = match fields[i_lat].trim().parse() {
+        // CSV holds UTM33 metric: Nord = northing, Øst = easting.
+        let northing: f64 = match fields[i_lat].trim().parse() {
             Ok(v) => v,
             Err(_) => { skipped += 1; continue; }
         };
-        let lon: f64 = match fields[i_lon].trim().parse() {
+        let easting: f64 = match fields[i_lon].trim().parse() {
             Ok(v) => v,
             Err(_) => { skipped += 1; continue; }
         };
+        let (lat, lon) = sweref99tm_to_wgs84(easting, northing);
 
-        // Sanity check coordinates (Norway: 57-81N, 4-32E)
-        if lat < 57.0 || lat > 81.0 || lon < 4.0 || lon > 32.0 {
+        // Sanity check coordinates (Norway: 57-81N, 4-32E for mainland +
+        // Svalbard; Jan Mayen at -8°E is excluded — Matrikkelen doesn't
+        // ship Jan Mayen addresses).
+        if lat < 57.0 || lat > 81.0 || lon < 4.0 || lon > 35.0 {
             skipped += 1;
             continue;
         }

@@ -1,54 +1,127 @@
 # Norwegian place name normalizer
-# Covers Bokmål, Nynorsk, and common English approximations
+# Covers Bokmål, Nynorsk, Sami names, and ASCII fallbacks via diacritics.
 
 [abbreviations]
-# Street types
+# Street types (Bokmål + Nynorsk)
 "gt." = "gate"
 "gt" = "gate"
+"g." = "gate"
 "v." = "vei"
 "vn." = "veien"
 "vn" = "veien"
+"vg." = "veg"
+"vg" = "veg"
 "pl." = "plass"
 "pl" = "plass"
 "alle" = "allé"
 "bv." = "byvei"
+"br." = "bru"
+
+# Religious / parish
+"k." = "kirke"
+"kpl." = "kapell"
 
 # Directional
 "n." = "nordre"
 "s." = "søndre"
 "ø." = "østre"
 "vestr." = "vestre"
-"st." = "store"
-"l." = "lille"
 "ndr." = "nordre"
 "sdr." = "søndre"
+"vstr." = "vestre"
+"østr." = "østre"
+
+# Size / position
+"st." = "store"
+"l." = "lille"
+"ll." = "lille"
 
 [stopwords]
 words = [
     "kommune",
+    "kommun",
     "fylke",
+    "tettsted",
+    "by",
     "norway",
     "norge",
     "noreg",
+    "norvegia",
 ]
 
-[known_variants]
-# English/ASCII approximations of Norwegian cities
-"tromso" = "tromsø"
-"tromsoe" = "tromsø"
-"bodo" = "bodø"
-"bodoe" = "bodø"
-"alesund" = "ålesund"
-"aalesund" = "ålesund"
-"gjovik" = "gjøvik"
-"gjoevik" = "gjøvik"
+# Norwegian-specific letters that don't decompose under NFD. The universal
+# ASCII normalizer handles `å` automatically (combining ring above strips),
+# but `æ` and `ø` are atomic codepoints — we declare the lossy ASCII
+# fallback here so users typing "Tromso" or "Baerum" find Tromsø / Bærum.
+# `oe`/`ae`/`aa` formal-transliteration variants come in via per-place
+# `known_variants` for the handful of cities where they're commonly used.
+[diacritics]
+"æ" = "a"
+"ø" = "o"
 
-# Historical names
+# Norwegian definite-article suffixes. Stripped per-word at query time so
+# "domkirken" finds "Bergen domkirke", "operaen" finds "Operahuset",
+# "bryggen" finds "Brygge", "torget" finds "X torg". Order longest-first;
+# each only fires when the stripped word stays ≥ 4 chars.
+#
+# Bokmål definite singular: -et (huset), -en (kirken), -n (kirken from
+# vowel stem "kirke"). Bokmål definite plural: -ene (husene, kirkene).
+# "n" handles the Bokmål pattern where a vowel-final stem (kirke, opera,
+# brygge, konge) takes a bare -n: "kirke" → "kirken", "opera" → "operaen".
+# Without "n", "Domkirken" strips to "Domkirk" (wrong stem) instead of
+# "Domkirke". With "n", we generate BOTH variants and the FST picks the
+# real one.
+[definite_suffixes]
+suffixes = ["ene", "et", "en", "n"]
+
+[known_variants]
+# Formal Norwegian-to-ASCII transliteration: æ→ae, ø→oe, å→aa. The
+# [diacritics] section above already gives the lossy single-char fallback
+# (æ→a, ø→o, å→a is automatic via NFD). These entries cover the older
+# canonical forms that show up in passports, postcards, and English texts.
+"tromsoe" = "tromsø"
+"bodoe" = "bodø"
+"aalesund" = "ålesund"
+"gjoevik" = "gjøvik"
+"aandalsnes" = "åndalsnes"
+"aamot" = "åmot"
+"aamli" = "åmli"
+"aas" = "ås"
+"vardoe" = "vardø"
+"vadsoe" = "vadsø"
+"roeroes" = "røros"
+"toensberg" = "tønsberg"
+"floroe" = "florø"
+"soerlandet" = "sørlandet"
+"soer-troendelag" = "sør-trøndelag"
+"nord-troendelag" = "nord-trøndelag"
+"oestfold" = "østfold"
+"lillestroem" = "lillestrøm"
+"sandnessjoeen" = "sandnessjøen"
+"hoenefoss" = "hønefoss"
+"andoeya" = "andøya"
+"bjoernoeya" = "bjørnøya"
+
+# Historical names — not derivable from any rule.
 "christiania" = "oslo"
 "kristiania" = "oslo"
 "nidaros" = "trondheim"
 "trondhjem" = "trondheim"
+"fredrikshald" = "halden"
+"frederikshald" = "halden"
 
-# Bokmål ↔ Nynorsk common pairs
+# Bokmål ↔ Nynorsk pairs and other alternate Norwegian forms.
 "bjorgvin" = "bergen"
 "bjørgvin" = "bergen"
+
+# Sami exonyms (Northern Sami is an official language — these are the
+# names locals use, not just historical).
+"romsa" = "tromsø"
+"álttá" = "alta"
+"alttaa" = "alta"
+"kárášjohka" = "karasjok"
+"karasjohka" = "karasjok"
+"guovdageaidnu" = "kautokeino"
+"deatnu" = "tana"
+"unjárga" = "nesseby"
+"unjarga" = "nesseby"

@@ -438,43 +438,109 @@ impl Normalizer {
     /// at full importance for every "Xet" record.
     pub fn normalize_for_query(&self, input: &str) -> Vec<String> {
         let mut candidates = self.normalize(input);
-        if self.definite_suffixes.is_empty() {
-            return candidates;
-        }
-        let new_candidates: Vec<String> = candidates.iter()
-            .filter_map(|c| {
-                let stripped = self.strip_definite_per_word(c);
-                if stripped != *c { Some(stripped) } else { None }
-            })
-            .collect();
-        for c in new_candidates {
-            if !candidates.contains(&c) {
-                candidates.push(c);
+
+        // Trailing single-letter token strip — Nordic postal-district
+        // suffixes ("København K", "Aarhus C", "Aalborg Ø") are
+        // universally formatted as "<city> <one-letter>". The letter
+        // carries no place-name signal but anchors phonetic noise; add
+        // a candidate without it so the underlying city resolves.
+        // Generic across languages — anything that looks like a
+        // 1-letter trailing token is unlikely to be the principal
+        // identifier of a place worth indexing.
+        if let Some(last) = input.split_whitespace().last() {
+            let alphas = last.chars().filter(|c| c.is_alphabetic()).count();
+            if alphas == 1 {
+                let words: Vec<&str> = input.split_whitespace().collect();
+                if words.len() >= 2 {
+                    let head = words[..words.len() - 1].join(" ");
+                    let head_norm = self.normalize(&head);
+                    for v in head_norm {
+                        if !candidates.contains(&v) {
+                            candidates.push(v);
+                        }
+                    }
+                }
             }
         }
+
+        // Definite-suffix-stripped variants (Norwegian "domkirken" →
+        // "domkirke"; Swedish "stadsbiblioteket" → "stadsbibliotek").
+        if !self.definite_suffixes.is_empty() {
+            let mut new_variants: Vec<String> = Vec::new();
+            for c in &candidates {
+                for v in self.strip_definite_variants(c) {
+                    if &v != c && !candidates.contains(&v) && !new_variants.contains(&v) {
+                        new_variants.push(v);
+                    }
+                }
+            }
+            candidates.extend(new_variants);
+        }
+
+        // Word-boundary variants: hyphen ↔ space and adjacent-word
+        // concatenation. Generic — applies universally — because OSM
+        // canonicalisation diverges from how users type compound names.
+        // "Ny Ålesund" ↔ "Ny-Ålesund", "Kristian Sand" → "Kristiansand",
+        // "Sør Trøndelag" ↔ "Sør-Trøndelag". One change per variant to
+        // bound the candidate explosion to ~3N for an N-token query.
+        let mut boundary_variants: Vec<String> = Vec::new();
+        for c in &candidates {
+            for v in word_boundary_variants(c) {
+                if &v != c && !candidates.contains(&v) && !boundary_variants.contains(&v) {
+                    boundary_variants.push(v);
+                }
+            }
+        }
+        // Cap to keep downstream FST lookup count reasonable.
+        boundary_variants.truncate(16);
+        candidates.extend(boundary_variants);
+
         candidates
     }
 
-    /// Strip Swedish/Norwegian definite-article suffixes from each word.
-    /// Conservative: only strips when the resulting word is ≥ 4 chars
-    /// (so "Bergen" → "Bergen", not "Berg") and the suffix is one of
-    /// the configured longest-first list.
-    fn strip_definite_per_word(&self, input: &str) -> String {
-        input.split_whitespace()
-            .map(|word| self.strip_definite_one(word))
-            .collect::<Vec<_>>()
-            .join(" ")
-    }
-
-    fn strip_definite_one(&self, word: &str) -> String {
+    /// All valid definite-suffix-stripped forms of a single word. A word may
+    /// match multiple suffixes (Norwegian "domkirken" → "domkirk" via "en"
+    /// AND "domkirke" via "n"); both stems are useful candidates because the
+    /// real OSM record could be indexed under either depending on whether
+    /// the indefinite stem ends in a vowel.
+    fn strip_definite_one_all(&self, word: &str) -> Vec<String> {
+        let mut out = Vec::new();
         for suffix in &self.definite_suffixes {
             if word.ends_with(suffix.as_str())
                 && word.len() - suffix.len() >= 4
             {
-                return word[..word.len() - suffix.len()].to_owned();
+                let stem = word[..word.len() - suffix.len()].to_owned();
+                if !out.contains(&stem) {
+                    out.push(stem);
+                }
             }
         }
-        word.to_owned()
+        out
+    }
+
+    /// Generate all definite-stripped variants of a multi-word phrase.
+    /// Strips one word at a time (cartesian product across the strip
+    /// options of that word) — full cartesian across all words would
+    /// blow up for long queries. In practice ≥99% of definite-form
+    /// queries have only one strippable token.
+    fn strip_definite_variants(&self, input: &str) -> Vec<String> {
+        let words: Vec<&str> = input.split_whitespace().collect();
+        if words.is_empty() {
+            return Vec::new();
+        }
+        let mut out: Vec<String> = Vec::new();
+        for (i, w) in words.iter().enumerate() {
+            for stem in self.strip_definite_one_all(w) {
+                let parts: Vec<String> = words.iter().enumerate()
+                    .map(|(j, ww)| if j == i { stem.clone() } else { (*ww).to_string() })
+                    .collect();
+                let joined = parts.join(" ");
+                if !out.contains(&joined) {
+                    out.push(joined);
+                }
+            }
+        }
+        out
     }
 
     /// Strip Finnish grammatical case suffixes from a word.
@@ -539,6 +605,84 @@ impl Normalizer {
         }
         result
     }
+}
+
+/// Generate word-boundary variants of a query string.
+///
+/// Language-agnostic. Users type compound names with separators that don't
+/// always match how OSM canonicalises them. For each adjacent-token gap we
+/// emit two variants:
+///
+///   - **Swap separator** (space ↔ hyphen). `"Ny Ålesund"` → `"Ny-Ålesund"`,
+///     `"Sør-Trøndelag"` → `"Sør Trøndelag"`.
+///   - **Concatenate** (drop the separator). `"Kristian Sand"` →
+///     `"Kristiansand"`, `"Lille Hammer"` → `"Lillehammer"`.
+///
+/// Exactly one boundary changes per variant — never the cartesian product
+/// across all gaps — so an N-token input yields at most `2 * (N - 1)`
+/// variants. The original input is **not** included in the output; callers
+/// should try it first and treat these as fallbacks.
+pub fn word_boundary_variants(input: &str) -> Vec<String> {
+    // Tokenise on whitespace and hyphens, recording the separator that
+    // ended each token. Empty tokens (from runs like "  ") are skipped.
+    let mut tokens: Vec<&str> = Vec::new();
+    let mut seps: Vec<char> = Vec::new();
+    let mut start = 0usize;
+    for (i, c) in input.char_indices() {
+        if c.is_whitespace() || c == '-' {
+            if i > start {
+                tokens.push(&input[start..i]);
+                seps.push(c);
+            }
+            start = i + c.len_utf8();
+        }
+    }
+    if start < input.len() {
+        tokens.push(&input[start..]);
+    }
+    if tokens.len() < 2 {
+        return Vec::new();
+    }
+    // We have tokens[0..N] and seps[0..N-1] (one separator per gap;
+    // if `seps.len() < tokens.len() - 1` the input ended in a separator
+    // run, which we treat the same as a normal trailing token).
+    while seps.len() < tokens.len().saturating_sub(1) {
+        seps.push(' ');
+    }
+
+    // Helper: rebuild input with the gap at `sep_idx` either swapped to
+    // the alternate separator or concatenated.
+    let rebuild = |sep_idx: usize, target: Option<char>| -> String {
+        let mut s = String::with_capacity(input.len() + 1);
+        for (i, t) in tokens.iter().enumerate() {
+            if i > 0 {
+                let c = if i - 1 == sep_idx {
+                    target
+                } else {
+                    Some(seps[i - 1])
+                };
+                if let Some(c) = c {
+                    s.push(c);
+                }
+            }
+            s.push_str(t);
+        }
+        s
+    };
+
+    let mut out: Vec<String> = Vec::with_capacity(seps.len() * 2);
+    for sep_idx in 0..seps.len() {
+        let alt = if seps[sep_idx] == '-' { ' ' } else { '-' };
+        let swapped = rebuild(sep_idx, Some(alt));
+        if swapped != input && !out.contains(&swapped) {
+            out.push(swapped);
+        }
+        let concatenated = rebuild(sep_idx, None);
+        if concatenated != input && !out.contains(&concatenated) {
+            out.push(concatenated);
+        }
+    }
+    out
 }
 
 /// Strip everything after comma or parenthesis.
@@ -780,6 +924,51 @@ mod tests {
         let n = Normalizer::swedish();
         let candidates = n.normalize("Stockholm");
         assert!(candidates.contains(&"stockholm".to_owned()));
+    }
+
+    #[test]
+    fn test_word_boundary_variants_concatenate() {
+        // Case preservation is intentional — normalize() lowercases later
+        // when it builds FST lookup keys. We just rejoin tokens as-is.
+        let v = word_boundary_variants("Kristian Sand");
+        assert!(v.contains(&"KristianSand".to_owned()), "got {:?}", v);
+        let v2 = word_boundary_variants("kristian sand");
+        assert!(v2.contains(&"kristiansand".to_owned()), "got {:?}", v2);
+    }
+
+    #[test]
+    fn test_word_boundary_variants_swap() {
+        let v = word_boundary_variants("Ny Ålesund");
+        assert!(v.contains(&"Ny-Ålesund".to_owned()), "got {:?}", v);
+        let v2 = word_boundary_variants("Sør-Trøndelag");
+        assert!(v2.contains(&"Sør Trøndelag".to_owned()), "got {:?}", v2);
+    }
+
+    #[test]
+    fn test_word_boundary_variants_three_token() {
+        let v = word_boundary_variants("A B C");
+        // Each gap gets a swap and a concat → 4 variants total
+        assert!(v.contains(&"A-B C".to_owned()), "got {:?}", v);
+        assert!(v.contains(&"AB C".to_owned()), "got {:?}", v);
+        assert!(v.contains(&"A B-C".to_owned()), "got {:?}", v);
+        assert!(v.contains(&"A BC".to_owned()), "got {:?}", v);
+    }
+
+    #[test]
+    fn test_word_boundary_variants_no_change_single_token() {
+        let v = word_boundary_variants("Stockholm");
+        assert!(v.is_empty(), "single token should produce no variants, got {:?}", v);
+    }
+
+    #[test]
+    fn test_normalize_for_query_includes_boundary_variants() {
+        // Default (Swedish) normalizer should still produce a concatenated
+        // candidate from user input "Kristian Sand" via the language-agnostic
+        // word-boundary variant path.
+        let n = Normalizer::swedish();
+        let cands = n.normalize_for_query("Kristian Sand");
+        assert!(cands.iter().any(|c| c == "kristiansand"),
+                "no kristiansand candidate, got {:?}", cands);
     }
 
     #[test]

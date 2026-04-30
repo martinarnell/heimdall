@@ -1002,6 +1002,14 @@ fn is_place_record(osm_key: &str, osm_value: &str) -> bool {
 }
 
 /// Map Photon osm_key/value to Heimdall PlaceType
+///
+/// Mirrors `extract::place_type_from_tag` so Photon-sourced records get the
+/// same classification as OSM-extracted ones. Without this, a Photon record
+/// like `tourism=museum` would land as `Unknown` and pack.rs would only keep
+/// it if it carried a `wikidata` Q-id — silently dropping museums, libraries,
+/// hospitals, and parks that Photon ingested but OSM extract missed (or that
+/// got merged in via per-country fallback in regions where the OSM-only
+/// pipeline came up short).
 fn map_photon_place_type(osm_key: &str, osm_value: &str, rank: Option<u8>) -> PlaceType {
     match (osm_key, osm_value) {
         ("place", v) => PlaceType::from_osm(v),
@@ -1015,13 +1023,40 @@ fn map_photon_place_type(osm_key: &str, osm_value: &str, rank: Option<u8>) -> Pl
             _ => PlaceType::Unknown,
         },
         ("natural", "water") | ("natural", "lake") => PlaceType::Lake,
-        ("natural", "peak") | ("natural", "volcano") => PlaceType::Mountain,
+        ("natural", "peak") | ("natural", "volcano")
+        | ("natural", "mountain") | ("mountain_pass", _) => PlaceType::Mountain,
         ("natural", "bay") => PlaceType::Bay,
-        ("natural", "cape") => PlaceType::Cape,
-        ("natural", "wood") | ("natural", "forest") => PlaceType::Forest,
-        ("waterway", "river") | ("waterway", "stream") => PlaceType::River,
+        ("natural", "cape") | ("natural", "peninsula") => PlaceType::Cape,
+        ("natural", "wood") | ("natural", "forest") | ("landuse", "forest") => PlaceType::Forest,
+        ("natural", "island") => PlaceType::Island,
+        ("natural", "islet") => PlaceType::Islet,
+        ("waterway", "river") | ("waterway", "stream") | ("waterway", "canal") => PlaceType::River,
         ("railway", "station") | ("railway", "halt") => PlaceType::Station,
+        ("public_transport", "station") => PlaceType::Station,
         ("aeroway", "aerodrome") => PlaceType::Airport,
+
+        // Tourism — visitor attractions and museums.
+        ("tourism", "attraction") | ("tourism", "museum") | ("tourism", "gallery")
+        | ("tourism", "viewpoint") | ("tourism", "theme_park") | ("tourism", "zoo")
+        | ("tourism", "aquarium") => PlaceType::Landmark,
+        // Historic — castles, monuments, ruins, memorials.
+        ("historic", _) => PlaceType::Landmark,
+        // Civic — universities, hospitals, libraries, theatres.
+        ("amenity", "university") | ("amenity", "college") => PlaceType::University,
+        ("amenity", "hospital") => PlaceType::Hospital,
+        ("amenity", "townhall") | ("amenity", "library") | ("amenity", "theatre")
+        | ("amenity", "arts_centre") | ("amenity", "courthouse")
+        | ("amenity", "place_of_worship") => PlaceType::PublicBuilding,
+        // Leisure — parks and major venues.
+        ("leisure", "park") | ("leisure", "garden") | ("leisure", "nature_reserve") => PlaceType::Park,
+        ("leisure", "stadium") | ("leisure", "sports_centre")
+        | ("leisure", "ice_rink") => PlaceType::Landmark,
+        // Man-made structures.
+        ("man_made", "bridge") | ("man_made", "lighthouse")
+        | ("man_made", "tower") => PlaceType::Landmark,
+        // Squares.
+        ("place", "square") => PlaceType::Square,
+
         _ => PlaceType::Unknown,
     }
 }
