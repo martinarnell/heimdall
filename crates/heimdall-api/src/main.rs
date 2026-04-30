@@ -344,6 +344,111 @@ fn resolve_city(
     (None, None)
 }
 
+/// Like `resolve_city`, but also returns the admin1_id of the resolved city.
+/// Used to apply a city-context bonus for disambiguation queries like
+/// "Slussen, Stockholm" — we want results sharing Stockholm's admin1/admin2
+/// or sitting close to Stockholm's coord.
+fn resolve_city_full(
+    city: &str,
+    country: &CountryIndex,
+    country_idx: usize,
+    normalizer: &Normalizer,
+    global_index: Option<&GlobalIndex>,
+) -> (Option<u16>, Option<u16>, Option<Coord>) {
+    let city_candidates = normalizer.normalize(city);
+
+    // Try per-country FST first (populated in full mode)
+    for candidate in &city_candidates {
+        if let Some(record_id) = country.index.exact_lookup(candidate) {
+            if let Ok(record) = country.index.record_store().get(record_id) {
+                let a1 = if record.admin1_id > 0 { Some(record.admin1_id) } else { None };
+                let a2 = if record.admin2_id > 0 { Some(record.admin2_id) } else { None };
+                return (a1, a2, Some(record.coord));
+            }
+        }
+    }
+
+    // Fallback: use global index postings
+    if let Some(global) = global_index {
+        for candidate in &city_candidates {
+            let postings = global.exact_lookup(candidate);
+            for posting in &postings {
+                if posting.country_id as usize == country_idx {
+                    if let Ok(record) = country.index.record_store().get(posting.record_id) {
+                        let a1 = if record.admin1_id > 0 { Some(record.admin1_id) } else { None };
+                        let a2 = if record.admin2_id > 0 { Some(record.admin2_id) } else { None };
+                        return (a1, a2, Some(record.coord));
+                    }
+                }
+            }
+        }
+    }
+
+    (None, None, None)
+}
+
+/// Split a "X, Y" or "X, Y, Z" query into (head, last_token).
+/// `head` is everything before the last comma (e.g. "Slussen" for
+/// "Slussen, Stockholm"; "Drottninggatan 1" for
+/// "Drottninggatan 1, Stockholm, Sweden").
+/// Returns None when the input has no comma or either side is empty,
+/// or when the last token starts with a digit (postcode/housenumber).
+fn split_disambiguation_query(input: &str) -> Option<(String, String)> {
+    let trimmed = input.trim();
+    let last_comma = trimmed.rfind(',')?;
+    let head = trimmed[..last_comma].trim();
+    let last = trimmed[last_comma + 1..].trim();
+    if head.is_empty() || last.is_empty() { return None; }
+    // Last token must look like a place name (alphabetic start, not a postcode)
+    if last.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(true) { return None; }
+    Some((head.to_owned(), last.to_owned()))
+}
+
+/// Compute a city-context tier for a candidate, used to re-rank results
+/// when the query has a "X, Y" disambiguation pattern.
+///
+/// Returns a non-negative integer where higher is better:
+///   3 = same admin2 (municipality) — strongest match
+///   2 = same admin1 (state/county/län)
+///   1 = within 50 km of city coord
+///   0 = no relationship
+fn city_context_tier(
+    cand_admin1: u16,
+    cand_admin2: u16,
+    cand_coord: Coord,
+    ctx_admin1: Option<u16>,
+    ctx_admin2: Option<u16>,
+    ctx_coord: Option<Coord>,
+) -> u8 {
+    if let (Some(a2), true) = (ctx_admin2, cand_admin2 > 0) {
+        if a2 == cand_admin2 { return 3; }
+    }
+    if let (Some(a1), true) = (ctx_admin1, cand_admin1 > 0) {
+        if a1 == cand_admin1 { return 2; }
+    }
+    if let Some(c) = ctx_coord {
+        if cand_coord.distance_m(&c) <= 50_000.0 {
+            return 1;
+        }
+    }
+    0
+}
+
+/// Detect a postcode-shaped query. Matches:
+///   - 4-7 ASCII digits ("11122", "21100", "75221", "1010", "1234567")
+///   - 5-digit Swedish split form "NNN NN" ("11 122", "114 56")
+///
+/// UK-style alphanumeric postcodes are handled separately by
+/// `heimdall_core::addr_index::is_uk_postcode`.
+fn is_postcode_shaped(s: &str) -> bool {
+    let trimmed = s.trim();
+    if trimmed.is_empty() { return false; }
+    // Strip a single internal space (Swedish "114 56", DE "12345" w/ stray ws)
+    let compact: String = trimmed.chars().filter(|c| !c.is_whitespace()).collect();
+    if compact.len() < 4 || compact.len() > 7 { return false; }
+    compact.chars().all(|c| c.is_ascii_digit())
+}
+
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
@@ -548,8 +653,89 @@ async fn search(
         }
     }
 
+    // Postcode auto-detect for q= (Bug B). Users paste raw zips like "11122"
+    // or "114 56" into the search box and expect the same result as
+    // ?postalcode=. Try each target country's postcode FST. If a match is
+    // found we push it as a `postcode` result; we keep going so place-name
+    // results from the global FST below can still be returned alongside.
+    let mut postcode_match_found = false;
+    if is_postcode_shaped(&query_text) {
+        for (_ci, country) in &target_countries {
+            if let Some(ref addr_index) = country.addr_index {
+                if let Some(r) = addr_index.lookup_postcode(&query_text) {
+                    let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
+                    let display = if r.street.is_empty() {
+                        query_text.trim().to_owned()
+                    } else {
+                        r.street.clone()
+                    };
+                    response.push(NominatimResult {
+                        place_id: 0,
+                        osm_type: None,
+                        osm_id: None,
+                        display_name: display,
+                        lat: format!("{:.7}", r.coord.lat_f64()),
+                        lon: format!("{:.7}", r.coord.lon_f64()),
+                        place_type: "postcode".to_owned(),
+                        importance: 0.6,
+                        match_type: Some("postcode".to_owned()),
+                        address: if params.addressdetails > 0 {
+                            Some(AddressDetails {
+                                house_number: None,
+                                road: None,
+                                suburb: None,
+                                city: None,
+                                town: None,
+                                village: None,
+                                county: None,
+                                state: None,
+                                postcode: Some(query_text.trim().to_owned()),
+                                country: Some(country.name.clone()),
+                                country_code: Some(cc),
+                            })
+                        } else { None },
+                    });
+                    postcode_match_found = true;
+                    break;
+                }
+            }
+        }
+        // If the input is purely a postcode shape and we found a match,
+        // place-name lookups for the same digit string will be useless —
+        // short-circuit to keep the postcode result clean.
+        if postcode_match_found {
+            return Ok(Json(response));
+        }
+    }
+
     let query_text = strip_us_unit_designator(&query_text);
     let (query_text, _detected_state) = strip_us_state_suffix(&query_text);
+
+    // ------------------------------------------------------------------
+    // City-context disambiguation (Bug A). If the query is "X, Y" we
+    // resolve Y to a (admin1, admin2, coord) and use it to re-rank the
+    // place-name candidates produced below. Soft re-rank only — we never
+    // hide a candidate, just multiply its importance.
+    // ------------------------------------------------------------------
+    let city_context: Option<(Option<u16>, Option<u16>, Option<Coord>)> = {
+        let mut ctx = None;
+        if let Some((_head, last)) = split_disambiguation_query(&query_text) {
+            for &(ci, country) in &target_countries {
+                let (a1, a2, coord) = resolve_city_full(
+                    &last,
+                    country,
+                    ci,
+                    &country.normalizer,
+                    state.global_index.as_ref(),
+                );
+                if a1.is_some() || a2.is_some() || coord.is_some() {
+                    ctx = Some((a1, a2, coord));
+                    break;
+                }
+            }
+        }
+        ctx
+    };
 
     // ------------------------------------------------------------------
     // Global FST fast path — single lookup instead of scanning all country FSTs
@@ -564,6 +750,15 @@ async fn search(
             .first()
             .map(|&(_, c)| &c.normalizer);
 
+        // When we have a city context (Bug A), look at a wider candidate pool
+        // so the city-context boost can lift a relevant-but-less-important
+        // posting above the globally-most-important one.
+        let posting_window = if city_context.is_some() {
+            (limit * 8).max(32)
+        } else {
+            limit
+        };
+
         if let Some(norm) = normalizer {
             let candidates = norm.normalize(&query_text);
 
@@ -572,7 +767,7 @@ async fn search(
                 let postings = global.exact_lookup(candidate);
                 let filtered = filter_postings_by_country(&postings, &country_codes, &state.countries);
 
-                for posting in filtered.iter().take(limit) {
+                for posting in filtered.iter().take(posting_window) {
                     if let Some(result) = posting_to_nominatim(posting, &state.countries, "exact", params.addressdetails > 0) {
                         response.push(result);
                     }
@@ -589,7 +784,7 @@ async fn search(
                     let postings = global.fuzzy_lookup(candidate, 1);
                     let filtered = filter_postings_by_country(&postings, &country_codes, &state.countries);
 
-                    for posting in filtered.iter().take(limit) {
+                    for posting in filtered.iter().take(posting_window) {
                         if let Some(result) = posting_to_nominatim(posting, &state.countries, "levenshtein", params.addressdetails > 0) {
                             response.push(result);
                         }
@@ -601,6 +796,7 @@ async fn search(
                 }
             }
         }
+
     }
 
     // Per-country pipeline: address/street lookups always run (even when
@@ -955,17 +1151,66 @@ async fn search(
         }
     }
 
-    // Rank: address/street results and exact place matches are all "high confidence",
-    // then sort by importance within each tier.
-    response.sort_by(|a, b| {
+    // City-context tier (Bug A): when q="X, Y" and Y resolved to a city,
+    // compute a per-result tier (0..3) capturing how strongly the candidate
+    // belongs to Y's admin hierarchy. The final sort uses this as the
+    // primary key. Soft re-rank — never hides a candidate, just promotes
+    // contextually-relevant ones. Computed AFTER the viewbox filter so the
+    // index alignment stays correct.
+    let response_tiers: Vec<u8> = if let Some((ctx_a1, ctx_a2, ctx_coord)) = city_context {
+        response.iter().map(|r| {
+            // Place-name results have a non-zero place_id encoding
+            // (country, record). Address/street results have place_id=0.
+            if r.place_id != 0 {
+                let (ci, rid) = decode_place_id(r.place_id);
+                if let Some(country) = state.countries.get(ci) {
+                    if let Ok(rec) = country.index.record_store().get(rid) {
+                        return city_context_tier(
+                            rec.admin1_id,
+                            rec.admin2_id,
+                            rec.coord,
+                            ctx_a1,
+                            ctx_a2,
+                            ctx_coord,
+                        );
+                    }
+                }
+            }
+            // Fallback: distance check using the result's own coord.
+            if let Some(c) = ctx_coord {
+                if let (Ok(lat), Ok(lon)) = (r.lat.parse::<f64>(), r.lon.parse::<f64>()) {
+                    let cand = Coord::new(lat, lon);
+                    if cand.distance_m(&c) <= 50_000.0 {
+                        return 1;
+                    }
+                }
+            }
+            0
+        }).collect()
+    } else {
+        vec![0; response.len()]
+    };
+
+    // Rank: city-context tier (highest first) > high-confidence match types
+    // (exact/address/street) > importance. The city-context tier dominates
+    // when q="X, Y" — a candidate in Y's municipality outranks a more
+    // important candidate elsewhere. Without city context, all tiers are 0
+    // and the sort behaves exactly as before.
+    let mut paired: Vec<(NominatimResult, u8)> = response
+        .into_iter()
+        .zip(response_tiers.into_iter())
+        .collect();
+    paired.sort_by(|(ra, ta), (rb, tb)| {
         let high_confidence = |r: &NominatimResult| {
             matches!(r.match_type.as_deref(), Some("exact" | "address" | "street"))
         };
-        let a_hi = high_confidence(a);
-        let b_hi = high_confidence(b);
-        b_hi.cmp(&a_hi)
-            .then(b.importance.partial_cmp(&a.importance).unwrap_or(std::cmp::Ordering::Equal))
+        let a_hi = high_confidence(ra);
+        let b_hi = high_confidence(rb);
+        tb.cmp(ta)
+            .then(b_hi.cmp(&a_hi))
+            .then(rb.importance.partial_cmp(&ra.importance).unwrap_or(std::cmp::Ordering::Equal))
     });
+    let mut response: Vec<NominatimResult> = paired.into_iter().map(|(r, _)| r).collect();
     response.truncate(limit);
 
     metrics::record_result_count("search", response.len());
