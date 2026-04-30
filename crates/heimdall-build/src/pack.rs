@@ -178,7 +178,21 @@ pub fn pack(
                 let population = if populations.is_null(i) { None } else { Some(populations.value(i)) };
                 let is_relation = osm_types.as_ref().map_or(false, |t| t.value(i) == 2);
 
-                let importance = compute_importance_inline(place_type, population, has_wikidata);
+                // name_intl translation count is a strong notability proxy.
+                // A place with 8 name:* tags (Stockholm Stortorget) is more
+                // famous than one with 0 (Växjö Stortorget). Counts as
+                // tiebreaker between same-type, same-wikidata places.
+                let intl_translation_count = if name_intl_arr.is_null(i) {
+                    0
+                } else {
+                    name_intl_arr.value(i)
+                        .split(';')
+                        .filter(|s| !s.trim().is_empty())
+                        .count()
+                };
+                let importance = compute_importance_inline(
+                    place_type, population, has_wikidata, intl_translation_count,
+                );
 
                 let mut flags: u8 = 0;
                 if population.is_some() { flags |= 0x01; }
@@ -265,6 +279,26 @@ pub fn pack(
                     if !key.is_empty() {
                         write!(exact_writer, "{}\t{}\t{}\t{}\n", key, id, importance, pop_flag)?;
                         exact_count += 1;
+                        // Also write a stop-word-stripped variant. "ABBA
+                        // The Museum" → "abba museum" so the canonical
+                        // English query for the place lands on the
+                        // record. Cheap — a handful of common articles
+                        // in English/Swedish/German.
+                        let no_stops = strip_stopwords(&key);
+                        if no_stops != key && !no_stops.is_empty() {
+                            write!(exact_writer, "{}\t{}\t{}\t{}\n", no_stops, id, importance, pop_flag)?;
+                            exact_count += 1;
+                        }
+                        // Run the alt name through the normalizer too so
+                        // diacritic-stripped, abbreviation-expanded variants
+                        // also land on the record.
+                        for candidate in normalizer.normalize(alt) {
+                            let cand_lower = candidate.to_lowercase();
+                            if !cand_lower.is_empty() && cand_lower != key {
+                                write!(exact_writer, "{}\t{}\t{}\t{}\n", cand_lower, id, importance, pop_flag)?;
+                                exact_count += 1;
+                            }
+                        }
                     }
                 }
 
@@ -393,7 +427,6 @@ fn build_fst_from_disk(tsv_path: &Path, fst_path: &Path) -> Result<usize> {
     let mut prev_key = String::new();
     let mut best_id: u32 = 0;
     let mut best_importance: u16 = 0;
-    let mut best_is_pop: bool = false;
 
     for line in reader.lines() {
         let line = line?;
@@ -403,14 +436,16 @@ fn build_fst_from_disk(tsv_path: &Path, fst_path: &Path) -> Result<usize> {
         let key = parts[0];
         let id: u32 = parts[1].parse().unwrap_or(0);
         let importance: u16 = parts[2].parse().unwrap_or(0);
-        let is_pop = parts[3] == "1";
+        // is_pop tag still written but no longer the primary collision key.
+        // Importance already accounts for population, place type, and
+        // wikidata, so an is_populated tiebreak forced same-name landmarks
+        // to lose to no-population suburbs (Skansen suburb beat the
+        // Skansen theme park even though importance was 1500 vs 9100).
 
         if key == prev_key {
-            // Collision: keep higher (is_populated, importance)
-            if (is_pop, importance) > (best_is_pop, best_importance) {
+            if importance > best_importance {
                 best_id = id;
                 best_importance = importance;
-                best_is_pop = is_pop;
             }
         } else {
             // Emit previous key
@@ -420,7 +455,6 @@ fn build_fst_from_disk(tsv_path: &Path, fst_path: &Path) -> Result<usize> {
             prev_key = key.to_owned();
             best_id = id;
             best_importance = importance;
-            best_is_pop = is_pop;
         }
     }
     // Emit last key
@@ -449,11 +483,44 @@ fn build_fst_from_disk(tsv_path: &Path, fst_path: &Path) -> Result<usize> {
 /// - Wikidata bonus: +8000 (notable enough to have a Wikipedia article).
 ///   Lifts famous-but-tiny places (Gamla stan, Skansen, Drottningholm) above
 ///   anonymous suburbs/villages of similar size.
-fn compute_importance_inline(place_type: PlaceType, population: Option<u32>, has_wikidata: bool) -> u16 {
+/// Strip common articles/conjunctions so "ABBA The Museum" → "abba museum"
+/// and "Universitetet i Stockholm" → "universitetet stockholm".
+/// Operates on lowercased input. Conservative list — only words that
+/// almost never carry meaning in a place name.
+fn strip_stopwords(s: &str) -> String {
+    const STOPS: &[&str] = &[
+        // English
+        "the", "of", "and",
+        // Swedish
+        "och", "i",
+        // German
+        "der", "die", "das", "und",
+    ];
+    s.split_whitespace()
+        .filter(|w| !STOPS.contains(w))
+        .collect::<Vec<&str>>()
+        .join(" ")
+}
+
+fn compute_importance_inline(place_type: PlaceType, population: Option<u32>, has_wikidata: bool, intl_translations: usize) -> u16 {
     let mut score: u32 = 0;
-    if let Some(pop) = population {
-        if pop > 0 {
-            score += ((pop as f64).log10() * 4000.0) as u32;
+    // Population bonus: only counts for major settlements (City and
+    // Town). Village/Hamlet/Farm population in OSM is wildly unreliable
+    // — a 1492-person village called "Slottsskogen" should not outrank
+    // a wikidata-tagged park of the same name (the famous Göteborg
+    // park). 100-person floor to suppress tiny outliers.
+    //
+    // Suburb/Quarter/Neighbourhood are subdivisions of cities — their
+    // `population` tag is OSM noise.
+    let population_eligible = matches!(
+        place_type,
+        PlaceType::City | PlaceType::Town
+    );
+    if population_eligible {
+        if let Some(pop) = population {
+            if pop > 100 {
+                score += ((pop as f64).log10() * 4000.0) as u32;
+            }
         }
     }
     score += match place_type {
@@ -462,19 +529,29 @@ fn compute_importance_inline(place_type: PlaceType, population: Option<u32>, has
         PlaceType::Village => 2000,
         PlaceType::Suburb | PlaceType::Quarter => 1500,
         PlaceType::Neighbourhood => 1400,
-        PlaceType::Hamlet | PlaceType::Farm => 800,
+        PlaceType::Hamlet | PlaceType::Farm => 500,
         PlaceType::Island => 3000,
-        PlaceType::Airport => 1000,
-        PlaceType::Station => 700,
-        PlaceType::Square => 1200,
-        // Notable POIs — set below Town/Village so a famous landmark
-        // never outranks a city of the same name. Modest additive bias
-        // over generic Locality so e.g. Vasa Museum beats a random rural locality.
-        PlaceType::Landmark => 1100,
-        PlaceType::University | PlaceType::Hospital | PlaceType::PublicBuilding => 900,
-        PlaceType::Park => 600,
+        PlaceType::Airport => 1500,
+        // Major transit hubs (subway, mainline rail) — bumped from 700 to
+        // 1500 so a wikidata-tagged station beats a same-name Hamlet.
+        PlaceType::Station => 1500,
+        PlaceType::Square => 1500,
+        // Famous named streets (Avenyn, Drottninggatan). Set close to
+        // Square so they reliably beat random restaurants of the same
+        // colloquial name.
+        PlaceType::Street => 1500,
+        // Notable POIs — bumped to 2500 so a wikidata-tagged landmark
+        // (Liseberg theme park = 2500+8000=10500) reliably beats a
+        // same-name suburb (Suburb = 1500+8000=9500). Still well below
+        // Town/Village so a small village never loses to a same-name POI.
+        PlaceType::Landmark => 2500,
+        PlaceType::University | PlaceType::Hospital | PlaceType::PublicBuilding => 1000,
+        // Park base bumped (was 800) so a famous park (Slottsskogen,
+        // Hagaparken) reliably beats a random village of the same
+        // name.
+        PlaceType::Park => 3500,
         PlaceType::Lake | PlaceType::River => 1000,
-        PlaceType::Mountain | PlaceType::Forest => 800,
+        PlaceType::Mountain | PlaceType::Forest => 700,
         PlaceType::County => 4000,
         PlaceType::State => 5000,
         PlaceType::Country => 8000,
@@ -486,6 +563,11 @@ fn compute_importance_inline(place_type: PlaceType, population: Option<u32>, has
     if has_wikidata {
         score += 8000;
     }
+    // Each name:* translation is editorial attention from a foreign-language
+    // mapper. Caps at +2000 (10 translations) so it can't dwarf wikidata,
+    // but breaks ties between same-type same-wikidata places of the same
+    // name (Stockholm Stortorget has 8 translations, Växjö has 0).
+    score += (intl_translations as u32).min(10) * 200;
     score.min(65535) as u16
 }
 
@@ -496,10 +578,12 @@ fn build_fst(pairs: &mut Vec<(String, (u32, u16, bool))>, path: &Path) -> Result
     pairs.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
     pairs.dedup_by(|a, b| {
         if a.0 == b.0 {
-            // Keep: prefer populated place, then higher importance
-            let a_score = (a.1 .2, a.1 .1);
-            let b_score = (b.1 .2, b.1 .1);
-            if a_score > b_score {
+            // Keep the higher-importance record. Importance already
+            // factors in population, place type, and wikidata, so we
+            // don't need an additional populated-place tiebreak (which
+            // used to demote famous landmarks under no-population
+            // suburbs of the same name).
+            if a.1 .1 > b.1 .1 {
                 b.1 = a.1;
             }
             true
@@ -699,6 +783,8 @@ fn place_type_from_u8(v: u8) -> PlaceType {
         12 => PlaceType::Neighbourhood,
         13 => PlaceType::Island,
         14 => PlaceType::Islet,
+        15 => PlaceType::Square,
+        16 => PlaceType::Street,
         20 => PlaceType::Lake,
         21 => PlaceType::River,
         22 => PlaceType::Mountain,
@@ -707,6 +793,11 @@ fn place_type_from_u8(v: u8) -> PlaceType {
         25 => PlaceType::Cape,
         30 => PlaceType::Airport,
         31 => PlaceType::Station,
+        32 => PlaceType::Landmark,
+        33 => PlaceType::University,
+        34 => PlaceType::Hospital,
+        35 => PlaceType::PublicBuilding,
+        36 => PlaceType::Park,
         _ => PlaceType::Unknown,
     }
 }

@@ -78,6 +78,7 @@ pub enum PlaceType {
     Island = 13,
     Islet = 14,
     Square = 15,   // place=square (e.g. Sergels torg, Stortorget)
+    Street = 16,   // notable named highway (Avenyn, Drottninggatan, Sveavägen)
 
     // Natural features (often geocoded)
     Lake = 20,
@@ -138,6 +139,7 @@ impl PlaceType {
             Self::Island => 50,
             Self::Airport | Self::Station => 65,
             Self::Square => 50,
+            Self::Street => 48,
             Self::Neighbourhood => 50,
             Self::Landmark => 55,
             Self::University | Self::Hospital | Self::PublicBuilding => 50,

@@ -158,17 +158,25 @@ impl HeimdallIndex {
             }
         }
 
-        // 3. Levenshtein edit-1
+        // 3. Levenshtein edit-1 — catches typos ("upsala" → Uppsala,
+        // "stockholms central" → "Stockholm Central").
         if let Ok(results) = self.levenshtein_lookup(normalized, 1, query) {
             if !results.is_empty() {
                 return results;
             }
         }
 
-        // 4. Levenshtein edit-2
-        if let Ok(results) = self.levenshtein_lookup(normalized, 2, query) {
-            if !results.is_empty() {
-                return results;
+        // 4. Levenshtein edit-2 — only for short single-word queries.
+        // Lev-2 on "stockholm sweden" cheerfully matches "stockholmsheden",
+        // and even Lev-1 can be misleading on long multi-word strings.
+        // Restrict to single tokens so the per-character edit budget
+        // stays meaningful.
+        let is_multi_word = normalized.split_whitespace().count() >= 2;
+        if !is_multi_word {
+            if let Ok(results) = self.levenshtein_lookup(normalized, 2, query) {
+                if !results.is_empty() {
+                    return results;
+                }
             }
         }
 

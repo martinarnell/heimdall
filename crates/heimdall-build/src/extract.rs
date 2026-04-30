@@ -43,6 +43,7 @@ pub(crate) const MEANINGFUL_NODE_TAGS: &[&str] = &[
     "mountain_pass",
     "public_transport",
     "leisure",
+    "man_made",
 ];
 
 /// Tags that make a way worth indexing (with name)
@@ -57,54 +58,83 @@ pub(crate) const MEANINGFUL_WAY_TAGS: &[&str] = &[
     "historic",
     "aeroway",
     "public_transport",
+    "man_made",
 ];
 
-/// Filter: is this (key, value) a notable POI worth indexing?
+/// Filter: is this (key, value) a POI worth extracting?
 ///
-/// Conservative whitelist — we don't want every roadside bench to flood the
-/// place index. Returns true only for value-restricted POIs that have
-/// genuine search demand (landmarks, transit hubs, civic buildings, named
-/// parks/squares).
+/// Additive whitelist: any key in MEANINGFUL_*_TAGS qualifies UNLESS the
+/// value is a known-noisy infrastructure tag (vending machines, benches,
+/// playgrounds). Specific high-signal values (museum, hospital, square,
+/// park, etc.) get dedicated PlaceTypes via place_type_from_tag; the
+/// long tail falls back to PlaceType::Locality.
 ///
-/// Tags like `natural=*`, `landuse=*`, `waterway=*`, `aeroway=*`,
-/// `railway=station|halt`, `mountain_pass=*` are accepted unconditionally
-/// because they were already in the pre-existing extraction path.
+/// We rely on the name? requirement at extraction time to filter out the
+/// vast majority of throwaway POIs — only ~10% of OSM amenities carry a
+/// name, and those are the ones users actually search for ("Grand Hôtel",
+/// "Espresso House Götgatan", etc.).
 pub(crate) fn is_qualifying_poi(key: &str, value: &str) -> bool {
     match key {
-        // Tourism — only well-known categories
-        "tourism" => matches!(
-            value,
-            "attraction" | "museum" | "gallery" | "viewpoint"
-            | "theme_park" | "zoo" | "aquarium"
-        ),
-        // Historic — all (memorial, monument, castle, ruins, fort, archaeological_site, etc.)
-        "historic" => true,
-        // Amenity — only civic/cultural categories
-        "amenity" => matches!(
-            value,
-            "townhall" | "university" | "college" | "hospital"
-            | "library" | "theatre" | "arts_centre" | "courthouse"
-            | "place_of_worship"
-        ),
-        // public_transport — only stations (not stops, platforms, etc.)
-        "public_transport" => matches!(value, "station"),
-        // Leisure — only named parks, nature_reserves; tiny things filtered out
-        // by requiring a notability signal (wikidata) at extraction site.
-        "leisure" => matches!(value, "park" | "nature_reserve" | "garden"),
-        // Other categories — allow through (existing behaviour)
-        "natural" | "landuse" | "waterway" | "aeroway" | "mountain_pass" => true,
+        // Always-qualifying categories (existing behaviour, untouched)
+        "natural" | "landuse" | "waterway" | "aeroway" | "mountain_pass" | "place" => true,
         "railway" => matches!(value, "station" | "halt"),
-        "place" => true, // place=* always allowed (square, neighbourhood, etc.)
+
+        // Restored to old additive behaviour: any named tourism / amenity /
+        // historic POI passes. Specific values get specific PlaceTypes;
+        // others fall to Locality. Only truly low-signal infrastructure
+        // values are blocked so they don't flood the index.
+        "tourism" => !matches!(value, "yes" | "information"),
+        "historic" => true,
+        "amenity" => !matches!(
+            value,
+            "yes" | "bench" | "vending_machine" | "waste_basket" | "waste_disposal"
+            | "recycling" | "bicycle_parking" | "motorcycle_parking" | "parking_space"
+            | "parking_entrance" | "parking" | "charging_station" | "telephone"
+            | "post_box" | "drinking_water" | "shower" | "toilets" | "hunting_stand"
+            | "clock"
+        ),
+
+        // public_transport — only stations (skip stops, platforms, etc.)
+        "public_transport" => matches!(value, "station" | "stop_area"),
+
+        // Leisure — parks/gardens/nature_reserves AND major venues
+        // (stadiums, sports_centres, ice rinks) — all gated by
+        // notability in leisure_needs_notability. Filters out the
+        // overwhelming majority of leisure noise (pitches, playgrounds,
+        // swimming pools, fitness stations).
+        "leisure" => matches!(
+            value,
+            "park" | "nature_reserve" | "garden"
+                | "stadium" | "sports_centre" | "ice_rink"
+        ),
+
+        // man_made — bridges, lighthouses, towers (Öresundsbron,
+        // Ölandsbron, Tjörnbron, Kaknästornet). Other man_made values
+        // (mast, works, pier, etc.) are mostly noise without notability.
+        "man_made" => matches!(value, "bridge" | "lighthouse" | "tower"),
+
         _ => false,
     }
 }
 
-/// Does this leisure POI need a notability signal (wikidata) to qualify?
-/// Returns true for leisure=park/garden/nature_reserve — these are extremely
-/// numerous in OSM and we don't want every neighborhood pocket-park flooding
-/// the place index. Only major named parks (with wikidata) are kept.
+/// Does this POI need a notability signal (wikidata) to qualify?
+///
+/// Leisure values (parks, stadiums, ice rinks) and man_made values
+/// (bridges, towers, lighthouses) are extremely numerous in OSM —
+/// every pocket-park, every school football pitch, every footbridge,
+/// every radio mast. Without a wikidata signal we'd flood the index.
+/// Only the regionally-famous names (Liseberg, Ullevi, Ölandsbron,
+/// Tjörnbron, Kaknästornet) survive the gate.
 pub(crate) fn leisure_needs_notability(key: &str, value: &str) -> bool {
-    key == "leisure" && matches!(value, "park" | "garden" | "nature_reserve")
+    match key {
+        "leisure" => matches!(
+            value,
+            "park" | "garden" | "nature_reserve"
+                | "stadium" | "sports_centre" | "ice_rink"
+        ),
+        "man_made" => matches!(value, "bridge" | "tower" | "lighthouse"),
+        _ => false,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -437,17 +467,27 @@ pub fn extract_places(
                 let ref_count = refs.len();
                 all_refs.extend_from_slice(&refs);
 
+                // A way can be ALL THREE: an address (addr:* tags), a named
+                // place (tourism=museum, place=square, etc.), AND a member of
+                // a relation we're stitching. Skansen is
+                // `addr:street=Djurgårdsslätten, tourism=theme_park` — push
+                // to every pipeline it qualifies for. They all reuse the
+                // same resolved centroid; relation members consume node
+                // coords downstream regardless of whether the way is also
+                // emitted as a standalone place/address.
                 if let Some((street, housenumber, postcode, city)) = scan_addr_way_tags(&way) {
                     way_buf.push(BufferedWay {
                         id: way_id, ref_start, ref_count,
                         kind: BufferedWayKind::Address { street, housenumber, postcode, city },
                     });
-                } else if let Some(pending) = scan_way(&way) {
+                }
+                if let Some(pending) = scan_way(&way) {
                     way_buf.push(BufferedWay {
                         id: way_id, ref_start, ref_count,
                         kind: BufferedWayKind::Named(pending),
                     });
-                } else if relation_way_ids.contains(&way_id) {
+                }
+                if relation_way_ids.contains(&way_id) {
                     way_buf.push(BufferedWay {
                         id: way_id, ref_start, ref_count,
                         kind: BufferedWayKind::RelationMember,
@@ -728,20 +768,25 @@ fn scan_way(way: &osmpbf::Way) -> Option<PendingWay> {
     let mut qualifying_tag: Option<(String, String)> = None;
     let mut is_highway = false;
     let mut is_building = false;
+    let mut has_wikipedia = false;
+    let mut highway_value: Option<String> = None;
+    let mut is_area = false;
 
     for (k, v) in way.tags() {
         match k {
             "name" => name = Some(v.to_owned()),
             "place" => place_tag = Some(v.to_owned()),
             "alt_name" => alt_names.extend(v.split(';').map(|s| s.trim().to_owned())),
-            "loc_name" | "short_name" | "nat_name" | "reg_name" => {
+            "loc_name" | "short_name" | "nat_name" | "reg_name" | "official_name" => {
                 alt_names.extend(v.split(';').map(|s| s.trim().to_owned()));
             }
             "old_name" => old_names.extend(v.split(';').map(|s| s.trim().to_owned())),
             "population" => population = v.parse().ok(),
             "admin_level" => admin_level = v.parse().ok(),
             "wikidata" => wikidata = Some(v.to_owned()),
-            "highway" => is_highway = true,
+            "wikipedia" => has_wikipedia = true,
+            "highway" => { is_highway = true; highway_value = Some(v.to_owned()); }
+            "area" => { if v == "yes" { is_area = true; } }
             "building" => is_building = true,
             k if k.starts_with("name:") => {
                 let lang = &k[5..];
@@ -762,9 +807,20 @@ fn scan_way(way: &osmpbf::Way) -> Option<PendingWay> {
         }
     }
 
-    // Must have a name, skip highways/buildings
+    // Must have a name. Buildings are always skipped (pure geometry).
+    // Highways are skipped UNLESS they carry a notability signal — this
+    // catches famous named streets (Avenyn, Drottninggatan, Sveavägen) so
+    // the city-context disambiguation has something to rank.
     let name = name?;
-    if is_highway || is_building {
+    // Buildings are skipped UNLESS they carry a real qualifying tag —
+    // Vasamuseet is `building=museum, tourism=museum, wikidata=Q901371`,
+    // and the tourism wins over the geometry tag.
+    if is_building && qualifying_tag.is_none() && place_tag.is_none() {
+        return None;
+    }
+    let highway_qualifies = is_highway
+        && (wikidata.is_some() || has_wikipedia || !alt_names.is_empty());
+    if is_highway && !highway_qualifies {
         return None;
     }
 
@@ -779,11 +835,21 @@ fn scan_way(way: &osmpbf::Way) -> Option<PendingWay> {
         }
     }
 
-    // Must have a qualifying tag
+    // Must have a qualifying tag, OR be a notability-gated highway.
+    // A pedestrianised plaza without an explicit place=square tag
+    // (Stockholm Stortorget = `highway=pedestrian, area=yes`) should
+    // still be classified as Square so it ranks against the other named
+    // squares in the country.
     let place_type = if let Some(ref pt) = place_tag {
         PlaceType::from_osm(pt)
     } else if let Some((ref tk, ref tv)) = qualifying_tag {
         place_type_from_tag(tk, tv)
+    } else if highway_qualifies {
+        if is_area && highway_value.as_deref() == Some("pedestrian") {
+            PlaceType::Square
+        } else {
+            PlaceType::Street
+        }
     } else {
         return None;
     };
@@ -828,7 +894,7 @@ fn scan_relation(relation: &osmpbf::Relation) -> Option<PendingRelation> {
             "type" => rel_type = Some(v.to_owned()),
             "population" => population = v.parse().ok(),
             "alt_name" => alt_names.extend(v.split(';').map(|s| s.trim().to_owned())),
-            "loc_name" | "short_name" | "nat_name" | "reg_name" => {
+            "loc_name" | "short_name" | "nat_name" | "reg_name" | "official_name" => {
                 alt_names.extend(v.split(';').map(|s| s.trim().to_owned()));
             }
             "old_name" => old_names.extend(v.split(';').map(|s| s.trim().to_owned())),
@@ -1027,7 +1093,7 @@ pub(crate) fn parse_tags<'a>(tags: impl Iterator<Item = (&'a str, &'a str)>) -> 
             }
             // loc_name = local/colloquial name (e.g. Avenyn for Kungsportsavenyen).
             // Treat it as an alt_name so the FST index resolves it.
-            "loc_name" | "short_name" | "nat_name" | "reg_name" => {
+            "loc_name" | "short_name" | "nat_name" | "reg_name" | "official_name" => {
                 parsed.alt_names.extend(v.split(';').map(|s| s.trim().to_owned()));
             }
             "old_name" => {
@@ -1256,6 +1322,12 @@ pub(crate) fn place_type_from_tag(key: &str, value: &str) -> PlaceType {
         ("place", "locality") => PlaceType::Locality,
         ("leisure", "park") | ("leisure", "garden") => PlaceType::Park,
         ("leisure", "nature_reserve") => PlaceType::Park,
+        // Major venues — Ullevi, Scandinavium, Avicii Arena, Friends Arena
+        ("leisure", "stadium") | ("leisure", "sports_centre")
+        | ("leisure", "ice_rink") => PlaceType::Landmark,
+        // Famous man-made structures (bridges, lighthouses, towers)
+        ("man_made", "bridge") | ("man_made", "lighthouse")
+        | ("man_made", "tower") => PlaceType::Landmark,
         // Tourism — mostly visitor-attraction landmarks
         ("tourism", "attraction") | ("tourism", "museum") | ("tourism", "gallery")
         | ("tourism", "viewpoint") | ("tourism", "theme_park") | ("tourism", "zoo")
@@ -1306,19 +1378,25 @@ fn has_addr_tags(way: &osmpbf::Way) -> bool {
     false
 }
 
-/// Lightweight check: does this way have a name + qualifying tag (not highway/building)?
+/// Lightweight check: does this way have a name + qualifying tag (not building)?
+/// Highways are skipped UNLESS they have a notability signal (wikidata, wikipedia,
+/// loc_name, short_name) — this preserves Avenyn / Drottninggatan / Sveavägen
+/// while filtering out generic residential streets.
 /// No allocations — used in pre-pass 2 for node ID collection.
 fn way_qualifies(way: &osmpbf::Way) -> bool {
     let mut has_name = false;
     let mut is_highway = false;
     let mut is_building = false;
     let mut has_qualifying = false;
+    let mut has_notability = false;
 
     for (k, v) in way.tags() {
         match k {
             "name" => has_name = true,
             "highway" => is_highway = true,
             "building" => is_building = true,
+            "wikidata" | "wikipedia" | "loc_name" | "short_name"
+            | "nat_name" | "reg_name" => has_notability = true,
             _ => {
                 if !has_qualifying {
                     for &mt in MEANINGFUL_WAY_TAGS {
@@ -1332,7 +1410,19 @@ fn way_qualifies(way: &osmpbf::Way) -> bool {
         }
     }
 
-    has_name && !is_highway && !is_building && has_qualifying
+    if !has_name {
+        return false;
+    }
+    if is_highway {
+        // Notable highway only — ~50–500 famous streets per country.
+        return has_notability;
+    }
+    // Buildings need a real qualifying tag (Vasamuseet =
+    // building=museum + tourism=museum). Pure building=yes is geometry only.
+    if is_building {
+        return has_qualifying;
+    }
+    has_qualifying
 }
 
 /// Scan a way for addr:street + addr:housenumber tags (building footprints).

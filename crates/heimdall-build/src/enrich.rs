@@ -551,8 +551,16 @@ fn is_valid_admin_for_country(name: &str, admin_level: u8, dir_name: &str) -> bo
         match admin_level {
             // Swedish counties: "Skåne län", "Stockholms län"
             3..=4 => name.ends_with(" län"),
-            // Swedish municipalities: "Malmö kommun", "Stockholms kommun"
-            5..=8 => name.ends_with(" kommun"),
+            // Swedish municipalities. Most use the " kommun" suffix; the
+            // four metropolitan ones use " Stad"/"stad" instead
+            // (Göteborgs Stad, Malmö stad, …) — without these the
+            // central Göteborg points fall through to the neighbouring
+            // Mölndal polygon.
+            5..=8 => {
+                name.ends_with(" kommun")
+                    || name.ends_with(" Stad")
+                    || name.ends_with(" stad")
+            }
             _ => false,
         }
     } else if dir_name.contains("finland") || dir_name.contains("-fi") {
