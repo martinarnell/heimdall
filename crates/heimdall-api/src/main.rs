@@ -3004,6 +3004,7 @@ fn load_country_index_inner(path: &std::path::Path, lightweight: bool) -> anyhow
 fn runtime_index_size(path: &std::path::Path) -> u64 {
     let runtime_files = [
         "records.bin", "fst_exact.fst", "fst_phonetic.fst", "fst_ngram.fst",
+        "record_lists.bin", "record_lists_phonetic.bin", "record_lists_ngram.bin",
         "admin.bin", "addr_streets.bin", "addr_records.bin", "fst_addr.fst",
         "geohash_index.bin", "fst_postcode.fst", "postcode_centroids.bin",
         "fst_zip.fst", "zip_records.bin", "sv.toml", "meta.json",
