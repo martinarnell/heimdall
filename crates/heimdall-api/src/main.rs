@@ -436,19 +436,33 @@ fn split_disambiguation_query(input: &str) -> Option<(String, String)> {
 ///   1 = within 50 km of city coord
 ///   0 = no relationship
 fn city_context_tier(
+    cand_country: usize,
     cand_admin1: u16,
     cand_admin2: u16,
     cand_coord: Coord,
+    ctx_country: Option<usize>,
     ctx_admin1: Option<u16>,
     ctx_admin2: Option<u16>,
     ctx_coord: Option<Coord>,
 ) -> u8 {
-    if let (Some(a2), true) = (ctx_admin2, cand_admin2 > 0) {
-        if a2 == cand_admin2 { return 3; }
+    // admin1 and admin2 IDs are PER-COUNTRY (each country has its own
+    // admin table starting at index 0). Without the country gate below,
+    // a tier-2 boost on Norway's "Buskerud" admin1=N could spuriously
+    // fire whenever a Danish region happens to share the same u16 ID —
+    // causing same-name cross-country queries (Holmens Kirke → Holmen
+    // kirke NO) to outrank the in-country exact match.
+    let same_country = ctx_country == Some(cand_country);
+    if same_country {
+        if let (Some(a2), true) = (ctx_admin2, cand_admin2 > 0) {
+            if a2 == cand_admin2 { return 3; }
+        }
+        if let (Some(a1), true) = (ctx_admin1, cand_admin1 > 0) {
+            if a1 == cand_admin1 { return 2; }
+        }
     }
-    if let (Some(a1), true) = (ctx_admin1, cand_admin1 > 0) {
-        if a1 == cand_admin1 { return 2; }
-    }
+    // Coord distance is country-agnostic — Øresund crossings legitimately
+    // pull a candidate ~30 km from a Copenhagen context coord into a
+    // Malmö suburb. Keep this tier active across countries.
     if let Some(c) = ctx_coord {
         if cand_coord.distance_m(&c) <= 50_000.0 {
             return 1;
@@ -991,7 +1005,7 @@ async fn search(
     // place-name candidates produced below. Soft re-rank only — we never
     // hide a candidate, just multiply its importance.
     // ------------------------------------------------------------------
-    let city_context: Option<(Option<u16>, Option<u16>, Option<Coord>)> = {
+    let city_context: Option<(Option<usize>, Option<u16>, Option<u16>, Option<Coord>)> = {
         let mut ctx = None;
         // Two patterns produce a city context:
         //   "X, Y"  — explicit comma disambiguation (Slussen, Stockholm).
@@ -1047,7 +1061,7 @@ async fn search(
                 // record-store importance score (population × type ×
                 // wikidata) does the job — major settlements always
                 // outscore farm/locality entries.
-                let mut best: Option<(u16, Option<u16>, Option<u16>, Option<Coord>)> = None;
+                let mut best: Option<(u16, usize, Option<u16>, Option<u16>, Option<Coord>)> = None;
                 for &(ci, country) in &target_countries {
                     let candidates = country.normalizer.normalize(&last);
                     for cand in &candidates {
@@ -1061,18 +1075,17 @@ async fn search(
                                     if !is_settlement { continue; }
                                 }
                                 let imp = record.importance;
-                                if best.as_ref().map(|(b, _, _, _)| imp > *b).unwrap_or(true) {
+                                if best.as_ref().map(|(b, _, _, _, _)| imp > *b).unwrap_or(true) {
                                     let a1 = if record.admin1_id > 0 { Some(record.admin1_id) } else { None };
                                     let a2 = if record.admin2_id > 0 { Some(record.admin2_id) } else { None };
-                                    best = Some((imp, a1, a2, Some(record.coord)));
+                                    best = Some((imp, ci, a1, a2, Some(record.coord)));
                                 }
                             }
                         }
                     }
-                    let _ = ci; // silence unused lint when no match
                 }
-                if let Some((_, a1, a2, coord)) = best {
-                    ctx = Some((a1, a2, coord));
+                if let Some((_, ci, a1, a2, coord)) = best {
+                    ctx = Some((Some(ci), a1, a2, coord));
                 }
             }
         }
@@ -1462,7 +1475,7 @@ async fn search(
     // queries like "stadsbiblioteket stockholm" would short-circuit on
     // a phonetic-fallback match in some other city, then get
     // city-filtered to empty, never running word-drop.
-    let response_has_city_match = if let Some((ctx_a1, ctx_a2, ctx_coord)) = city_context {
+    let response_has_city_match = if let Some((ctx_country, ctx_a1, ctx_a2, ctx_coord)) = city_context {
         response.iter().any(|r| {
             // Verbatim full-string FST hits are always considered a
             // match regardless of admin — "Hammarby Sjöstad" should
@@ -1475,8 +1488,8 @@ async fn search(
             let (ci, rid) = decode_place_id(r.place_id);
             if let Some(country) = state.countries.get(ci) {
                 if let Ok(rec) = country.index.record_store().get(rid) {
-                    return city_context_tier(rec.admin1_id, rec.admin2_id, rec.coord,
-                                             ctx_a1, ctx_a2, ctx_coord) > 0;
+                    return city_context_tier(ci, rec.admin1_id, rec.admin2_id, rec.coord,
+                                             ctx_country, ctx_a1, ctx_a2, ctx_coord) > 0;
                 }
             }
             false
@@ -1642,7 +1655,7 @@ async fn search(
     // primary key. Soft re-rank — never hides a candidate, just promotes
     // contextually-relevant ones. Computed AFTER the viewbox filter so the
     // index alignment stays correct.
-    let response_tiers: Vec<u8> = if let Some((ctx_a1, ctx_a2, ctx_coord)) = city_context {
+    let response_tiers: Vec<u8> = if let Some((ctx_country, ctx_a1, ctx_a2, ctx_coord)) = city_context {
         response.iter().map(|r| {
             // Place-name results have a non-zero place_id encoding
             // (country, record). Address/street results have place_id=0.
@@ -1651,9 +1664,11 @@ async fn search(
                 if let Some(country) = state.countries.get(ci) {
                     if let Ok(rec) = country.index.record_store().get(rid) {
                         return city_context_tier(
+                            ci,
                             rec.admin1_id,
                             rec.admin2_id,
                             rec.coord,
+                            ctx_country,
                             ctx_a1,
                             ctx_a2,
                             ctx_coord,
