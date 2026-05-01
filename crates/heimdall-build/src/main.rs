@@ -35,6 +35,7 @@ mod lucene;
 mod rebuild;
 mod ssr;
 mod dagi;
+mod gn250;
 mod tiger;
 mod oa;
 mod gnaf;
@@ -165,6 +166,17 @@ enum Commands {
         /// Path to DAGI steder JSON dump
         #[arg(long)]
         json: PathBuf,
+    },
+
+    /// Merge BKG Geographische Namen (GN250) CSV into existing OSM places
+    MergeGn250 {
+        /// Path to index directory (must contain places.parquet)
+        #[arg(short, long)]
+        index: PathBuf,
+
+        /// Path to GN250.csv (extracted from gn250.utm32s.csv.zip)
+        #[arg(long)]
+        csv: PathBuf,
     },
 
     /// Merge Photon JSONL dump into an existing index (places + addresses)
@@ -784,6 +796,27 @@ fn main() -> Result<()> {
             photon::write_places_parquet(&merged, &places_parquet)?;
             info!(
                 "Done! {} total ({} existing + {} SSR new). Run 'build --skip-extract' to rebuild.",
+                merged.len(), osm_places.len(), merged.len() - osm_places.len(),
+            );
+        }
+
+        Commands::MergeGn250 { index, csv } => {
+            let gn250_places = gn250::read_gn250_places(&csv)?;
+
+            let places_parquet = index.join("places.parquet");
+            let osm_places = if places_parquet.exists() {
+                info!("Reading existing places...");
+                read_osm_places(&places_parquet)?
+            } else {
+                vec![]
+            };
+
+            let merged = gn250::merge_gn250_places(&osm_places, &gn250_places);
+
+            info!("Writing merged places.parquet...");
+            photon::write_places_parquet(&merged, &places_parquet)?;
+            info!(
+                "Done! {} total ({} existing + {} GN250 new). Run 'build --skip-extract' to rebuild.",
                 merged.len(), osm_places.len(), merged.len() - osm_places.len(),
             );
         }

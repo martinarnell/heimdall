@@ -323,7 +323,15 @@ impl HeimdallIndex {
     }
 
     pub fn geocode_normalized(&self, normalized: &str, query: &GeoQuery) -> Vec<GeoResult> {
-        // 1. Exact FST lookup — returns ALL same-name candidates (sorted by importance).
+        // 1. Exact FST lookup — returns ALL same-name candidates.
+        //
+        // Posting lists are pre-sorted at build time by the FST-stored
+        // importance — which is already demoted for per-word and split-name
+        // entries. Re-sorting here by `record.importance` (the *full*
+        // importance) defeats that demotion: a town's per-word entry under
+        // "sachsen" has FST-stored importance ~270, but record.importance
+        // ~37000 — way above the State record (24000). Trust the FST
+        // ordering and skip the re-sort for exact matches.
         let exact_ids = self.exact_lookup_all(normalized);
         if !exact_ids.is_empty() {
             let mut results = Vec::new();
@@ -334,7 +342,10 @@ impl HeimdallIndex {
                     }
                 }
             }
-            self.rank_and_filter(&mut results, query);
+            // Filter low-confidence and bbox-mismatched results, but
+            // preserve the FST posting order.
+            results.retain(|r| r.confidence >= query.min_confidence);
+            results.truncate(query.limit);
             if !results.is_empty() { return results; }
         }
 

@@ -77,6 +77,8 @@ struct NormConfig {
     diacritics: HashMap<String, String>,
     #[serde(default)]
     char_equivalences: HashMap<String, String>,
+    #[serde(default)]
+    suffix_abbreviations: HashMap<String, String>,
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -137,6 +139,12 @@ pub struct Normalizer {
     diacritics: Vec<(String, String)>,
     /// Character equivalences (e.g. ß↔ss) — generates extra candidates
     char_equivalences: Vec<(String, String)>,
+    /// Suffix abbreviations — sorted longest-first. Apply at the end of each
+    /// token, generating an extra candidate where the suffix is expanded.
+    /// German compound place names need this ("Friedrichstr." →
+    /// "Friedrichstraße") because [abbreviations] only matches standalone
+    /// tokens.
+    suffix_abbreviations: Vec<(String, String)>,
     /// Strip Unicode combining marks (Mn category) before processing.
     /// Removes Arabic tashkeel, Hebrew niqqud, Thai tone marks, etc.
     strip_combining_marks: bool,
@@ -165,6 +173,7 @@ impl Normalizer {
             phonetic_engine: PhoneticEngine::SwedishMetaphone,
             diacritics: Vec::new(),
             char_equivalences: Vec::new(),
+            suffix_abbreviations: Vec::new(),
             strip_combining_marks: false,
             fullwidth_to_halfwidth: false,
         }
@@ -248,6 +257,15 @@ impl Normalizer {
             .into_iter()
             .collect();
 
+        // Suffix abbreviations — sort longest-first so "strasse" wins over
+        // "str" when both are present. Lowercase keys to match base_normalize.
+        let mut suffix_abbreviations: Vec<(String, String)> = config
+            .suffix_abbreviations
+            .into_iter()
+            .map(|(k, v)| (k.to_lowercase(), v.to_lowercase()))
+            .collect();
+        suffix_abbreviations.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+
         let strip_combining_marks = config.phonetic.strip_combining_marks;
         let fullwidth_to_halfwidth = config.phonetic.fullwidth_to_halfwidth;
 
@@ -260,6 +278,7 @@ impl Normalizer {
             phonetic_engine,
             diacritics,
             char_equivalences,
+            suffix_abbreviations,
             strip_combining_marks,
             fullwidth_to_halfwidth,
         }
@@ -303,6 +322,17 @@ impl Normalizer {
             let expanded_stripped = self.strip_stopwords(&expanded);
             if expanded_stripped != expanded && !candidates.contains(&expanded_stripped) {
                 candidates.push(expanded_stripped);
+            }
+        }
+
+        // Step 3b: suffix abbreviation expansion within each token. German
+        // compound names ("Friedrichstr.", "Marienpl.") need the trailing
+        // abbreviation expanded; the [abbreviations] section only handles
+        // standalone tokens. Generates one variant per matched-suffix token.
+        if !self.suffix_abbreviations.is_empty() {
+            let suffix_expanded = self.expand_suffix_abbreviations(&base);
+            if suffix_expanded != base && !candidates.contains(&suffix_expanded) {
+                candidates.push(suffix_expanded);
             }
         }
 
@@ -593,6 +623,32 @@ impl Normalizer {
                     .find(|(a, _)| a == &lower)
                     .map(|(_, e)| e.clone())
                     .unwrap_or_else(|| tok.to_owned())
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// Expand suffix abbreviations within each whitespace-delimited token.
+    /// German compound names ("Friedrichstr.", "Marienpl.") commonly end in
+    /// abbreviated suffixes; this expands the trailing suffix on each token
+    /// independently, longest-suffix-first per token. Required minimum
+    /// prefix length (4 chars) prevents tiny tokens like "str" itself
+    /// from getting empty-prefixed.
+    fn expand_suffix_abbreviations(&self, input: &str) -> String {
+        input
+            .split_whitespace()
+            .map(|tok| {
+                let lower = tok.to_lowercase();
+                for (suffix, expansion) in &self.suffix_abbreviations {
+                    if lower.ends_with(suffix.as_str())
+                        && lower.len() > suffix.len()
+                        && lower.len() - suffix.len() >= 4
+                    {
+                        let prefix = &lower[..lower.len() - suffix.len()];
+                        return format!("{}{}", prefix, expansion);
+                    }
+                }
+                tok.to_owned()
             })
             .collect::<Vec<_>>()
             .join(" ")

@@ -125,7 +125,24 @@ pub fn enrich(parquet_path: &Path, output_dir: &Path) -> Result<EnrichResult> {
             }
 
             // Accept admin regions from any country — is_valid_admin_for_country() handles cross-border filtering
-            if !admin_levels.is_null(i) {
+            //
+            // Critical: only admin-typed records qualify. OSM tags
+            // admin_level on plenty of non-admin objects (rivers carrying
+            // a level number, bus-station polygons, individual buildings
+            // like Stadtarchiv / Kriegerdenkmal). Without this gate the
+            // centroid pool fills with garbage and nearest-centroid
+            // picks "Ruhebank vor dem Haus Kennedyallee" or a Belgian
+            // province as a German city's admin2.
+            //
+            // Country/State/County (place_type 0/1/2) come from extract.rs
+            // explicitly. admin_level=8 Gemeinden flow through as Unknown
+            // (place_type 255) because the extract.rs admin-level→place_type
+            // table only covers 2..=7 — accept those too. Rejected:
+            // Locality, River, Suburb, etc. that happen to carry an
+            // admin_level tag.
+            let pt = place_types.value(i);
+            let is_admin_typed = matches!(pt, 0 | 1 | 2 | 255);
+            if is_admin_typed && !admin_levels.is_null(i) {
                 let level = admin_levels.value(i);
                 let population = if populations.is_null(i) { None } else { Some(populations.value(i)) };
                 let has_wikidata = !wikidatas.is_null(i);
@@ -199,6 +216,24 @@ pub fn enrich(parquet_path: &Path, output_dir: &Path) -> Result<EnrichResult> {
         info!(
             "Filtered out {} cross-border counties + {} municipalities (country name check)",
             removed_c, removed_m
+        );
+    }
+
+    // Belt-and-braces bbox filter: many neighboring-country admin names
+    // don't match an obvious foreign prefix (French départements like
+    // "Moselle", Polish powiats, Czech kraje). Reject any admin region
+    // whose centroid sits outside the target country's bbox so they
+    // never get picked as nearest-centroid for a German border city.
+    let pre_county_bb = counties.len();
+    let pre_muni_bb = municipalities.len();
+    counties.retain(|r| is_in_country_bbox(r.lat, r.lon, dir_name));
+    municipalities.retain(|r| is_in_country_bbox(r.lat, r.lon, dir_name));
+    let removed_cb = pre_county_bb - counties.len();
+    let removed_mb = pre_muni_bb - municipalities.len();
+    if removed_cb > 0 || removed_mb > 0 {
+        info!(
+            "Filtered out {} cross-border counties + {} municipalities (country bbox check)",
+            removed_cb, removed_mb
         );
     }
 
@@ -612,6 +647,81 @@ fn build_geo_polygons(
 // Country-specific admin filtering
 // ---------------------------------------------------------------------------
 
+/// Check if an admin region's centroid is within the target country's bbox.
+/// Catches neighboring-country admins that slipped past name-pattern filtering.
+/// Returns true for unknown country dirs (no bbox = no filter).
+fn is_in_country_bbox(lat: f64, lon: f64, dir_name: &str) -> bool {
+    let bb = if dir_name.contains("germany") || has_cc_token(dir_name, "de") {
+        // Slightly tighter than the API server bbox (5.866-55.06 / 5.87-15.04)
+        // so we don't keep border-edge French/Polish admins clipping in.
+        Some((47.27, 55.06, 5.87, 15.04))
+    } else if dir_name.contains("denmark") || has_cc_token(dir_name, "dk") {
+        Some((54.5, 57.8, 8.0, 15.2))
+    } else if dir_name.contains("sweden") || has_cc_token(dir_name, "se") {
+        Some((55.3, 69.1, 10.9, 24.2))
+    } else if dir_name.contains("norway") || has_cc_token(dir_name, "no") {
+        Some((57.5, 71.5, 4.0, 31.5))
+    } else if dir_name.contains("finland") || has_cc_token(dir_name, "fi") {
+        Some((59.5, 70.2, 19.4, 31.6))
+    } else if dir_name.contains("austria") || has_cc_token(dir_name, "at") {
+        Some((46.37, 49.02, 9.53, 17.16))
+    } else if dir_name.contains("switzerland") || has_cc_token(dir_name, "ch") {
+        Some((45.82, 47.81, 5.96, 10.49))
+    } else if dir_name.contains("netherlands") || has_cc_token(dir_name, "nl") {
+        Some((50.75, 53.47, 3.36, 7.21))
+    } else if dir_name.contains("belgium") || has_cc_token(dir_name, "be") {
+        Some((49.50, 51.50, 2.55, 6.41))
+    } else if dir_name.contains("france") || has_cc_token(dir_name, "fr") {
+        Some((41.33, 51.12, -5.14, 9.56))
+    } else {
+        None
+    };
+    match bb {
+        Some((min_lat, max_lat, min_lon, max_lon)) => {
+            lat >= min_lat && lat <= max_lat && lon >= min_lon && lon <= max_lon
+        }
+        None => true,
+    }
+}
+
+fn has_cc_token(dir_name: &str, cc: &str) -> bool {
+    let token_mid = format!("-{}-", cc);
+    let token_suf = format!("-{}", cc);
+    dir_name == cc
+        || dir_name.starts_with(&format!("{}-", cc))
+        || dir_name.contains(&token_mid)
+        || dir_name.ends_with(&token_suf)
+}
+
+/// The 16 German Bundesländer. Closed set — list hasn't changed since
+/// 1990 and won't realistically change for the index's lifetime.
+fn is_german_bundesland(name: &str) -> bool {
+    matches!(
+        name,
+        "Baden-Württemberg"
+            | "Bayern"
+            | "Berlin"
+            | "Brandenburg"
+            | "Bremen"
+            | "Freie Hansestadt Bremen"
+            | "Hamburg"
+            | "Freie und Hansestadt Hamburg"
+            | "Hessen"
+            | "Mecklenburg-Vorpommern"
+            | "Niedersachsen"
+            | "Nordrhein-Westfalen"
+            | "Rheinland-Pfalz"
+            | "Saarland"
+            | "Sachsen"
+            | "Freistaat Sachsen"
+            | "Sachsen-Anhalt"
+            | "Schleswig-Holstein"
+            | "Thüringen"
+            | "Freistaat Thüringen"
+            | "Freistaat Bayern"
+    )
+}
+
 /// Check if an admin region name matches the expected pattern for the target country.
 /// Uses the index directory name to detect which country is being built.
 /// This filters out cross-border admin regions from Geofabrik PBF extracts.
@@ -673,26 +783,12 @@ fn is_valid_admin_for_country(name: &str, admin_level: u8, dir_name: &str) -> bo
         //   admin_level 5 = Regierungsbezirk (some states only)
         //   admin_level 6 = Landkreis/Stadtkreis (~400 districts)
         //   admin_level 8 = Gemeinde (~11,000 municipalities)
-        //
-        // We use admin_level 4 as admin1 (Bundesland/state) and
-        // admin_level 6 as admin2 (Landkreis/district).
-        // Filter out neighboring countries' admin regions.
         match admin_level {
-            // Bundesländer (states): admin_level 4
-            3..=4 => {
-                // Reject non-German admin regions that leak from Geofabrik extract
-                let is_foreign = name.ends_with(" län")          // Swedish county
-                    || name.ends_with(" kommun")                 // Swedish municipality
-                    || name.ends_with(" Kommune")                // Danish municipality
-                    || name.starts_with("Region ")               // Danish region
-                    || name.ends_with(" fylke")                  // Norwegian county
-                    || name.starts_with("Provincie ")            // Dutch province
-                    || name.starts_with("Province ")             // Belgian/French province
-                    || name.starts_with("Canton ")               // Swiss canton
-                    || name == "Polska"                          // Poland
-                    || name == "Česko";                          // Czechia
-                !is_foreign
-            }
+            // Bundesländer (states): only the 16 known names. Closed list
+            // is safe — Bundesländer don't change. Without this, Dutch
+            // Limburg (whose centroid sits inside the German bbox just
+            // barely past the border) gets picked as Köln's admin1.
+            3..=4 => is_german_bundesland(name),
             // Landkreis/Stadtkreis/Gemeinde (districts + municipalities): admin_level 5-8
             5..=8 => {
                 // German Landkreis names typically end with specific patterns
@@ -702,7 +798,14 @@ fn is_valid_admin_for_country(name: &str, admin_level: u8, dir_name: &str) -> bo
                     || name.ends_with(" Kommune")                // Danish
                     || name.ends_with(" län")                    // Swedish
                     || name.ends_with(" gemeente")               // Dutch
-                    || name.starts_with("Arrondissement ");      // French/Belgian
+                    || name.starts_with("Arrondissement ")       // French/Belgian
+                    || name.starts_with("Powiat ")               // Polish
+                    || name.starts_with("powiat ")               // Polish (lowercase)
+                    || name.ends_with(" kraj")                   // Czech
+                    || name.starts_with("Région ")               // French
+                    || name.starts_with("Département ")          // French
+                    || name == "Vlaanderen"                      // Belgian
+                    || name == "Wallonie";                       // Belgian
                 !is_foreign
             }
             _ => false,

@@ -1288,6 +1288,15 @@ fn merge_places_source(
             crate::ssr::read_ssr_places(&gml_path)?
         }
         "dagi" => crate::dagi::read_dagi_places(path)?,
+        "gn250" => {
+            // GN250: a .zip containing GN250.csv (we want that one only)
+            let csv_path = if path.extension().map_or(false, |e| e == "zip") {
+                extract_gn250_csv_from_zip(path)?
+            } else {
+                path.to_path_buf()
+            };
+            crate::gn250::read_gn250_places(&csv_path)?
+        }
         other => bail!("[{}] Unknown places source type: {}", cc, other),
     };
 
@@ -1299,13 +1308,14 @@ fn merge_places_source(
 
     let merged = match source_type {
         "dagi" => crate::dagi::merge_dagi_places(&existing, &new_places),
+        "gn250" => crate::gn250::merge_gn250_places(&existing, &new_places),
         // Default — SSR's spatial+name dedup works for any geometry-rich
         // place source, so reuse it.
         _ => crate::ssr::merge_ssr_places(&existing, &new_places),
     };
     crate::photon::write_places_parquet(&merged, places_parquet)?;
 
-    let label = match source_type { "dagi" => "DAGI", _ => "SSR" };
+    let label = match source_type { "dagi" => "DAGI", "gn250" => "GN250", _ => "SSR" };
     Ok(format!(
         "+{} places ({} {} total)",
         merged.len() - existing.len(),
@@ -1339,6 +1349,39 @@ fn extract_gml_from_zip(zip_path: &Path) -> Result<PathBuf> {
 
     bail!(
         "No GML file found in ZIP: {}",
+        zip_path.display()
+    )
+}
+
+/// Extract GN250.csv (the place-names table) from the BKG zip.
+///
+/// The zip contains GN250.csv (the names), GN_DLMLink.csv (links to DLM50),
+/// GN_VORWAHL.csv (phone-area-code reference), plus PDF documentation.
+/// We only need GN250.csv.
+fn extract_gn250_csv_from_zip(zip_path: &Path) -> Result<PathBuf> {
+    let file = std::fs::File::open(zip_path)?;
+    let mut archive = zip::ZipArchive::new(file)?;
+
+    let out_dir = zip_path.parent().unwrap_or(Path::new("."));
+
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i)?;
+        let name = entry.name().to_string();
+        let basename = Path::new(&name)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        if basename.eq_ignore_ascii_case("GN250.csv") {
+            let out_path = out_dir.join("GN250.csv");
+            let mut out = std::fs::File::create(&out_path)?;
+            std::io::copy(&mut entry, &mut out)?;
+            info!("  Extracted {} from ZIP", out_path.display());
+            return Ok(out_path);
+        }
+    }
+
+    bail!(
+        "GN250.csv not found in ZIP: {}",
         zip_path.display()
     )
 }
