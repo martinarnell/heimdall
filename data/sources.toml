@@ -16,6 +16,14 @@ ram_gb = 2
 [country.dk.osm]
 url = "https://download.geofabrik.de/europe/denmark-latest.osm.pbf"
 state_url = "https://download.geofabrik.de/europe/denmark-updates/state.txt"
+# Greenland and Faroe Islands are autonomous countries within the Kingdom
+# of Denmark — Geofabrik publishes them separately. Merging them into the
+# DK extract resolves "Nuuk", "Tórshavn", etc. without spinning up
+# dedicated indices. Requires `osmium` on the build host.
+extra_urls = [
+    "https://download.geofabrik.de/north-america/greenland-latest.osm.pbf",
+    "https://download.geofabrik.de/europe/faroe-islands-latest.osm.pbf",
+]
 
 [country.dk.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/dk/photon-db-dk-250720.tar.bz2"

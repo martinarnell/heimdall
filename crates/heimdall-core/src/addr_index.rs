@@ -157,17 +157,38 @@ fn parse_city_postcode(s: &str) -> (Option<String>, Option<String>) {
         let _postcode = if words.len() > 1 && words[1].len() == 2 && words[1].chars().all(|c| c.is_ascii_digit()) {
             // "114 56" format
             let pc = format!("{} {}", first, words[1]);
-            let city = if words.len() > 2 { Some(words[2..].join(" ")) } else { None };
+            let city = if words.len() > 2 {
+                Some(strip_trailing_postal_letter(&words[2..].join(" ")))
+            } else { None };
             return (city, Some(pc));
         } else {
             let pc = first.to_owned();
-            let city = if words.len() > 1 { Some(words[1..].join(" ")) } else { None };
+            let city = if words.len() > 1 {
+                Some(strip_trailing_postal_letter(&words[1..].join(" ")))
+            } else { None };
             return (city, Some(pc));
         };
     }
 
     // Just a city name
-    (Some(s.to_owned()), None)
+    (Some(strip_trailing_postal_letter(s)), None)
+}
+
+/// Strip a trailing single-letter postal-district suffix from a city name.
+/// Danish addresses use "København K", "Aarhus C", "Aalborg Ø" to denote
+/// the postal district within the city; the letter has no place-name
+/// signal and breaks city resolution. Generic across languages — anything
+/// like "<word> <one-letter>" trims the letter.
+fn strip_trailing_postal_letter(city: &str) -> String {
+    let words: Vec<&str> = city.split_whitespace().collect();
+    if words.len() < 2 { return city.to_owned(); }
+    let last = words[words.len() - 1];
+    let alphas = last.chars().filter(|c| c.is_alphabetic()).count();
+    if alphas == 1 {
+        words[..words.len() - 1].join(" ")
+    } else {
+        city.to_owned()
+    }
 }
 
 /// Normalize house number: lowercase, strip ranges (take first number)

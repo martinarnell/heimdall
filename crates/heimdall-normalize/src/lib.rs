@@ -495,6 +495,25 @@ impl Normalizer {
         boundary_variants.truncate(16);
         candidates.extend(boundary_variants);
 
+        // Two-token reverse-order variant. FST keys are word-order sensitive —
+        // "Roskilde Domkirke" indexes under "roskilde domkirke", and a
+        // user-typed "Domkirken Roskilde" misses even after definite-strip
+        // ("domkirke roskilde" ≠ "roskilde domkirke"). Generating the
+        // reversed form lets either order resolve to the canonical key.
+        // Restricted to two tokens to bound candidate growth — for 3+ tokens
+        // the per-word index handles long-form queries adequately.
+        let mut reverse_variants: Vec<String> = Vec::new();
+        for c in &candidates {
+            let words: Vec<&str> = c.split_whitespace().collect();
+            if words.len() == 2 {
+                let reversed = format!("{} {}", words[1], words[0]);
+                if !candidates.contains(&reversed) && !reverse_variants.contains(&reversed) {
+                    reverse_variants.push(reversed);
+                }
+            }
+        }
+        candidates.extend(reverse_variants);
+
         candidates
     }
 

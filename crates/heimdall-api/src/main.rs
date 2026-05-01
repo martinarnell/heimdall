@@ -519,6 +519,41 @@ fn strip_country_prefix(s: &str) -> &str {
     }
 }
 
+/// Extract the 2-letter country code from a "CC-NNNN" / "CC NNNN" postcode
+/// prefix. Returns None when no recognised prefix is present, or when the
+/// stripped digit body isn't postcode-shaped. Used to restrict postcode
+/// lookups to the named country so "DK-2100" doesn't accidentally resolve
+/// to Norway's 2100.
+fn extract_country_prefix(s: &str) -> Option<[u8; 2]> {
+    let bytes = s.as_bytes();
+    if bytes.len() < 4 { return None; }
+    let c0 = bytes[0];
+    let c1 = bytes[1];
+    let c2 = bytes[2];
+    let prefix_letters = c0.is_ascii_alphabetic() && c1.is_ascii_alphabetic();
+    let separator = matches!(c2, b'-' | b' ');
+    if !(prefix_letters && separator) { return None; }
+    Some([c0.to_ascii_uppercase(), c1.to_ascii_uppercase()])
+}
+
+/// Country-prefix shorthand variants that callers also type without a
+/// separator: "DK1000", "DE12345". Returns Some((cc, stripped)) when the
+/// first two bytes are letters and the rest is digit-only postcode-shaped;
+/// otherwise None.
+fn extract_country_prefix_compact(s: &str) -> Option<([u8; 2], &str)> {
+    let bytes = s.as_bytes();
+    if bytes.len() < 5 { return None; }
+    let c0 = bytes[0];
+    let c1 = bytes[1];
+    if !(c0.is_ascii_alphabetic() && c1.is_ascii_alphabetic()) { return None; }
+    let rest = &s[2..];
+    if rest.chars().all(|c| c.is_ascii_digit()) && rest.len() >= 3 && rest.len() <= 7 {
+        Some(([c0.to_ascii_uppercase(), c1.to_ascii_uppercase()], rest))
+    } else {
+        None
+    }
+}
+
 /// Detect a "postcode + city" query like "111 22 Stockholm" or "11122 Malmö".
 /// Returns (postcode_string, city_string). The postcode is whatever shape
 /// `is_postcode_shaped` accepts; the city is the rest of the query.
@@ -778,6 +813,10 @@ async fn search(
     // to the bare-postcode path.
     if let Some((pc, city_part)) = split_postcode_city(&query_text) {
         let pc_lookup = strip_country_prefix(pc.trim()).trim().to_owned();
+        // If the postcode carries an explicit "CC-" country prefix, restrict
+        // the cross-country scan to that country so e.g. "DK-1000 København K"
+        // never gets resolved against Norway or Sweden.
+        let split_prefix_country = extract_country_prefix(pc.trim());
         // Search every loaded country and pick the result whose coord is
         // closest to the city_part — without this, "1601 Fredrikstad"
         // hits Denmark's 1601 (København K) before reaching Norway's
@@ -785,6 +824,9 @@ async fn search(
         // Tie-breaker: shortest distance to a settlement matching `city_part`.
         let mut best: Option<(usize, &CountryIndex, heimdall_core::addr_index::AddrResult, f64)> = None;
         for &(ci, country) in &target_countries {
+            if let Some(ref forced) = split_prefix_country {
+                if &country.code != forced { continue; }
+            }
             let addr_index = match &country.addr_index { Some(a) => a, None => continue };
             let r = match addr_index.lookup_postcode(&pc_lookup) {
                 Some(r) => r,
@@ -875,14 +917,29 @@ async fn search(
             query_text = city_part;
         }
     }
-    if is_postcode_shaped(&query_text) {
-        let pc_stripped = strip_country_prefix(query_text.trim()).trim().to_owned();
+    // Compact "DKNNNN" form (no separator) — the country prefix isn't a
+    // postcode shape on its own, so check it before the regular shape test.
+    let mut compact_prefix_query: Option<String> = None;
+    if let Some(([c0, c1], rest)) = extract_country_prefix_compact(query_text.trim()) {
+        // Reconstruct as "CC NNNN" for the regular postcode pipeline below.
+        compact_prefix_query = Some(format!("{}{} {}", c0 as char, c1 as char, rest));
+    }
+    let query_text_for_pc: String = compact_prefix_query.clone().unwrap_or_else(|| query_text.clone());
+    if is_postcode_shaped(&query_text_for_pc) {
+        let pc_stripped = strip_country_prefix(query_text_for_pc.trim()).trim().to_owned();
+        // Country prefix ("DK-1000") explicitly names the country — restrict
+        // the postcode FST scan so we don't accidentally accept a same-digit
+        // postcode from another loaded country.
+        let prefix_country = extract_country_prefix(query_text_for_pc.trim());
         for (_ci, country) in &target_countries {
+            if let Some(ref forced) = prefix_country {
+                if &country.code != forced { continue; }
+            }
             if let Some(ref addr_index) = country.addr_index {
                 if let Some(r) = addr_index.lookup_postcode(&pc_stripped) {
                     let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
                     let display = if r.street.is_empty() {
-                        query_text.trim().to_owned()
+                        pc_stripped.clone()
                     } else {
                         r.street.clone()
                     };
@@ -906,7 +963,7 @@ async fn search(
                                 village: None,
                                 county: None,
                                 state: None,
-                                postcode: Some(query_text.trim().to_owned()),
+                                postcode: Some(pc_stripped.clone()),
                                 country: Some(country.name.clone()),
                                 country_code: Some(cc),
                             })
@@ -2469,15 +2526,27 @@ fn load_country_index_inner(path: &std::path::Path, lightweight: bool) -> anyhow
         .and_then(|n| n.to_str())
         .unwrap_or("");
 
-    let (code, bbox, name) = if dir_name.contains("denmark") || dir_name.ends_with("-dk") {
+    // Match a 2-letter ISO code as a `-cc` token anywhere in the dir name —
+    // "index-dk", "index-dk-realm", "dk-test" all qualify. Without this we
+    // wrongly default to Sweden for any non-`-dk` suffix variant.
+    let has_cc_token = |cc: &str| -> bool {
+        let token_mid = format!("-{}-", cc);
+        let token_suf = format!("-{}", cc);
+        dir_name == cc
+            || dir_name.starts_with(&format!("{}-", cc))
+            || dir_name.contains(&token_mid)
+            || dir_name.ends_with(&token_suf)
+    };
+
+    let (code, bbox, name) = if dir_name.contains("denmark") || has_cc_token("dk") {
         (*b"DK", BoundingBox { min_lat: 54.5, max_lat: 57.8, min_lon: 8.0, max_lon: 15.2 }, "Denmark")
-    } else if dir_name.contains("germany") || dir_name.ends_with("-de") {
+    } else if dir_name.contains("germany") || has_cc_token("de") {
         (*b"DE", BoundingBox { min_lat: 47.3, max_lat: 55.1, min_lon: 5.9, max_lon: 15.0 }, "Germany")
-    } else if dir_name.contains("norway") || dir_name.ends_with("-no") {
+    } else if dir_name.contains("norway") || has_cc_token("no") {
         (*b"NO", BoundingBox { min_lat: 57.5, max_lat: 71.5, min_lon: 4.0, max_lon: 31.5 }, "Norway")
-    } else if dir_name.contains("sweden") || dir_name.ends_with("-se") {
+    } else if dir_name.contains("sweden") || has_cc_token("se") {
         (*b"SE", BoundingBox::sweden(), "Sweden")
-    } else if dir_name.contains("finland") || dir_name.ends_with("-fi") {
+    } else if dir_name.contains("finland") || has_cc_token("fi") {
         (*b"FI", BoundingBox { min_lat: 59.7, max_lat: 70.1, min_lon: 19.5, max_lon: 31.6 }, "Finland")
     } else if dir_name.contains("-gb") || dir_name.contains("-uk") || dir_name.contains("britain") {
         (*b"GB", BoundingBox { min_lat: 49.8, max_lat: 60.9, min_lon: -8.7, max_lon: 1.8 }, "Great Britain")

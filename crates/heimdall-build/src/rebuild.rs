@@ -49,6 +49,12 @@ pub(crate) struct CountryConfig {
 pub(crate) struct OsmSource {
     pub url: String,
     pub state_url: Option<String>,
+    /// Optional supplementary PBF URLs merged into the main extract before
+    /// the per-country pipeline runs. Used to bring overseas territories
+    /// (Greenland, Faroe Islands) into Denmark's index in one shot. The
+    /// `osmium merge` binary must be installed on the host.
+    #[serde(default)]
+    pub extra_urls: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -1571,15 +1577,48 @@ fn build_country_pipeline(
             let ss = cs.osm.get_or_insert_with(Default::default);
             let pbf_path = rt.block_on(download_source(client, &osm.url, &download_dir, ss, skip_download))?;
 
+            // Optional supplementary PBFs (e.g. Greenland + Faroe Islands
+            // for Denmark). Downloaded fresh each rebuild — no per-source
+            // state tracking, since they're tiny and change slowly.
+            let mut extra_paths: Vec<PathBuf> = Vec::new();
+            for extra_url in &osm.extra_urls {
+                let mut tmp_state = SourceState::default();
+                let p = rt.block_on(download_source(client, extra_url, &download_dir, &mut tmp_state, skip_download))?;
+                extra_paths.push(p);
+            }
+
+            let merged_pbf_path: PathBuf = if extra_paths.is_empty() {
+                pbf_path.clone()
+            } else {
+                // Merge with osmium so the extract pipeline sees one stream.
+                // osmium ships in most Geofabrik-friendly environments; we
+                // surface a clear error if it's missing.
+                let merged = download_dir.join(format!("{}-realm.osm.pbf", cc));
+                let mut cmd = std::process::Command::new("osmium");
+                cmd.arg("merge").arg("--overwrite").arg(&pbf_path);
+                for ep in &extra_paths { cmd.arg(ep); }
+                cmd.arg("-o").arg(&merged);
+                let status = cmd.status().map_err(|e| anyhow::anyhow!(
+                    "[{}] osmium merge failed (is osmium-tool installed?): {}", cc, e))?;
+                if !status.success() {
+                    anyhow::bail!("[{}] osmium merge exited with status {}", cc, status);
+                }
+                merged
+            };
+
             let pp = places_parquet.clone();
             let step = time_step(cc, "extract", || {
-                let r = crate::extract::extract_places(&pbf_path, &pp, min_population, true)?;
+                let r = crate::extract::extract_places(&merged_pbf_path, &pp, min_population, true)?;
                 Ok(format!("{} places  {} addr", r.place_count, r.address_count))
             })?;
             steps.push(step);
 
-            // PBF no longer needed — parquet has all extracted data
+            // Cleanup PBF + extras + merged file (all served their purpose)
             delete_file_if_exists(&pbf_path, "PBF download", !cleanup);
+            for ep in &extra_paths { delete_file_if_exists(ep, "extra PBF", !cleanup); }
+            if merged_pbf_path != pbf_path {
+                delete_file_if_exists(&merged_pbf_path, "merged PBF", !cleanup);
+            }
         }
 
         // Step 2: Download national source → merge → delete download
