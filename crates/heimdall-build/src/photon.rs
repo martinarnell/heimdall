@@ -1108,19 +1108,36 @@ pub fn write_places_parquet(places: &[RawPlace], path: &Path) -> Result<()> {
         let populations: Vec<Option<u32>> = chunk.iter().map(|p| p.population).collect();
         let wikidatas: Vec<Option<&str>> = chunk.iter().map(|p| p.wikidata.as_deref()).collect();
 
-        let alt_names: Vec<Option<&str>> = chunk
+        // Stored as semicolon-separated. Empty Vec → None so downstream
+        // readers can `.is_null()`-check without splitting an empty string.
+        // Earlier this writer was Photon-only and Photon JSON didn't expose
+        // alt_names; now extract.rs feeds the same writer with rich OSM data
+        // (short_name, loc_name, official_name) — silently dropping it
+        // killed cross-name resolution for queries like "AU" → Aarhus
+        // Universitet.
+        let alt_strings: Vec<Option<String>> = chunk
             .iter()
             .map(|p| {
                 if p.alt_names.is_empty() {
                     None
                 } else {
-                    // Stored as semicolon-separated in a single string
-                    None // Photon doesn't have alt_names separately
+                    Some(p.alt_names.join(";"))
                 }
             })
             .collect();
+        let alt_names: Vec<Option<&str>> = alt_strings.iter().map(|s| s.as_deref()).collect();
 
-        let old_names: Vec<Option<&str>> = chunk.iter().map(|_| None).collect();
+        let old_strings: Vec<Option<String>> = chunk
+            .iter()
+            .map(|p| {
+                if p.old_names.is_empty() {
+                    None
+                } else {
+                    Some(p.old_names.join(";"))
+                }
+            })
+            .collect();
+        let old_names: Vec<Option<&str>> = old_strings.iter().map(|s| s.as_deref()).collect();
 
         // Format name_intl as "lang=name;lang=name"
         let name_intl_strings: Vec<Option<String>> = chunk
