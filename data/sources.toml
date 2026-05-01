@@ -34,6 +34,15 @@ type = "dawa"
 url = "https://api.dataforsyningen.dk/adgangsadresser?format=csv&srid=4326"
 sequence_url = "https://api.dataforsyningen.dk/replikering/senestesekvensnummer"
 
+# Authoritative Danish place names registry (~140K records). Adds
+# bydele (suburbs/districts), castles, museums, churches, bridges,
+# stadiums, lakes, islands etc. — fixes "Storebæltsbroen", "Klampenborg",
+# "H.C. Andersens Hus", "Charlottenlund Slot" etc. that OSM tags
+# inconsistently. Same Dataforsyningen infra as DAWA — no auth needed.
+[country.dk.places_source]
+type = "dagi"
+url = "https://api.dataforsyningen.dk/steder?format=json"
+
 # ── Sweden ─────────────────────────────────────────────────────────────────
 
 [country.se]

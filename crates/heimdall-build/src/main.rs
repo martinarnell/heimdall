@@ -34,6 +34,7 @@ mod photon;
 mod lucene;
 mod rebuild;
 mod ssr;
+mod dagi;
 mod tiger;
 mod oa;
 mod gnaf;
@@ -153,6 +154,17 @@ enum Commands {
         /// Path to SSR GML file
         #[arg(long)]
         gml: PathBuf,
+    },
+
+    /// Merge DAGI Stednavne (Danske Stednavne) JSON into existing OSM places
+    MergeDagi {
+        /// Path to index directory (must contain places.parquet)
+        #[arg(short, long)]
+        index: PathBuf,
+
+        /// Path to DAGI steder JSON dump
+        #[arg(long)]
+        json: PathBuf,
     },
 
     /// Merge Photon JSONL dump into an existing index (places + addresses)
@@ -772,6 +784,27 @@ fn main() -> Result<()> {
             photon::write_places_parquet(&merged, &places_parquet)?;
             info!(
                 "Done! {} total ({} existing + {} SSR new). Run 'build --skip-extract' to rebuild.",
+                merged.len(), osm_places.len(), merged.len() - osm_places.len(),
+            );
+        }
+
+        Commands::MergeDagi { index, json } => {
+            let dagi_places = dagi::read_dagi_places(&json)?;
+
+            let places_parquet = index.join("places.parquet");
+            let osm_places = if places_parquet.exists() {
+                info!("Reading existing places...");
+                read_osm_places(&places_parquet)?
+            } else {
+                vec![]
+            };
+
+            let merged = dagi::merge_dagi_places(&osm_places, &dagi_places);
+
+            info!("Writing merged places.parquet...");
+            photon::write_places_parquet(&merged, &places_parquet)?;
+            info!(
+                "Done! {} total ({} existing + {} DAGI new). Run 'build --skip-extract' to rebuild.",
                 merged.len(), osm_places.len(), merged.len() - osm_places.len(),
             );
         }

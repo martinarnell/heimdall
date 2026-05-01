@@ -1287,6 +1287,7 @@ fn merge_places_source(
             };
             crate::ssr::read_ssr_places(&gml_path)?
         }
+        "dagi" => crate::dagi::read_dagi_places(path)?,
         other => bail!("[{}] Unknown places source type: {}", cc, other),
     };
 
@@ -1296,13 +1297,20 @@ fn merge_places_source(
         vec![]
     };
 
-    let merged = crate::ssr::merge_ssr_places(&existing, &new_places);
+    let merged = match source_type {
+        "dagi" => crate::dagi::merge_dagi_places(&existing, &new_places),
+        // Default — SSR's spatial+name dedup works for any geometry-rich
+        // place source, so reuse it.
+        _ => crate::ssr::merge_ssr_places(&existing, &new_places),
+    };
     crate::photon::write_places_parquet(&merged, places_parquet)?;
 
+    let label = match source_type { "dagi" => "DAGI", _ => "SSR" };
     Ok(format!(
-        "+{} places ({} SSR total)",
+        "+{} places ({} {} total)",
         merged.len() - existing.len(),
         new_places.len(),
+        label,
     ))
 }
 
