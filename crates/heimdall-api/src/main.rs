@@ -1491,7 +1491,15 @@ async fn search(
             // word-drop so we don't carry them into the final ranking.
             response.clear();
         }
-        let words: Vec<&str> = query_text.split_whitespace().collect();
+        // Tokenise on whitespace AND hyphens so hyphenated postal districts
+        // ("Hellerup-Klampenborg", "Snekkersten-Espergærde") get the same
+        // word-drop treatment as space-separated queries. Otherwise the
+        // hyphen swallows them into a single token and word-drop never
+        // fires.
+        let words: Vec<&str> = query_text
+            .split(|c: char| c.is_whitespace() || c == '-')
+            .filter(|t| !t.is_empty())
+            .collect();
         if words.len() >= 2 {
             let mut subqueries: Vec<String> = Vec::new();
 
@@ -1517,6 +1525,10 @@ async fn search(
             // Only first word as a standalone (useful for "Pamplona Navarra" → "Pamplona")
             if words.len() >= 2 {
                 subqueries.push(words[0].to_string());
+                // Also try the *last* word — for hyphenated postal districts
+                // like "Hellerup-Klampenborg" the second half ("Klampenborg")
+                // is a famous suburb in its own right, not just an anchor.
+                subqueries.push(words[words.len() - 1].to_string());
             }
 
             'word_drop: for sub in &subqueries {
