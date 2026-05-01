@@ -65,6 +65,11 @@ pub fn enrich(parquet_path: &Path, output_dir: &Path) -> Result<EnrichResult> {
 
     // Also collect all places for admin assignment
     let mut places: Vec<(i64, f64, f64)> = Vec::new(); // (osm_id, lat, lon)
+    // Settlement populations — used in Step 3c to backfill admin populations
+    // for countries (e.g. Denmark) where most kommune relations have no
+    // population tag. Aggregating contained settlements gives the
+    // centrality bonus something to work with for cross-country ranking.
+    let mut settlement_populations: Vec<(i64, u32)> = Vec::new();
 
     let file = std::fs::File::open(parquet_path)?;
     let builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
@@ -88,6 +93,8 @@ pub fn enrich(parquet_path: &Path, output_dir: &Path) -> Result<EnrichResult> {
             .as_any().downcast_ref::<UInt32Array>().unwrap();
         let wikidatas = batch.column_by_name("wikidata").unwrap()
             .as_any().downcast_ref::<StringArray>().unwrap();
+        let place_types = batch.column_by_name("place_type").unwrap()
+            .as_any().downcast_ref::<UInt8Array>().unwrap();
 
         for i in 0..n {
             let lat = lats.value(i);
@@ -102,6 +109,20 @@ pub fn enrich(parquet_path: &Path, output_dir: &Path) -> Result<EnrichResult> {
 
             // Collect all places for assignment
             places.push((osm_id, lat, lon));
+
+            // Settlement-type place with a population tag — used later to
+            // back-fill missing admin populations. Only City/Town/Village
+            // counts; Suburb/Hamlet have unreliable OSM population tags.
+            if !populations.is_null(i) {
+                let pt = place_types.value(i);
+                let is_settlement = matches!(pt, 3 | 4 | 5); // City=3, Town=4, Village=5
+                if is_settlement {
+                    let pop = populations.value(i);
+                    if pop > 0 {
+                        settlement_populations.push((osm_id, pop));
+                    }
+                }
+            }
 
             // Accept admin regions from any country — is_valid_admin_for_country() handles cross-border filtering
             if !admin_levels.is_null(i) {
@@ -294,6 +315,60 @@ pub fn enrich(parquet_path: &Path, output_dir: &Path) -> Result<EnrichResult> {
             pip_hits_val, centroid_fallbacks_val,
             pip_hits_val as f64 / (pip_hits_val + centroid_fallbacks_val).max(1) as f64 * 100.0
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Step 3c: Backfill missing admin populations from contained settlements
+    // -----------------------------------------------------------------------
+    // Many countries (Denmark, France, Switzerland) tag their kommune /
+    // commune relations without a `population` tag — we extract a 0,
+    // and the centrality bonus in `compute_importance_inline` never fires.
+    // The cross-country effect: a Suburb in Copenhagen with wikidata loses
+    // to a same-name Park in Sundsvall whose Sundsvalls kommun *does*
+    // have a population tag.
+    //
+    // Fix: aggregate populations of City/Town/Village settlements that
+    // landed inside each admin polygon and use the sum as a backstop when
+    // OSM didn't provide one. Pure data fix — no algorithm change.
+    {
+        let mut agg_admin1: HashMap<u16, u64> = HashMap::new();
+        let mut agg_admin2: HashMap<u16, u64> = HashMap::new();
+        let mut backfilled_count: usize = 0;
+
+        for (osm_id, pop) in &settlement_populations {
+            if let Some(&(a1, a2)) = admin_map.get(osm_id) {
+                if a1 != u16::MAX {
+                    *agg_admin1.entry(a1).or_insert(0) += *pop as u64;
+                }
+                if a2 != u16::MAX {
+                    *agg_admin2.entry(a2).or_insert(0) += *pop as u64;
+                }
+            }
+        }
+
+        for entry in admin_entries.iter_mut() {
+            if entry.population > 0 { continue; }
+            let agg = if entry.place_type == PlaceType::State {
+                agg_admin1.get(&entry.id).copied().unwrap_or(0)
+            } else {
+                agg_admin2.get(&entry.id).copied().unwrap_or(0)
+            };
+            // Cap at u32::MAX to fit AdminEntry.population. A sum overflow
+            // at admin1 would mean the parent contains > 4 G people —
+            // physically impossible, but the saturating cast keeps us
+            // honest if the data is corrupt.
+            if agg > 0 {
+                entry.population = agg.min(u32::MAX as u64) as u32;
+                backfilled_count += 1;
+            }
+        }
+
+        if backfilled_count > 0 {
+            info!(
+                "Backfilled population for {} admin entries from contained settlements ({} settlements aggregated)",
+                backfilled_count, settlement_populations.len()
+            );
+        }
     }
 
     // -----------------------------------------------------------------------

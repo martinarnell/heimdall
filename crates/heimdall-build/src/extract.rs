@@ -818,8 +818,17 @@ fn scan_way(way: &osmpbf::Way) -> Option<PendingWay> {
     if is_building && qualifying_tag.is_none() && place_tag.is_none() {
         return None;
     }
+    // Highway notability gate. Without this, every residential street in the
+    // PBF gets indexed and floods the FST. We accept four signals:
+    //   - wikidata / wikipedia (regionally famous)
+    //   - alt_name / loc_name / short_name (`old_name=`-style historic names)
+    //   - name_intl (officially bilingual streets — Helsinki / Espoo / Turku
+    //     in Finland, Brussels in Belgium, Wales, Catalonia, …). The
+    //     `name:sv` (or any `name:<lang>`) tag itself is the notability
+    //     signal: someone bothered to translate it because it matters.
     let highway_qualifies = is_highway
-        && (wikidata.is_some() || has_wikipedia || !alt_names.is_empty());
+        && (wikidata.is_some() || has_wikipedia
+            || !alt_names.is_empty() || !name_intl.is_empty());
     if is_highway && !highway_qualifies {
         return None;
     }
@@ -1397,6 +1406,10 @@ fn way_qualifies(way: &osmpbf::Way) -> bool {
             "building" => is_building = true,
             "wikidata" | "wikipedia" | "loc_name" | "short_name"
             | "nat_name" | "reg_name" => has_notability = true,
+            // `name:<lang>` (e.g. name:sv on Aleksanterinkatu in
+            // bilingual Helsinki) is itself a notability signal — keep
+            // pre-pass 2 in sync with scan_way's gate.
+            k if k.starts_with("name:") && k.len() == 7 => has_notability = true,
             _ => {
                 if !has_qualifying {
                     for &mt in MEANINGFUL_WAY_TAGS {

@@ -139,8 +139,17 @@ pub fn pack(
         4 * 1024 * 1024,
         std::fs::File::create(key_dir.join("phonetic.tsv"))?,
     );
+    // Trigram TSV: same `key\trecord_id\timportance\tpop_flag` format as
+    // exact/phonetic so build_fst_from_disk reads it unmodified. Each
+    // indexed name expands to ~name_len trigrams, so the file is ~10×
+    // bigger than exact.tsv pre-sort.
+    let mut ngram_writer = std::io::BufWriter::with_capacity(
+        4 * 1024 * 1024,
+        std::fs::File::create(key_dir.join("ngram.tsv"))?,
+    );
     let mut exact_count = 0usize;
     let mut phonetic_count = 0usize;
+    let mut ngram_count = 0usize;
 
     let mut records_added = 0usize;
     let mut skipped_empty = 0usize;
@@ -374,6 +383,56 @@ pub fn pack(
                     write!(phonetic_writer, "{}\t{}\t{}\t{}\n", phonetic_key, id, importance, pop_flag)?;
                     phonetic_count += 1;
                 }
+
+                // Trigrams from the lowercased primary name and from each
+                // alt/intl name. Demote alt-name trigrams slightly so the
+                // primary name's trigrams dominate ranking — but not so
+                // much that an English-only name like "Ericsson Globe"
+                // can't be reached via "Globen" (its Swedish alt).
+                //
+                // We deliberately skip the per-word and stop-word stripped
+                // variants: trigrams already implicitly handle partial
+                // tokens. Adding extra variants blows up the FST without
+                // meaningful recall gain.
+                let trigrams_emit = |writer: &mut std::io::BufWriter<std::fs::File>,
+                                     counter: &mut usize,
+                                     text: &str,
+                                     imp: u16|
+                 -> std::io::Result<()> {
+                    if text.is_empty() || text.len() > 80 { return Ok(()); }
+                    for tg in heimdall_core::ngram::trigrams(text) {
+                        // Skip the boundary-only trigram for very common
+                        // 1-char tokens — `^i$`, `^a$` would otherwise
+                        // attract every short particle.
+                        if tg.len() == 3 && tg.starts_with('^') && tg.ends_with('$') {
+                            continue;
+                        }
+                        write!(writer, "{}\t{}\t{}\t{}\n", tg, id, imp, pop_flag)?;
+                        *counter += 1;
+                    }
+                    Ok(())
+                };
+
+                trigrams_emit(&mut ngram_writer, &mut ngram_count,
+                              &primary_lower, importance)?;
+
+                // Diacritic-stripped + abbreviation-expanded variants of
+                // the primary name. Same demotion as the alt path — these
+                // are derived forms.
+                for candidate in &candidates {
+                    if !candidate.is_empty() && candidate != &primary_lower {
+                        trigrams_emit(&mut ngram_writer, &mut ngram_count,
+                                      candidate, importance.saturating_sub(50))?;
+                    }
+                }
+
+                // Alt and intl names — slightly demoted so the primary
+                // name takes precedence on ties.
+                for alt in &all_alts {
+                    let alt_lower = alt.to_lowercase();
+                    trigrams_emit(&mut ngram_writer, &mut ngram_count,
+                                  &alt_lower, importance.saturating_sub(50))?;
+                }
             }
         }
     } // parquet reader dropped, Arrow batch buffers freed
@@ -397,13 +456,17 @@ pub fn pack(
     // Flush key writers
     exact_writer.flush()?;
     phonetic_writer.flush()?;
+    ngram_writer.flush()?;
     drop(exact_writer);
     drop(phonetic_writer);
-    info!("FST keys written: {} exact, {} phonetic", exact_count, phonetic_count);
+    drop(ngram_writer);
+    info!("FST keys written: {} exact, {} phonetic, {} ngram",
+        exact_count, phonetic_count, ngram_count);
 
     // Build 3 FSTs in parallel
     let exact_tsv = key_dir.join("exact.tsv");
     let phonetic_tsv = key_dir.join("phonetic.tsv");
+    let ngram_tsv = key_dir.join("ngram.tsv");
     let fst_exact_path = output_dir.join("fst_exact.fst");
     let fst_phonetic_path = output_dir.join("fst_phonetic.fst");
     let fst_ngram_path = output_dir.join("fst_ngram.fst");
@@ -414,6 +477,7 @@ pub fn pack(
     // treated as a record_id directly (backwards compatibility).
     let record_lists_exact_path = output_dir.join("record_lists.bin");
     let record_lists_phonetic_path = output_dir.join("record_lists_phonetic.bin");
+    let record_lists_ngram_path = output_dir.join("record_lists_ngram.bin");
 
     let (res_exact, (res_phonetic, res_ngram)) = rayon::join(
         || -> Result<usize> {
@@ -434,8 +498,17 @@ pub fn pack(
                 Ok(bytes)
             },
             || -> Result<usize> {
-                let bytes = build_fst(&mut vec![], &fst_ngram_path)?;
+                // Trigram posting lists are *much* longer than exact /
+                // phonetic — common letter pairs like `^st` show up in
+                // thousands of names. The shared MAX_POSTINGS_PER_KEY=16
+                // cap is too tight; use a larger ngram-specific cap so
+                // we keep enough candidates per trigram to still find a
+                // good intersection while bounding worst-case memory.
+                let bytes = build_fst_from_disk_ngram(&ngram_tsv, &fst_ngram_path, &record_lists_ngram_path)?;
                 heimdall_core::compressed_io::compress_file(&fst_ngram_path, 19)?;
+                if record_lists_ngram_path.exists() {
+                    heimdall_core::compressed_io::compress_file(&record_lists_ngram_path, 19)?;
+                }
                 Ok(bytes)
             },
         ),
@@ -443,8 +516,9 @@ pub fn pack(
     let fst_exact_bytes = res_exact?;
     let fst_phonetic_bytes = res_phonetic?;
     let fst_ngram_bytes = res_ngram?;
-    info!("FSTs built in parallel: exact {:.1} MB, phonetic {:.1} MB",
-        fst_exact_bytes as f64 / 1e6, fst_phonetic_bytes as f64 / 1e6);
+    info!("FSTs built in parallel: exact {:.1} MB, phonetic {:.1} MB, ngram {:.1} MB",
+        fst_exact_bytes as f64 / 1e6, fst_phonetic_bytes as f64 / 1e6,
+        fst_ngram_bytes as f64 / 1e6);
 
     // Clean up temp key files
     std::fs::remove_dir_all(&key_dir).ok();
@@ -471,6 +545,111 @@ pub fn pack(
 /// and per-word ("X stadsbibliotek") indexing — small enough that the
 /// sidecar stays under a few MB.
 const MAX_POSTINGS_PER_KEY: usize = 16;
+
+/// Cap on postings per trigram. Common trigrams like `^st` appear in
+/// thousands of records — without a cap the worst-case posting list is
+/// O(record_count). 4096 keeps the per-trigram cost bounded while still
+/// retaining the top several thousand most-important records, which is
+/// more than enough headroom for the trigram intersection ranker to find
+/// the right needle.
+const MAX_NGRAM_POSTINGS_PER_KEY: usize = 4096;
+
+/// Trigram-specific FST builder. Same disk-sort + group-by-key pattern as
+/// `build_fst_from_disk` but with a much larger posting cap because
+/// common trigrams legitimately appear in thousands of names. Posting
+/// list values are u32 record_ids (no importance stored separately —
+/// they're already sorted by importance desc when written).
+fn build_fst_from_disk_ngram(tsv_path: &Path, fst_path: &Path, sidecar_path: &Path) -> Result<usize> {
+    use std::io::{BufRead, Write};
+
+    if !tsv_path.exists() || std::fs::metadata(tsv_path)?.len() == 0 {
+        let file = std::io::BufWriter::new(std::fs::File::create(fst_path)?);
+        let mut builder = MapBuilder::new(file)?;
+        builder.finish()?;
+        std::fs::write(sidecar_path, &[][..])?;
+        return Ok(std::fs::metadata(fst_path)?.len() as usize);
+    }
+
+    let sorted_path = tsv_path.with_extension("sorted.tsv");
+    let sort_status = std::process::Command::new("sort")
+        .env("LC_ALL", "C")
+        .args(["-t", "\t", "-k1,1", "-s", "--buffer-size=256M"])
+        .arg(tsv_path)
+        .stdout(std::fs::File::create(&sorted_path)?)
+        .status()?;
+    if !sort_status.success() {
+        anyhow::bail!("sort command failed for {}", tsv_path.display());
+    }
+
+    let reader = std::io::BufReader::new(std::fs::File::open(&sorted_path)?);
+    let file = std::io::BufWriter::new(std::fs::File::create(fst_path)?);
+    let mut builder = MapBuilder::new(file)?;
+
+    let mut sidecar_writer = std::io::BufWriter::with_capacity(
+        4 * 1024 * 1024,
+        std::fs::File::create(sidecar_path)?,
+    );
+    let mut sidecar_offset: u64 = 0;
+
+    let mut prev_key = String::new();
+    let mut group: Vec<(u32, u16)> = Vec::new();
+
+    let flush_group = |builder: &mut MapBuilder<std::io::BufWriter<std::fs::File>>,
+                       sidecar_writer: &mut std::io::BufWriter<std::fs::File>,
+                       sidecar_offset: &mut u64,
+                       key: &str,
+                       group: &mut Vec<(u32, u16)>|
+     -> Result<()> {
+        if key.is_empty() || group.is_empty() {
+            return Ok(());
+        }
+        // Same dedup pattern as the exact builder: by record_id keeping
+        // highest-importance entry, then re-sort by importance desc.
+        group.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
+        group.dedup_by_key(|(id, _)| *id);
+        group.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        if group.len() > MAX_NGRAM_POSTINGS_PER_KEY {
+            group.truncate(MAX_NGRAM_POSTINGS_PER_KEY);
+        }
+
+        let count = group.len() as u16;
+        let offset = *sidecar_offset;
+        sidecar_writer.write_all(&count.to_le_bytes())?;
+        for &(id, _) in group.iter() {
+            sidecar_writer.write_all(&id.to_le_bytes())?;
+        }
+        *sidecar_offset += 2 + (group.len() as u64) * 4;
+        builder.insert(key.as_bytes(), offset)?;
+
+        group.clear();
+        Ok(())
+    };
+
+    for line in reader.lines() {
+        let line = line?;
+        let parts: Vec<&str> = line.split('\t').collect();
+        if parts.len() < 4 { continue; }
+
+        let key = parts[0];
+        let id: u32 = parts[1].parse().unwrap_or(0);
+        let importance: u16 = parts[2].parse().unwrap_or(0);
+
+        if key != prev_key {
+            flush_group(&mut builder, &mut sidecar_writer, &mut sidecar_offset, &prev_key, &mut group)?;
+            prev_key = key.to_owned();
+        }
+        group.push((id, importance));
+    }
+    flush_group(&mut builder, &mut sidecar_writer, &mut sidecar_offset, &prev_key, &mut group)?;
+
+    builder.finish()?;
+    sidecar_writer.flush()?;
+
+    std::fs::remove_file(&sorted_path).ok();
+    std::fs::remove_file(tsv_path).ok();
+
+    Ok(std::fs::metadata(fst_path)?.len() as usize)
+}
 
 /// Build FST from a disk TSV file: external sort → group by key → write top-N postings
 /// to sidecar → stream offsets into FST.

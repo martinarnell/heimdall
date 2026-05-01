@@ -436,19 +436,33 @@ fn split_disambiguation_query(input: &str) -> Option<(String, String)> {
 ///   1 = within 50 km of city coord
 ///   0 = no relationship
 fn city_context_tier(
+    cand_country: usize,
     cand_admin1: u16,
     cand_admin2: u16,
     cand_coord: Coord,
+    ctx_country: Option<usize>,
     ctx_admin1: Option<u16>,
     ctx_admin2: Option<u16>,
     ctx_coord: Option<Coord>,
 ) -> u8 {
-    if let (Some(a2), true) = (ctx_admin2, cand_admin2 > 0) {
-        if a2 == cand_admin2 { return 3; }
+    // admin1 and admin2 IDs are PER-COUNTRY (each country has its own
+    // admin table starting at index 0). Without the country gate below,
+    // a tier-2 boost on Norway's "Buskerud" admin1=N could spuriously
+    // fire whenever a Danish region happens to share the same u16 ID —
+    // causing same-name cross-country queries (Holmens Kirke → Holmen
+    // kirke NO) to outrank the in-country exact match.
+    let same_country = ctx_country == Some(cand_country);
+    if same_country {
+        if let (Some(a2), true) = (ctx_admin2, cand_admin2 > 0) {
+            if a2 == cand_admin2 { return 3; }
+        }
+        if let (Some(a1), true) = (ctx_admin1, cand_admin1 > 0) {
+            if a1 == cand_admin1 { return 2; }
+        }
     }
-    if let (Some(a1), true) = (ctx_admin1, cand_admin1 > 0) {
-        if a1 == cand_admin1 { return 2; }
-    }
+    // Coord distance is country-agnostic — Øresund crossings legitimately
+    // pull a candidate ~30 km from a Copenhagen context coord into a
+    // Malmö suburb. Keep this tier active across countries.
     if let Some(c) = ctx_coord {
         if cand_coord.distance_m(&c) <= 50_000.0 {
             return 1;
@@ -489,13 +503,69 @@ fn normalize_punctuation(input: &str) -> String {
 ///
 /// UK-style alphanumeric postcodes are handled separately by
 /// `heimdall_core::addr_index::is_uk_postcode`.
+///
+/// Also accepts the European "CC-NNNN" / "CC NNNN" form where CC is a
+/// 2-letter ISO country code (DK-1000, DE-12345, NL-1011 AB, etc.).
+/// The country prefix is stripped before checking the digit shape.
 fn is_postcode_shaped(s: &str) -> bool {
-    let trimmed = s.trim();
+    let trimmed = strip_country_prefix(s.trim());
     if trimmed.is_empty() { return false; }
-    // Strip a single internal space (Swedish "114 56", DE "12345" w/ stray ws)
     let compact: String = trimmed.chars().filter(|c| !c.is_whitespace()).collect();
     if compact.len() < 4 || compact.len() > 7 { return false; }
     compact.chars().all(|c| c.is_ascii_digit())
+}
+
+/// Strip a leading 2-letter country-code prefix and optional separator
+/// from a potential postcode. "DK-1000" → "1000", "DE 12345" → "12345".
+/// Returns the input unchanged if no recognised prefix is present.
+fn strip_country_prefix(s: &str) -> &str {
+    let bytes = s.as_bytes();
+    if bytes.len() < 4 { return s; }
+    let c0 = bytes[0];
+    let c1 = bytes[1];
+    let c2 = bytes[2];
+    let prefix_letters = c0.is_ascii_alphabetic() && c1.is_ascii_alphabetic();
+    let separator = matches!(c2, b'-' | b' ');
+    if prefix_letters && separator {
+        &s[3..]
+    } else {
+        s
+    }
+}
+
+/// Extract the 2-letter country code from a "CC-NNNN" / "CC NNNN" postcode
+/// prefix. Returns None when no recognised prefix is present, or when the
+/// stripped digit body isn't postcode-shaped. Used to restrict postcode
+/// lookups to the named country so "DK-2100" doesn't accidentally resolve
+/// to Norway's 2100.
+fn extract_country_prefix(s: &str) -> Option<[u8; 2]> {
+    let bytes = s.as_bytes();
+    if bytes.len() < 4 { return None; }
+    let c0 = bytes[0];
+    let c1 = bytes[1];
+    let c2 = bytes[2];
+    let prefix_letters = c0.is_ascii_alphabetic() && c1.is_ascii_alphabetic();
+    let separator = matches!(c2, b'-' | b' ');
+    if !(prefix_letters && separator) { return None; }
+    Some([c0.to_ascii_uppercase(), c1.to_ascii_uppercase()])
+}
+
+/// Country-prefix shorthand variants that callers also type without a
+/// separator: "DK1000", "DE12345". Returns Some((cc, stripped)) when the
+/// first two bytes are letters and the rest is digit-only postcode-shaped;
+/// otherwise None.
+fn extract_country_prefix_compact(s: &str) -> Option<([u8; 2], &str)> {
+    let bytes = s.as_bytes();
+    if bytes.len() < 5 { return None; }
+    let c0 = bytes[0];
+    let c1 = bytes[1];
+    if !(c0.is_ascii_alphabetic() && c1.is_ascii_alphabetic()) { return None; }
+    let rest = &s[2..];
+    if rest.chars().all(|c| c.is_ascii_digit()) && rest.len() >= 3 && rest.len() <= 7 {
+        Some(([c0.to_ascii_uppercase(), c1.to_ascii_uppercase()], rest))
+    } else {
+        None
+    }
 }
 
 /// Detect a "postcode + city" query like "111 22 Stockholm" or "11122 Malmö".
@@ -505,19 +575,30 @@ fn split_postcode_city(s: &str) -> Option<(String, String)> {
     let trimmed = s.trim();
     let words: Vec<&str> = trimmed.split_whitespace().collect();
     if words.len() < 2 { return None; }
+    // Strip trailing punctuation from the candidate-postcode token so
+    // "0150,Oslo" (after `normalize_punctuation` → "0150, Oslo") still
+    // matches. Only ASCII punctuation — not letters! — otherwise
+    // "København" trims down to "" and the function spuriously decides
+    // "1000 " is a 2-token postcode form.
+    let strip_trailing_punct = |w: &str| -> String {
+        w.trim_end_matches([',', '.', ';', '|', '/', ':']).to_owned()
+    };
     // Try the first one or two tokens as a postcode prefix.
     // Two-token form: "111 22 Stockholm" — postcode is "111 22".
     if words.len() >= 3 {
-        let two = format!("{} {}", words[0], words[1]);
+        let w0 = strip_trailing_punct(words[0]);
+        let w1 = strip_trailing_punct(words[1]);
+        let two = format!("{} {}", w0, w1);
         if is_postcode_shaped(&two) {
             let rest = words[2..].join(" ");
             return Some((two, rest));
         }
     }
     // One-token form: "11122 Stockholm" — postcode is "11122".
-    if is_postcode_shaped(words[0]) {
+    let w0 = strip_trailing_punct(words[0]);
+    if is_postcode_shaped(&w0) {
         let rest = words[1..].join(" ");
-        return Some((words[0].to_owned(), rest));
+        return Some((w0, rest));
     }
     None
 }
@@ -569,7 +650,7 @@ async fn search(
     // a uniform whitespace-delimited input. Comma is preserved as a
     // soft separator for the "X, Y" disambiguation pattern by re-joining
     // with ", " when the original used commas.
-    let query_text = normalize_punctuation(&query_text);
+    let mut query_text = normalize_punctuation(&query_text);
 
     // For postalcode-only structured queries, try postcode FSTs first
     let postalcode_only = structured && is_postalcode_only(&params);
@@ -744,58 +825,135 @@ async fn search(
     // → look up "111 22" via the postcode FST, then prefer the postcode
     // result if it sits in/near the named city. Otherwise fall through
     // to the bare-postcode path.
-    if let Some((pc, _city_part)) = split_postcode_city(&query_text) {
-        for (_ci, country) in &target_countries {
-            if let Some(ref addr_index) = country.addr_index {
-                if let Some(r) = addr_index.lookup_postcode(&pc) {
-                    let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
-                    let display = if r.street.is_empty() {
-                        pc.clone()
-                    } else {
-                        r.street.clone()
-                    };
-                    response.push(NominatimResult {
-                        place_id: 0,
-                        osm_type: None,
-                        osm_id: None,
-                        display_name: display,
-                        lat: format!("{:.7}", r.coord.lat_f64()),
-                        lon: format!("{:.7}", r.coord.lon_f64()),
-                        place_type: "postcode".to_owned(),
-                        importance: 0.6,
-                        match_type: Some("postcode".to_owned()),
-                        address: if params.addressdetails > 0 {
-                            Some(AddressDetails {
-                                house_number: None,
-                                road: None,
-                                suburb: None,
-                                city: None,
-                                town: None,
-                                village: None,
-                                county: None,
-                                state: None,
-                                postcode: Some(pc.clone()),
-                                country: Some(country.name.clone()),
-                                country_code: Some(cc),
-                            })
-                        } else { None },
-                    });
-                    postcode_match_found = true;
-                    break;
+    if let Some((pc, city_part)) = split_postcode_city(&query_text) {
+        let pc_lookup = strip_country_prefix(pc.trim()).trim().to_owned();
+        // If the postcode carries an explicit "CC-" country prefix, restrict
+        // the cross-country scan to that country so e.g. "DK-1000 København K"
+        // never gets resolved against Norway or Sweden.
+        let split_prefix_country = extract_country_prefix(pc.trim());
+        // Search every loaded country and pick the result whose coord is
+        // closest to the city_part — without this, "1601 Fredrikstad"
+        // hits Denmark's 1601 (København K) before reaching Norway's
+        // 1601 (Fredrikstad), or vice versa, depending on load order.
+        // Tie-breaker: shortest distance to a settlement matching `city_part`.
+        let mut best: Option<(usize, &CountryIndex, heimdall_core::addr_index::AddrResult, f64)> = None;
+        for &(ci, country) in &target_countries {
+            if let Some(ref forced) = split_prefix_country {
+                if &country.code != forced { continue; }
+            }
+            let addr_index = match &country.addr_index { Some(a) => a, None => continue };
+            let r = match addr_index.lookup_postcode(&pc_lookup) {
+                Some(r) => r,
+                None => continue,
+            };
+            // Distance from the postcode coord to the city_part's
+            // canonical settlement coord (in this same country).
+            // Lower is better. We also try each individual word of
+            // city_part — "København K" / "Aarhus C" wouldn't match
+            // any record as a single string, but "København" /
+            // "Aarhus" do, and that's enough to pin the country.
+            let mut best_dist = f64::INFINITY;
+            let mut city_strings: Vec<String> = vec![city_part.to_owned()];
+            for w in city_part.split_whitespace() {
+                if w.chars().filter(|c| c.is_alphabetic()).count() >= 2 {
+                    city_strings.push(w.to_owned());
                 }
             }
+            for cs in &city_strings {
+                let cands = country.normalizer.normalize(cs);
+                for cand in &cands {
+                    if let Some(record_id) = country.index.exact_lookup(cand) {
+                        if let Ok(record) = country.index.record_store().get(record_id) {
+                            let d = r.coord.distance_m(&record.coord);
+                            if d < best_dist { best_dist = d; }
+                        }
+                    }
+                }
+            }
+            // Prefer the closest pairing across countries.
+            if best.as_ref().map(|(_, _, _, d)| best_dist < *d).unwrap_or(true) {
+                best = Some((ci, country, r, best_dist));
+            }
+        }
+        // Reject if no country had a city_part match within ~80 km of the
+        // postcode coord. Without this guard we'd return Denmark's "1601"
+        // for the user's "1601 Fredrikstad" simply because Norway hasn't
+        // got 1601 in its postcode FST yet — a stale-data artefact, not
+        // a real geocode. Falling through to the city_part text search
+        // lets us land on Fredrikstad NO instead.
+        let best = best.filter(|(_, _, _, d)| *d <= 80_000.0);
+        if let Some((_ci, country, r, _)) = best {
+            let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
+            let display = if r.street.is_empty() {
+                pc.clone()
+            } else {
+                r.street.clone()
+            };
+            response.push(NominatimResult {
+                place_id: 0,
+                osm_type: None,
+                osm_id: None,
+                display_name: display,
+                lat: format!("{:.7}", r.coord.lat_f64()),
+                lon: format!("{:.7}", r.coord.lon_f64()),
+                place_type: "postcode".to_owned(),
+                importance: 0.6,
+                match_type: Some("postcode".to_owned()),
+                address: if params.addressdetails > 0 {
+                    Some(AddressDetails {
+                        house_number: None,
+                        road: None,
+                        suburb: None,
+                        city: None,
+                        town: None,
+                        village: None,
+                        county: None,
+                        state: None,
+                        postcode: Some(pc.clone()),
+                        country: Some(country.name.clone()),
+                        country_code: Some(cc),
+                    })
+                } else { None },
+            });
+            postcode_match_found = true;
         }
         if postcode_match_found {
             return Ok(Json(response));
         }
+        // Postcode portion missed — could be a real-but-unindexed code
+        // (we miss entire prefixes when the national address feed is broken,
+        // e.g. "5000 Bergen" when postcode 5000 isn't tagged on any OSM
+        // address). Fall back to the city portion alone so the user at
+        // least lands on the right city. Without this the full string
+        // "5000 Bergen" goes to place-name lookup, which doesn't index
+        // numeric prefixes and returns empty.
+        if !city_part.trim().is_empty() {
+            query_text = city_part;
+        }
     }
-    if is_postcode_shaped(&query_text) {
+    // Compact "DKNNNN" form (no separator) — the country prefix isn't a
+    // postcode shape on its own, so check it before the regular shape test.
+    let mut compact_prefix_query: Option<String> = None;
+    if let Some(([c0, c1], rest)) = extract_country_prefix_compact(query_text.trim()) {
+        // Reconstruct as "CC NNNN" for the regular postcode pipeline below.
+        compact_prefix_query = Some(format!("{}{} {}", c0 as char, c1 as char, rest));
+    }
+    let query_text_for_pc: String = compact_prefix_query.clone().unwrap_or_else(|| query_text.clone());
+    if is_postcode_shaped(&query_text_for_pc) {
+        let pc_stripped = strip_country_prefix(query_text_for_pc.trim()).trim().to_owned();
+        // Country prefix ("DK-1000") explicitly names the country — restrict
+        // the postcode FST scan so we don't accidentally accept a same-digit
+        // postcode from another loaded country.
+        let prefix_country = extract_country_prefix(query_text_for_pc.trim());
         for (_ci, country) in &target_countries {
+            if let Some(ref forced) = prefix_country {
+                if &country.code != forced { continue; }
+            }
             if let Some(ref addr_index) = country.addr_index {
-                if let Some(r) = addr_index.lookup_postcode(&query_text) {
+                if let Some(r) = addr_index.lookup_postcode(&pc_stripped) {
                     let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
                     let display = if r.street.is_empty() {
-                        query_text.trim().to_owned()
+                        pc_stripped.clone()
                     } else {
                         r.street.clone()
                     };
@@ -819,7 +977,7 @@ async fn search(
                                 village: None,
                                 county: None,
                                 state: None,
-                                postcode: Some(query_text.trim().to_owned()),
+                                postcode: Some(pc_stripped.clone()),
                                 country: Some(country.name.clone()),
                                 country_code: Some(cc),
                             })
@@ -847,7 +1005,7 @@ async fn search(
     // place-name candidates produced below. Soft re-rank only — we never
     // hide a candidate, just multiply its importance.
     // ------------------------------------------------------------------
-    let city_context: Option<(Option<u16>, Option<u16>, Option<Coord>)> = {
+    let city_context: Option<(Option<usize>, Option<u16>, Option<u16>, Option<Coord>)> = {
         let mut ctx = None;
         // Two patterns produce a city context:
         //   "X, Y"  — explicit comma disambiguation (Slussen, Stockholm).
@@ -876,26 +1034,58 @@ async fn search(
             // ("Sweden", "Sverige", "kommun" …). Without this, "Stockholm,
             // Sweden" treats "Sweden" as a city and tries to filter
             // Stockholm into Sverige Country's polygon — empty result.
-            // Stopwords are language-specific so we read them from the
-            // first target country's normaliser.
+            // Stopwords are language-specific so we read them from
+            // every loaded target country's normaliser. With Sweden +
+            // Norway both loaded, "Trondheim, Norway" needs Norway's
+            // stopwords ("norway", "norge") to recognise the trailing
+            // country word — Sweden alone would miss it.
             let last_lower = last.to_lowercase();
-            let is_stop = target_countries.first()
-                .map(|(_, c)| c.normalizer.stopwords().iter().any(|s| s == &last_lower))
-                .unwrap_or(false);
-            if !is_stop {
+            let is_stop = target_countries.iter()
+                .any(|(_, c)| c.normalizer.stopwords().iter().any(|s| s == &last_lower));
+            // Single-character last-tokens like "Ø" / "C" / "Å" are too
+            // ambiguous to anchor a city context — Norway has multiple
+            // single-letter places (Å, Ø) and Danish addresses use postal
+            // suffix letters like "København Ø", "Aalborg Ø", "Aarhus C".
+            // Treating those one-char tokens as cities anchors the rerank
+            // on noise. Require ≥ 2 characters.
+            let last_meaningful = last.chars().filter(|c| c.is_alphabetic()).count() >= 2;
+            if !is_stop && last_meaningful {
+                // Pick the *highest-importance* match across all loaded
+                // countries, not the first country that has any record
+                // with this name. With SE+NO+DK loaded and the user
+                // querying "Vesterbro, København", Norway has a tiny
+                // "Kjøbenhavn" farm whose normalised name overlaps; if
+                // we took that as the city context we'd anchor the
+                // re-rank in central Norway and let unrelated Norwegian
+                // farms outrank the real Copenhagen district. The
+                // record-store importance score (population × type ×
+                // wikidata) does the job — major settlements always
+                // outscore farm/locality entries.
+                let mut best: Option<(u16, usize, Option<u16>, Option<u16>, Option<Coord>)> = None;
                 for &(ci, country) in &target_countries {
-                    let (a1, a2, coord) = resolve_city_full_filtered(
-                        &last,
-                        country,
-                        ci,
-                        &country.normalizer,
-                        state.global_index.as_ref(),
-                        settlement_only,
-                    );
-                    if a1.is_some() || a2.is_some() || coord.is_some() {
-                        ctx = Some((a1, a2, coord));
-                        break;
+                    let candidates = country.normalizer.normalize(&last);
+                    for cand in &candidates {
+                        if let Some(record_id) = country.index.exact_lookup(cand) {
+                            if let Ok(record) = country.index.record_store().get(record_id) {
+                                if settlement_only {
+                                    let is_settlement = matches!(record.place_type,
+                                        PlaceType::City | PlaceType::Town | PlaceType::Village
+                                            | PlaceType::Hamlet | PlaceType::Suburb
+                                            | PlaceType::Quarter | PlaceType::Neighbourhood);
+                                    if !is_settlement { continue; }
+                                }
+                                let imp = record.importance;
+                                if best.as_ref().map(|(b, _, _, _, _)| imp > *b).unwrap_or(true) {
+                                    let a1 = if record.admin1_id > 0 { Some(record.admin1_id) } else { None };
+                                    let a2 = if record.admin2_id > 0 { Some(record.admin2_id) } else { None };
+                                    best = Some((imp, ci, a1, a2, Some(record.coord)));
+                                }
+                            }
+                        }
                     }
+                }
+                if let Some((_, ci, a1, a2, coord)) = best {
+                    ctx = Some((Some(ci), a1, a2, coord));
                 }
             }
         }
@@ -1216,22 +1406,50 @@ async fn search(
             }
         }
 
-        // Place name lookup — skip when global FST already found results
+        // Place name lookup — skip when global FST already found results.
+        //
+        // Two-tier candidate iteration: prefer an exact FST match from any
+        // candidate over a phonetic-or-fuzzy match on an earlier one. The
+        // candidate list (from `normalize_for_query`) blends "same input
+        // normalised differently" (case/diacritic) with "different shape"
+        // (definite-stripped, word-boundary-rejoined). Boundary-rejoined
+        // variants like "Kristian Sand" → "Kristiansand" are usually what
+        // the user meant, but they show up *after* the original "kristian
+        // sand" in the candidate list. Without this two-tier loop the
+        // first candidate's phonetic fallback (matching some unrelated
+        // record) wins and we never try the rejoined exact form.
         if !used_global {
             let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
             let mut found_exact = false;
+            let mut fallback_results: Vec<heimdall_core::types::GeoResult> = Vec::new();
             for candidate in &candidates {
                 let results = country.index.geocode_normalized(candidate, &geo_query);
-                if !results.is_empty() {
+                if results.is_empty() { continue; }
+                let any_exact = results.iter().any(|r| {
+                    matches!(r.match_type, heimdall_core::types::MatchType::Exact)
+                });
+                if any_exact {
                     for r in results {
                         response.push(to_nominatim_enriched(ci, r, params.addressdetails > 0, &cc, &country.name, country));
                     }
                     found_exact = true;
                     break;
                 }
+                // Save the first phonetic/fuzzy hit; keep iterating in case
+                // a later candidate yields an exact match.
+                if fallback_results.is_empty() {
+                    fallback_results = results;
+                }
+            }
+            if !found_exact && !fallback_results.is_empty() {
+                for r in fallback_results {
+                    response.push(to_nominatim_enriched(ci, r, params.addressdetails > 0, &cc, &country.name, country));
+                }
+                found_exact = true; // suppress the explicit phonetic fallback below
             }
 
-            // Phonetic fallback
+            // Phonetic fallback against the original query (covers cases
+            // where the candidate list itself produced no FST hits at all).
             if !found_exact {
                 let phonetic = country.normalizer.phonetic_key(&query_text);
                 let phonetic_query = GeoQuery::new(&phonetic);
@@ -1257,7 +1475,7 @@ async fn search(
     // queries like "stadsbiblioteket stockholm" would short-circuit on
     // a phonetic-fallback match in some other city, then get
     // city-filtered to empty, never running word-drop.
-    let response_has_city_match = if let Some((ctx_a1, ctx_a2, ctx_coord)) = city_context {
+    let response_has_city_match = if let Some((ctx_country, ctx_a1, ctx_a2, ctx_coord)) = city_context {
         response.iter().any(|r| {
             // Verbatim full-string FST hits are always considered a
             // match regardless of admin — "Hammarby Sjöstad" should
@@ -1270,8 +1488,8 @@ async fn search(
             let (ci, rid) = decode_place_id(r.place_id);
             if let Some(country) = state.countries.get(ci) {
                 if let Ok(rec) = country.index.record_store().get(rid) {
-                    return city_context_tier(rec.admin1_id, rec.admin2_id, rec.coord,
-                                             ctx_a1, ctx_a2, ctx_coord) > 0;
+                    return city_context_tier(ci, rec.admin1_id, rec.admin2_id, rec.coord,
+                                             ctx_country, ctx_a1, ctx_a2, ctx_coord) > 0;
                 }
             }
             false
@@ -1279,15 +1497,38 @@ async fn search(
     } else {
         true
     };
+    let mut word_drop_fired = false;
     if response.is_empty() || (city_context.is_some() && !response_has_city_match) {
         if city_context.is_some() && !response.is_empty() {
             // Clear out the irrelevant phonetic/lev matches before running
             // word-drop so we don't carry them into the final ranking.
             response.clear();
         }
-        let words: Vec<&str> = query_text.split_whitespace().collect();
+        // Tokenise on whitespace AND hyphens so hyphenated postal districts
+        // ("Hellerup-Klampenborg", "Snekkersten-Espergærde") get the same
+        // word-drop treatment as space-separated queries. Otherwise the
+        // hyphen swallows them into a single token and word-drop never
+        // fires.
+        let words: Vec<&str> = query_text
+            .split(|c: char| c.is_whitespace() || c == '-')
+            .filter(|t| !t.is_empty())
+            .collect();
         if words.len() >= 2 {
             let mut subqueries: Vec<String> = Vec::new();
+
+            // Drop a trailing 1-letter token first ("København K", "Aarhus C",
+            // "Aalborg Ø" — Danish/Norwegian postal-district suffixes).
+            // These letters carry no name signal but anchor enough phonetic
+            // noise to break the ranking; dropping them before the
+            // shorter-prefix walks lets the city itself surface.
+            if let Some(last) = words.last() {
+                if last.chars().filter(|c| c.is_alphabetic()).count() == 1 {
+                    let head = words[..words.len() - 1].join(" ");
+                    if !head.is_empty() {
+                        subqueries.push(head);
+                    }
+                }
+            }
 
             // Drop words from the end: "Santa Cruz de Tenerife" → "Santa Cruz de" → "Santa Cruz"
             for end in (2..words.len()).rev() {
@@ -1297,6 +1538,10 @@ async fn search(
             // Only first word as a standalone (useful for "Pamplona Navarra" → "Pamplona")
             if words.len() >= 2 {
                 subqueries.push(words[0].to_string());
+                // Also try the *last* word — for hyphenated postal districts
+                // like "Hellerup-Klampenborg" the second half ("Klampenborg")
+                // is a famous suburb in its own right, not just an anchor.
+                subqueries.push(words[words.len() - 1].to_string());
             }
 
             'word_drop: for sub in &subqueries {
@@ -1327,38 +1572,63 @@ async fn search(
                     }
                 }
 
-                // Try per-country FST. Same caveat — relabel to
-                // "word_drop" so city-context filtering treats it as a
-                // fallback hit, not a verbatim one.
+                // Try per-country FST for this subquery. Collect exact
+                // matches from EVERY loaded country into the response (the
+                // final importance-based sort decides which wins). For
+                // "København Ø" the subquery "København" hits both
+                // Norway (a small farm `Kjøbenhavn`) and Denmark (the
+                // capital city); Denmark's record outscores Norway's by
+                // ~3× on importance, so it surfaces correctly. Save
+                // phonetic/fuzzy fallbacks separately and only commit
+                // them if NO country produced an exact hit.
+                let mut any_exact_pushed = false;
+                let mut country_fallbacks: Vec<(usize, &CountryIndex, Vec<heimdall_core::types::GeoResult>)> = Vec::new();
                 for &(ci, country) in &target_countries {
-                    let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
                     let sub_candidates = country.normalizer.normalize_for_query(sub);
                     let mut geo_q = GeoQuery::new(sub);
-                    // Mirror the main place-name path: widen the candidate
-                    // pool when a city context is set so the city-context
-                    // filter can pick the contextually-correct alternate.
                     geo_q.limit = if city_context.is_some() { (limit * 8).max(32) } else { limit };
-
+                    let mut this_country_exact = false;
+                    let mut this_country_fallback: Option<Vec<heimdall_core::types::GeoResult>> = None;
                     for candidate in &sub_candidates {
                         let results = country.index.geocode_normalized(candidate, &geo_q);
+                        if results.is_empty() { continue; }
+                        let any_exact = results.iter().any(|r| {
+                            matches!(r.match_type, heimdall_core::types::MatchType::Exact)
+                        });
+                        if any_exact {
+                            let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
+                            for r in results {
+                                let mut result = to_nominatim_enriched(ci, r, params.addressdetails > 0, &cc, &country.name, country);
+                                result.match_type = Some("word_drop".to_string());
+                                response.push(result);
+                            }
+                            this_country_exact = true;
+                            any_exact_pushed = true;
+                            break;
+                        }
+                        if this_country_fallback.is_none() {
+                            this_country_fallback = Some(results);
+                        }
+                    }
+                    if !this_country_exact {
+                        if let Some(results) = this_country_fallback {
+                            country_fallbacks.push((ci, country, results));
+                        }
+                    }
+                }
+                // No country produced an exact match → commit fallbacks.
+                if !any_exact_pushed {
+                    for (ci, country, results) in country_fallbacks {
+                        let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
                         for r in results {
                             let mut result = to_nominatim_enriched(ci, r, params.addressdetails > 0, &cc, &country.name, country);
                             result.match_type = Some("word_drop".to_string());
                             response.push(result);
                         }
-                        // When a city context is set, KEEP iterating
-                        // candidates — the first candidate's results may
-                        // all get filtered out by the city tier filter,
-                        // and a definite-suffix-stripped variant
-                        // ("domkyrka" from "domkyrkan") might find the
-                        // right record under a different per-word key.
-                        // Without a city context, break on first hit
-                        // (existing behaviour) since the filter won't
-                        // remove anything anyway.
-                        if !response.is_empty() && city_context.is_none() {
-                            break 'word_drop;
-                        }
                     }
+                }
+                if !response.is_empty() && city_context.is_none() {
+                    break 'word_drop;
                 }
             }
         }
@@ -1385,7 +1655,7 @@ async fn search(
     // primary key. Soft re-rank — never hides a candidate, just promotes
     // contextually-relevant ones. Computed AFTER the viewbox filter so the
     // index alignment stays correct.
-    let response_tiers: Vec<u8> = if let Some((ctx_a1, ctx_a2, ctx_coord)) = city_context {
+    let response_tiers: Vec<u8> = if let Some((ctx_country, ctx_a1, ctx_a2, ctx_coord)) = city_context {
         response.iter().map(|r| {
             // Place-name results have a non-zero place_id encoding
             // (country, record). Address/street results have place_id=0.
@@ -1394,9 +1664,11 @@ async fn search(
                 if let Some(country) = state.countries.get(ci) {
                     if let Ok(rec) = country.index.record_store().get(rid) {
                         return city_context_tier(
+                            ci,
                             rec.admin1_id,
                             rec.admin2_id,
                             rec.coord,
+                            ctx_country,
                             ctx_a1,
                             ctx_a2,
                             ctx_coord,
@@ -2281,15 +2553,27 @@ fn load_country_index_inner(path: &std::path::Path, lightweight: bool) -> anyhow
         .and_then(|n| n.to_str())
         .unwrap_or("");
 
-    let (code, bbox, name) = if dir_name.contains("denmark") || dir_name.ends_with("-dk") {
+    // Match a 2-letter ISO code as a `-cc` token anywhere in the dir name —
+    // "index-dk", "index-dk-realm", "dk-test" all qualify. Without this we
+    // wrongly default to Sweden for any non-`-dk` suffix variant.
+    let has_cc_token = |cc: &str| -> bool {
+        let token_mid = format!("-{}-", cc);
+        let token_suf = format!("-{}", cc);
+        dir_name == cc
+            || dir_name.starts_with(&format!("{}-", cc))
+            || dir_name.contains(&token_mid)
+            || dir_name.ends_with(&token_suf)
+    };
+
+    let (code, bbox, name) = if dir_name.contains("denmark") || has_cc_token("dk") {
         (*b"DK", BoundingBox { min_lat: 54.5, max_lat: 57.8, min_lon: 8.0, max_lon: 15.2 }, "Denmark")
-    } else if dir_name.contains("germany") || dir_name.ends_with("-de") {
+    } else if dir_name.contains("germany") || has_cc_token("de") {
         (*b"DE", BoundingBox { min_lat: 47.3, max_lat: 55.1, min_lon: 5.9, max_lon: 15.0 }, "Germany")
-    } else if dir_name.contains("norway") || dir_name.ends_with("-no") {
+    } else if dir_name.contains("norway") || has_cc_token("no") {
         (*b"NO", BoundingBox { min_lat: 57.5, max_lat: 71.5, min_lon: 4.0, max_lon: 31.5 }, "Norway")
-    } else if dir_name.contains("sweden") || dir_name.ends_with("-se") {
+    } else if dir_name.contains("sweden") || has_cc_token("se") {
         (*b"SE", BoundingBox::sweden(), "Sweden")
-    } else if dir_name.contains("finland") || dir_name.ends_with("-fi") {
+    } else if dir_name.contains("finland") || has_cc_token("fi") {
         (*b"FI", BoundingBox { min_lat: 59.7, max_lat: 70.1, min_lon: 19.5, max_lon: 31.6 }, "Finland")
     } else if dir_name.contains("-gb") || dir_name.contains("-uk") || dir_name.contains("britain") {
         (*b"GB", BoundingBox { min_lat: 49.8, max_lat: 60.9, min_lon: -8.7, max_lon: 1.8 }, "Great Britain")
@@ -2747,6 +3031,7 @@ fn load_country_index_inner(path: &std::path::Path, lightweight: bool) -> anyhow
 fn runtime_index_size(path: &std::path::Path) -> u64 {
     let runtime_files = [
         "records.bin", "fst_exact.fst", "fst_phonetic.fst", "fst_ngram.fst",
+        "record_lists.bin", "record_lists_phonetic.bin", "record_lists_ngram.bin",
         "admin.bin", "addr_streets.bin", "addr_records.bin", "fst_addr.fst",
         "geohash_index.bin", "fst_postcode.fst", "postcode_centroids.bin",
         "fst_zip.fst", "zip_records.bin", "sv.toml", "meta.json",

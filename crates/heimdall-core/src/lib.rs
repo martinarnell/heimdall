@@ -9,6 +9,7 @@ pub mod reverse;
 pub mod error;
 pub mod compressed_io;
 pub mod global_index;
+pub mod ngram;
 
 pub use types::*;
 pub use error::HeimdallError;

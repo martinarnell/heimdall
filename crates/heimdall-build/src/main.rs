@@ -34,6 +34,7 @@ mod photon;
 mod lucene;
 mod rebuild;
 mod ssr;
+mod dagi;
 mod tiger;
 mod oa;
 mod gnaf;
@@ -153,6 +154,17 @@ enum Commands {
         /// Path to SSR GML file
         #[arg(long)]
         gml: PathBuf,
+    },
+
+    /// Merge DAGI Stednavne (Danske Stednavne) JSON into existing OSM places
+    MergeDagi {
+        /// Path to index directory (must contain places.parquet)
+        #[arg(short, long)]
+        index: PathBuf,
+
+        /// Path to DAGI steder JSON dump
+        #[arg(long)]
+        json: PathBuf,
     },
 
     /// Merge Photon JSONL dump into an existing index (places + addresses)
@@ -772,6 +784,27 @@ fn main() -> Result<()> {
             photon::write_places_parquet(&merged, &places_parquet)?;
             info!(
                 "Done! {} total ({} existing + {} SSR new). Run 'build --skip-extract' to rebuild.",
+                merged.len(), osm_places.len(), merged.len() - osm_places.len(),
+            );
+        }
+
+        Commands::MergeDagi { index, json } => {
+            let dagi_places = dagi::read_dagi_places(&json)?;
+
+            let places_parquet = index.join("places.parquet");
+            let osm_places = if places_parquet.exists() {
+                info!("Reading existing places...");
+                read_osm_places(&places_parquet)?
+            } else {
+                vec![]
+            };
+
+            let merged = dagi::merge_dagi_places(&osm_places, &dagi_places);
+
+            info!("Writing merged places.parquet...");
+            photon::write_places_parquet(&merged, &places_parquet)?;
+            info!(
+                "Done! {} total ({} existing + {} DAGI new). Run 'build --skip-extract' to rebuild.",
                 merged.len(), osm_places.len(), merged.len() - osm_places.len(),
             );
         }
@@ -1994,6 +2027,10 @@ pub(crate) fn read_osm_places(parquet_path: &Path) -> Result<Vec<heimdall_core::
 
 fn place_type_from_u8(v: u8) -> heimdall_core::types::PlaceType {
     use heimdall_core::types::PlaceType;
+    // Keep this in sync with the canonical numeric values in
+    // `heimdall_core::types::PlaceType`. Missing arms here silently
+    // collapse the type to `Unknown` when read_osm_places loads parquet,
+    // and pack.rs then drops the record (Unknown without wikidata gate).
     match v {
         0 => PlaceType::Country,
         1 => PlaceType::State,
@@ -2009,6 +2046,8 @@ fn place_type_from_u8(v: u8) -> heimdall_core::types::PlaceType {
         12 => PlaceType::Neighbourhood,
         13 => PlaceType::Island,
         14 => PlaceType::Islet,
+        15 => PlaceType::Square,
+        16 => PlaceType::Street,
         20 => PlaceType::Lake,
         21 => PlaceType::River,
         22 => PlaceType::Mountain,
@@ -2017,6 +2056,11 @@ fn place_type_from_u8(v: u8) -> heimdall_core::types::PlaceType {
         25 => PlaceType::Cape,
         30 => PlaceType::Airport,
         31 => PlaceType::Station,
+        32 => PlaceType::Landmark,
+        33 => PlaceType::University,
+        34 => PlaceType::Hospital,
+        35 => PlaceType::PublicBuilding,
+        36 => PlaceType::Park,
         _ => PlaceType::Unknown,
     }
 }

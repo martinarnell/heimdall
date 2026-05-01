@@ -63,6 +63,12 @@ struct PhotonPlace {
     housenumber: Option<String>,
     postcode: Option<String>,
     country_code: Option<String>,
+    /// Some Nominatim dumps (Photon variants) carry the Wikidata Q-id
+    /// directly at the top level. Others put it under `extra`. Accept
+    /// either via the alias.
+    #[serde(alias = "extra_wikidata")]
+    wikidata: Option<String>,
+    extra: Option<HashMap<String, serde_json::Value>>,
 }
 
 #[derive(Deserialize)]
@@ -217,6 +223,18 @@ pub fn parse_es_documents(docs: &[serde_json::Value]) -> PhotonParseResult {
                     }
                 });
 
+            // Photon's `extra` field carries auxiliary OSM tags
+            // (wikidata, wikipedia, capital, ele, …). The ones we care
+            // about for ranking: wikidata (notability bonus), and any
+            // extra alt-name flavours the importer attached. Defensive
+            // .get chain — older Photon dumps may lack the field.
+            let wikidata = doc
+                .get("extra")
+                .and_then(|e| e.get("wikidata"))
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_owned());
+
             places.push(RawPlace {
                 osm_id,
                 osm_type: match doc.get("osm_type").and_then(|v| v.as_str()) {
@@ -235,7 +253,7 @@ pub fn parse_es_documents(docs: &[serde_json::Value]) -> PhotonParseResult {
                 admin1: None,
                 admin2: None,
                 population: synthetic_population,
-                wikidata: None,
+                wikidata,
             });
         }
 
@@ -361,6 +379,13 @@ pub fn parse_single_es_document(doc: &serde_json::Value) -> (Option<RawPlace>, O
                 }
             });
 
+        let wikidata = doc
+            .get("extra")
+            .and_then(|e| e.get("wikidata"))
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_owned());
+
         Some(RawPlace {
             osm_id,
             osm_type: match doc.get("osm_type").and_then(|v| v.as_str()) {
@@ -379,7 +404,7 @@ pub fn parse_single_es_document(doc: &serde_json::Value) -> (Option<RawPlace>, O
             admin1: None,
             admin2: None,
             population: synthetic_population,
-            wikidata: None,
+            wikidata,
         })
     } else {
         None
@@ -554,6 +579,14 @@ pub fn parse(input: &Path) -> Result<PhotonParseResult> {
                 None
             };
 
+            let wikidata = record.wikidata.clone().or_else(|| {
+                record.extra.as_ref()
+                    .and_then(|e| e.get("wikidata"))
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_owned())
+            });
+
             places.push(RawPlace {
                 osm_id,
                 osm_type: match record.object_type.as_deref() {
@@ -582,7 +615,7 @@ pub fn parse(input: &Path) -> Result<PhotonParseResult> {
                 admin1: None, // Resolved by enrich step
                 admin2: None,
                 population: synthetic_population,
-                wikidata: None,
+                wikidata,
             });
         }
 
@@ -822,6 +855,14 @@ pub fn import(input: &Path, output: &Path) -> Result<PhotonImportResult> {
                 None
             };
 
+            let wikidata = record.wikidata.clone().or_else(|| {
+                record.extra.as_ref()
+                    .and_then(|e| e.get("wikidata"))
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_owned())
+            });
+
             places.push(RawPlace {
                 osm_id,
                 osm_type: match record.object_type.as_deref() {
@@ -844,7 +885,7 @@ pub fn import(input: &Path, output: &Path) -> Result<PhotonImportResult> {
                 admin1: if state_name.is_empty() { None } else { Some(state_name.clone()) },
                 admin2: if county_name.is_empty() { None } else { Some(county_name.clone()) },
                 population: synthetic_population,
-                wikidata: None,
+                wikidata,
             });
         }
 
@@ -1002,6 +1043,14 @@ fn is_place_record(osm_key: &str, osm_value: &str) -> bool {
 }
 
 /// Map Photon osm_key/value to Heimdall PlaceType
+///
+/// Mirrors `extract::place_type_from_tag` so Photon-sourced records get the
+/// same classification as OSM-extracted ones. Without this, a Photon record
+/// like `tourism=museum` would land as `Unknown` and pack.rs would only keep
+/// it if it carried a `wikidata` Q-id — silently dropping museums, libraries,
+/// hospitals, and parks that Photon ingested but OSM extract missed (or that
+/// got merged in via per-country fallback in regions where the OSM-only
+/// pipeline came up short).
 fn map_photon_place_type(osm_key: &str, osm_value: &str, rank: Option<u8>) -> PlaceType {
     match (osm_key, osm_value) {
         ("place", v) => PlaceType::from_osm(v),
@@ -1015,13 +1064,40 @@ fn map_photon_place_type(osm_key: &str, osm_value: &str, rank: Option<u8>) -> Pl
             _ => PlaceType::Unknown,
         },
         ("natural", "water") | ("natural", "lake") => PlaceType::Lake,
-        ("natural", "peak") | ("natural", "volcano") => PlaceType::Mountain,
+        ("natural", "peak") | ("natural", "volcano")
+        | ("natural", "mountain") | ("mountain_pass", _) => PlaceType::Mountain,
         ("natural", "bay") => PlaceType::Bay,
-        ("natural", "cape") => PlaceType::Cape,
-        ("natural", "wood") | ("natural", "forest") => PlaceType::Forest,
-        ("waterway", "river") | ("waterway", "stream") => PlaceType::River,
+        ("natural", "cape") | ("natural", "peninsula") => PlaceType::Cape,
+        ("natural", "wood") | ("natural", "forest") | ("landuse", "forest") => PlaceType::Forest,
+        ("natural", "island") => PlaceType::Island,
+        ("natural", "islet") => PlaceType::Islet,
+        ("waterway", "river") | ("waterway", "stream") | ("waterway", "canal") => PlaceType::River,
         ("railway", "station") | ("railway", "halt") => PlaceType::Station,
+        ("public_transport", "station") => PlaceType::Station,
         ("aeroway", "aerodrome") => PlaceType::Airport,
+
+        // Tourism — visitor attractions and museums.
+        ("tourism", "attraction") | ("tourism", "museum") | ("tourism", "gallery")
+        | ("tourism", "viewpoint") | ("tourism", "theme_park") | ("tourism", "zoo")
+        | ("tourism", "aquarium") => PlaceType::Landmark,
+        // Historic — castles, monuments, ruins, memorials.
+        ("historic", _) => PlaceType::Landmark,
+        // Civic — universities, hospitals, libraries, theatres.
+        ("amenity", "university") | ("amenity", "college") => PlaceType::University,
+        ("amenity", "hospital") => PlaceType::Hospital,
+        ("amenity", "townhall") | ("amenity", "library") | ("amenity", "theatre")
+        | ("amenity", "arts_centre") | ("amenity", "courthouse")
+        | ("amenity", "place_of_worship") => PlaceType::PublicBuilding,
+        // Leisure — parks and major venues.
+        ("leisure", "park") | ("leisure", "garden") | ("leisure", "nature_reserve") => PlaceType::Park,
+        ("leisure", "stadium") | ("leisure", "sports_centre")
+        | ("leisure", "ice_rink") => PlaceType::Landmark,
+        // Man-made structures.
+        ("man_made", "bridge") | ("man_made", "lighthouse")
+        | ("man_made", "tower") => PlaceType::Landmark,
+        // Squares.
+        ("place", "square") => PlaceType::Square,
+
         _ => PlaceType::Unknown,
     }
 }
@@ -1073,19 +1149,36 @@ pub fn write_places_parquet(places: &[RawPlace], path: &Path) -> Result<()> {
         let populations: Vec<Option<u32>> = chunk.iter().map(|p| p.population).collect();
         let wikidatas: Vec<Option<&str>> = chunk.iter().map(|p| p.wikidata.as_deref()).collect();
 
-        let alt_names: Vec<Option<&str>> = chunk
+        // Stored as semicolon-separated. Empty Vec → None so downstream
+        // readers can `.is_null()`-check without splitting an empty string.
+        // Earlier this writer was Photon-only and Photon JSON didn't expose
+        // alt_names; now extract.rs feeds the same writer with rich OSM data
+        // (short_name, loc_name, official_name) — silently dropping it
+        // killed cross-name resolution for queries like "AU" → Aarhus
+        // Universitet.
+        let alt_strings: Vec<Option<String>> = chunk
             .iter()
             .map(|p| {
                 if p.alt_names.is_empty() {
                     None
                 } else {
-                    // Stored as semicolon-separated in a single string
-                    None // Photon doesn't have alt_names separately
+                    Some(p.alt_names.join(";"))
                 }
             })
             .collect();
+        let alt_names: Vec<Option<&str>> = alt_strings.iter().map(|s| s.as_deref()).collect();
 
-        let old_names: Vec<Option<&str>> = chunk.iter().map(|_| None).collect();
+        let old_strings: Vec<Option<String>> = chunk
+            .iter()
+            .map(|p| {
+                if p.old_names.is_empty() {
+                    None
+                } else {
+                    Some(p.old_names.join(";"))
+                }
+            })
+            .collect();
+        let old_names: Vec<Option<&str>> = old_strings.iter().map(|s| s.as_deref()).collect();
 
         // Format name_intl as "lang=name;lang=name"
         let name_intl_strings: Vec<Option<String>> = chunk

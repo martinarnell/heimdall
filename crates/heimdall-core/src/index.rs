@@ -59,6 +59,7 @@ impl IndexPaths {
     pub fn fst_ngram(&self) -> PathBuf { self.dir.join("fst_ngram.fst") }
     pub fn record_lists_exact(&self) -> PathBuf { self.dir.join("record_lists.bin") }
     pub fn record_lists_phonetic(&self) -> PathBuf { self.dir.join("record_lists_phonetic.bin") }
+    pub fn record_lists_ngram(&self) -> PathBuf { self.dir.join("record_lists_ngram.bin") }
     pub fn admin(&self) -> PathBuf { self.dir.join("admin.bin") }
     pub fn meta(&self) -> PathBuf { self.dir.join("meta.json") }
 }
@@ -71,12 +72,16 @@ pub struct HeimdallIndex {
     records: RecordStore,
     fst_exact: Map<compressed_io::MmapOrVec>,
     fst_phonetic: Map<compressed_io::MmapOrVec>,
-    _fst_ngram: Map<compressed_io::MmapOrVec>,
+    fst_ngram: Map<compressed_io::MmapOrVec>,
     /// Optional posting-list sidecars. When present the FST values are
     /// byte offsets into these blobs; when absent the FST values are
     /// raw record_ids (legacy v2 layout).
     record_lists_exact: Option<compressed_io::MmapOrVec>,
     record_lists_phonetic: Option<compressed_io::MmapOrVec>,
+    /// Posting-list sidecar for the trigram FST. Always present when
+    /// `fst_ngram` carries any keys; missing means the index was built
+    /// before the ngram layer existed and the layer is a no-op.
+    record_lists_ngram: Option<compressed_io::MmapOrVec>,
     admin: Vec<AdminEntry>,
 
     /// Optional pluggable fuzzy layers, tried in order after FST misses
@@ -143,6 +148,16 @@ impl HeimdallIndex {
                 None
             }
         };
+        let record_lists_ngram = if skip_fsts {
+            None
+        } else {
+            let p = paths.record_lists_ngram();
+            if p.exists() && std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0) > 0 {
+                Some(compressed_io::mmap_or_decompress(&p)?)
+            } else {
+                None
+            }
+        };
 
         let admin: Vec<AdminEntry> = {
             let bytes = compressed_io::read_maybe_compressed(&paths.admin())?;
@@ -166,9 +181,10 @@ impl HeimdallIndex {
             records,
             fst_exact,
             fst_phonetic,
-            _fst_ngram: fst_ngram,
+            fst_ngram,
             record_lists_exact,
             record_lists_phonetic,
+            record_lists_ngram,
             admin,
             fuzzy_layers: vec![],
         })
@@ -196,10 +212,12 @@ impl HeimdallIndex {
         };
         let off = value as usize;
         if off + 2 > bytes.len() { return vec![]; }
-        // Cap the count to the build-time MAX_POSTINGS_PER_KEY (16) — a
-        // sane builder will never write more, and clamping prevents
-        // unbounded Vec allocation if the sidecar were ever corrupted.
-        const MAX_POSTINGS_PER_KEY: usize = 16;
+        // Cap matches the largest build-time posting cap across all FSTs
+        // (currently the 4096 trigram cap). The exact/phonetic builders
+        // emit at most 16, so they're effectively unaffected. The ceiling
+        // protects against a corrupt sidecar driving an unbounded Vec
+        // allocation — u16 max would let one entry consume 256KB.
+        const MAX_POSTINGS_PER_KEY: usize = 4096;
         let count = (u16::from_le_bytes([bytes[off], bytes[off + 1]]) as usize)
             .min(MAX_POSTINGS_PER_KEY);
         let mut out = Vec::with_capacity(count);
@@ -227,6 +245,70 @@ impl HeimdallIndex {
             Some(v) => Self::decode_posting_list(self.record_lists_phonetic.as_ref(), v),
             None => vec![],
         }
+    }
+
+    /// Trigram substring lookup. Splits the normalized query into
+    /// `crate::ngram::trigrams` and returns candidate `(record_id, score)`
+    /// pairs ordered by score descending. Score is `match_count * 1000 +
+    /// importance / 64` — match count dominates, importance breaks ties.
+    /// Empty when the index has no ngram sidecar (older builds) or the
+    /// query is too short to produce any trigrams.
+    ///
+    /// `min_match_ratio` is the floor on `matched_trigrams /
+    /// query_trigram_count` — 0.7 means we discard candidates that match
+    /// fewer than 70% of the query's trigrams. Tunable per call site.
+    pub fn ngram_candidates(
+        &self,
+        normalized: &str,
+        min_match_ratio: f32,
+        max_candidates: usize,
+    ) -> Vec<(u32, u32)> {
+        // No sidecar → ngram FST is empty (legacy index). Bail cheap.
+        if self.record_lists_ngram.is_none() { return vec![]; }
+        let qgrams = crate::ngram::trigrams(normalized);
+        if qgrams.is_empty() { return vec![]; }
+        // Skip 1-trigram queries — a single trigram has too many false
+        // positives to be useful (e.g. "abc" matches ~every name with that
+        // letter run).
+        if qgrams.len() < 2 { return vec![]; }
+
+        // Per-record match count. We cap the per-trigram posting list at
+        // build time, so the worst-case work per query trigram is
+        // bounded; this counter map is also bounded by N_trigrams ×
+        // posting cap.
+        use std::collections::HashMap;
+        let mut counts: HashMap<u32, u16> = HashMap::with_capacity(256);
+        for tg in &qgrams {
+            if let Some(off) = self.fst_ngram.get(tg.as_bytes()) {
+                for id in Self::decode_posting_list(
+                    self.record_lists_ngram.as_ref(), off,
+                ) {
+                    *counts.entry(id).or_insert(0) += 1;
+                }
+            }
+        }
+        if counts.is_empty() { return vec![]; }
+
+        let qlen = qgrams.len() as f32;
+        let min_match = ((qlen * min_match_ratio).ceil() as u16).max(2);
+        let mut scored: Vec<(u32, u32)> = counts.into_iter()
+            .filter(|&(_, c)| c >= min_match)
+            .filter_map(|(id, c)| {
+                let imp = self.records.get(id).ok()?.importance;
+                // Match count is the dominant ranking signal — a query
+                // whose 8 trigrams all hit the candidate scores higher
+                // than a candidate matching only 5. Importance sneaks in
+                // through the low bits (max ~1024 vs 1000 per match) so
+                // ties between equal-match candidates resolve to the
+                // more-notable record (Stockholm Centralstation over a
+                // random "Centralvägen").
+                let score = (c as u32) * 1000 + (imp as u32) / 64;
+                Some((id, score))
+            })
+            .collect();
+        scored.sort_by(|a, b| b.1.cmp(&a.1));
+        scored.truncate(max_candidates);
+        scored
     }
 
     // -----------------------------------------------------------------------
@@ -272,7 +354,35 @@ impl HeimdallIndex {
             if !results.is_empty() { return results; }
         }
 
-        // 3. Levenshtein edit-1 — catches typos ("upsala" → Uppsala,
+        // 3. Trigram substring layer — catches truncations ("Stadsbib" →
+        // Stadsbiblioteket) and abbreviations ("Centralstat Stockholm").
+        // Levenshtein cannot reach these because the edit distance scales
+        // with the missing suffix length and Lev-1/Lev-2 only buy us 1-2
+        // characters. Restrict to queries with at least a few trigrams so
+        // the candidate set stays focused.
+        let qchars = normalized.chars().count();
+        if qchars >= 5 {
+            // 0.7 ratio: a 4-trigram query needs 3 matches; 8 needs 6.
+            // Strict enough to suppress noisy hits where only 1-2
+            // trigrams happen to overlap.
+            let candidates = self.ngram_candidates(normalized, 0.7, 64);
+            if !candidates.is_empty() {
+                let mut results = Vec::new();
+                for (id, score) in &candidates {
+                    if let Ok(record) = self.records.get(*id) {
+                        if let Some(r) = self.record_to_result(
+                            *id, record, MatchType::NGram { score: *score }, query,
+                        ) {
+                            results.push(r);
+                        }
+                    }
+                }
+                self.rank_and_filter(&mut results, query);
+                if !results.is_empty() { return results; }
+            }
+        }
+
+        // 4. Levenshtein edit-1 — catches typos ("upsala" → Uppsala,
         // "stockholms central" → "Stockholm Central").
         if let Ok(results) = self.levenshtein_lookup(normalized, 1, query) {
             if !results.is_empty() {
@@ -417,7 +527,16 @@ impl HeimdallIndex {
                 _ => 0.35,
             },
             MatchType::Neural { confidence } => *confidence as f32 / 1000.0,
-            MatchType::NGram { .. } => 0.50,
+            // Trigram score's high bits encode `match_count * 1000` (see
+            // `ngram_candidates`). Map back to a confidence band so the
+            // top-tier NGram match (≥6 matched query trigrams) sorts above
+            // a lower-tier one *and* sits above Levenshtein-2 (0.55) but
+            // below Levenshtein-1 (0.75) — Lev-1 still wins for genuine
+            // typos, ngram wins for truncations Lev can't reach.
+            MatchType::NGram { score } => {
+                let matches = (*score / 1000) as f32;
+                (0.40 + (matches * 0.04)).min(0.65)
+            }
         };
 
         Some(GeoResult {
