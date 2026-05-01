@@ -2517,11 +2517,41 @@ pub(crate) fn run_rebuild(
         errors = error_mutex.into_inner().unwrap();
     }
 
+    // ── Refresh global FST so the API's fast path stays consistent ──────
+    //
+    // The global FST stores posting lists keyed to per-country record IDs.
+    // Re-packing any country renumbers its records, so a partial rebuild
+    // leaves the global FST holding stale offsets — the API hands back
+    // garbage results until the global FST catches up. This bit us in
+    // production after a `--country dk,no,se,fi` run: prod returned
+    // "Stockholm → Kåseberga, Ystads kommun" until the global was rebuilt.
+    //
+    // Skipped only on dry runs (which return earlier anyway) and when
+    // every country failed (no point — global would be inconsistent
+    // with the still-old per-country indices).
+    let built_count = to_build.len() - errors.len();
+    if built_count > 0 {
+        let data_dir = PathBuf::from(&config.defaults.index_dir);
+        let global_dir = data_dir.join("global");
+        info!("Refreshing global FST → {}", global_dir.display());
+        let t0 = Instant::now();
+        match crate::build_global_fst(&data_dir, &global_dir) {
+            Ok(()) => info!(
+                "Global FST refreshed in {:.0}s",
+                t0.elapsed().as_secs_f64()
+            ),
+            Err(e) => tracing::error!(
+                "Global FST refresh failed: {} — \
+                 prod will return stale results until rebuilt manually",
+                e
+            ),
+        }
+    }
+
     // ── Summary ──────────────────────────────────────────────────────────
 
     write_report(&report, &config.defaults.index_dir)?;
 
-    let built_count = to_build.len() - errors.len();
     info!("========================================");
     info!(
         "SUMMARY: {} rebuilt, {} skipped, {} failed",

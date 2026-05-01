@@ -2324,7 +2324,7 @@ fn repack_index(dir: &Path, keep_backup: bool) -> Result<bool> {
 // Build global FST from per-country indices
 // ---------------------------------------------------------------------------
 
-fn build_global_fst(data_dir: &Path, output_dir: &Path) -> Result<()> {
+pub(crate) fn build_global_fst(data_dir: &Path, output_dir: &Path) -> Result<()> {
     use heimdall_core::global_index::GlobalIndexBuilder;
     use heimdall_core::record_store::RecordStore;
     use heimdall_core::compressed_io;
