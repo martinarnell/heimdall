@@ -63,6 +63,12 @@ struct PhotonPlace {
     housenumber: Option<String>,
     postcode: Option<String>,
     country_code: Option<String>,
+    /// Some Nominatim dumps (Photon variants) carry the Wikidata Q-id
+    /// directly at the top level. Others put it under `extra`. Accept
+    /// either via the alias.
+    #[serde(alias = "extra_wikidata")]
+    wikidata: Option<String>,
+    extra: Option<HashMap<String, serde_json::Value>>,
 }
 
 #[derive(Deserialize)]
@@ -217,6 +223,18 @@ pub fn parse_es_documents(docs: &[serde_json::Value]) -> PhotonParseResult {
                     }
                 });
 
+            // Photon's `extra` field carries auxiliary OSM tags
+            // (wikidata, wikipedia, capital, ele, …). The ones we care
+            // about for ranking: wikidata (notability bonus), and any
+            // extra alt-name flavours the importer attached. Defensive
+            // .get chain — older Photon dumps may lack the field.
+            let wikidata = doc
+                .get("extra")
+                .and_then(|e| e.get("wikidata"))
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_owned());
+
             places.push(RawPlace {
                 osm_id,
                 osm_type: match doc.get("osm_type").and_then(|v| v.as_str()) {
@@ -235,7 +253,7 @@ pub fn parse_es_documents(docs: &[serde_json::Value]) -> PhotonParseResult {
                 admin1: None,
                 admin2: None,
                 population: synthetic_population,
-                wikidata: None,
+                wikidata,
             });
         }
 
@@ -361,6 +379,13 @@ pub fn parse_single_es_document(doc: &serde_json::Value) -> (Option<RawPlace>, O
                 }
             });
 
+        let wikidata = doc
+            .get("extra")
+            .and_then(|e| e.get("wikidata"))
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_owned());
+
         Some(RawPlace {
             osm_id,
             osm_type: match doc.get("osm_type").and_then(|v| v.as_str()) {
@@ -379,7 +404,7 @@ pub fn parse_single_es_document(doc: &serde_json::Value) -> (Option<RawPlace>, O
             admin1: None,
             admin2: None,
             population: synthetic_population,
-            wikidata: None,
+            wikidata,
         })
     } else {
         None
@@ -554,6 +579,14 @@ pub fn parse(input: &Path) -> Result<PhotonParseResult> {
                 None
             };
 
+            let wikidata = record.wikidata.clone().or_else(|| {
+                record.extra.as_ref()
+                    .and_then(|e| e.get("wikidata"))
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_owned())
+            });
+
             places.push(RawPlace {
                 osm_id,
                 osm_type: match record.object_type.as_deref() {
@@ -582,7 +615,7 @@ pub fn parse(input: &Path) -> Result<PhotonParseResult> {
                 admin1: None, // Resolved by enrich step
                 admin2: None,
                 population: synthetic_population,
-                wikidata: None,
+                wikidata,
             });
         }
 
@@ -822,6 +855,14 @@ pub fn import(input: &Path, output: &Path) -> Result<PhotonImportResult> {
                 None
             };
 
+            let wikidata = record.wikidata.clone().or_else(|| {
+                record.extra.as_ref()
+                    .and_then(|e| e.get("wikidata"))
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_owned())
+            });
+
             places.push(RawPlace {
                 osm_id,
                 osm_type: match record.object_type.as_deref() {
@@ -844,7 +885,7 @@ pub fn import(input: &Path, output: &Path) -> Result<PhotonImportResult> {
                 admin1: if state_name.is_empty() { None } else { Some(state_name.clone()) },
                 admin2: if county_name.is_empty() { None } else { Some(county_name.clone()) },
                 population: synthetic_population,
-                wikidata: None,
+                wikidata,
             });
         }
 
