@@ -1,15 +1,20 @@
-# German place name normalizer
+# German place-name normalizer
 # Covers German diacritics (ä→ae, ö→oe, ü→ue), ß/ss equivalence,
-# street suffixes, English city name variants, and admin stopwords.
+# street suffixes, English/French/Italian/Polish/Czech exonyms for German
+# cities, federal-state English variants, historical names, abbreviations.
 
 [phonetic]
 engine = "cologne"  # Kölner Phonetik — purpose-built for German
 
 [abbreviations]
-# Street suffixes (attached or detached)
+# Religious / honorary
+"st." = "sankt"
+"st" = "sankt"
 "str." = "straße"
 "str" = "straße"
 "strasse" = "straße"
+
+# Streets — common detached forms
 "gasse" = "gasse"
 "weg" = "weg"
 "allee" = "allee"
@@ -32,11 +37,22 @@ engine = "cologne"  # Kölner Phonetik — purpose-built for German
 "s." = "süd"
 "o." = "ost"
 "w." = "west"
+"nw." = "nordwest"
+"sw." = "südwest"
+"no." = "nordost"
+"so." = "südost"
 
 # Administrative short forms
 "hbf" = "hauptbahnhof"
+"hbf." = "hauptbahnhof"
 "bf." = "bahnhof"
 "bhf." = "bahnhof"
+"bf" = "bahnhof"
+"bhf" = "bahnhof"
+
+# Titles common in street names
+"dr." = "doktor"
+"prof." = "professor"
 
 [stopwords]
 words = [
@@ -44,6 +60,8 @@ words = [
     "gemeinde",
     "landkreis",
     "kreis",
+    "regierungsbezirk",
+    "bezirk",
     "germany",
     "deutschland",
     "bundesrepublik",
@@ -51,48 +69,186 @@ words = [
     "freistaat",
     "hansestadt",
     "universitätsstadt",
+    "hansestadt",
+    "stadtteil",
 ]
 
 [diacritics]
-# German umlauts → standard ASCII expansions (NOT single-char like Nordic)
+# German umlauts → standard ASCII expansions (NOT single-char like Nordic).
+# "ue", "oe", "ae" are the canonical German ASCII expansions; users
+# typing them MUST resolve to the umlaut form too.
 "ä" = "ae"
 "ö" = "oe"
 "ü" = "ue"
-# ß handled separately via char_equivalences
+# ß handled via char_equivalences
 
 [char_equivalences]
-# ß ↔ ss: both directions must match
+# ß ↔ ss bidirectional
 "ß" = "ss"
 
+# Suffix expansions: applied within compound tokens at the end.
+# German compound place names ("Friedrichstr.", "Marienpl.") need the
+# trailing abbreviation expanded even though the leading token
+# ("Friedrich", "Marien") is the actual differentiator. Different from
+# [abbreviations] which only matches standalone tokens.
+[suffix_abbreviations]
+"str." = "straße"
+"str" = "straße"
+"strasse" = "straße"
+"pl." = "platz"
+"platz" = "platz"
+"-str." = "straße"
+"-str" = "straße"
+"hbf" = "hauptbahnhof"
+"hbf." = "hauptbahnhof"
+"bhf." = "bahnhof"
+"bhf" = "bahnhof"
+"bf." = "bahnhof"
+
 [known_variants]
-# English names for German cities
+# ── English / French / other-language exonyms for major German cities ──
 "munich" = "münchen"
 "muenchen" = "münchen"
+"munchen" = "münchen"
 "cologne" = "köln"
+"colonia" = "köln"
+"keulen" = "köln"
+"kolonia" = "köln"
 "koeln" = "köln"
 "nuremberg" = "nürnberg"
 "nuernberg" = "nürnberg"
 "nuremburg" = "nürnberg"
 "hanover" = "hannover"
+"hannover" = "hannover"
 "dusseldorf" = "düsseldorf"
 "duesseldorf" = "düsseldorf"
 "brunswick" = "braunschweig"
 "frankfort" = "frankfurt am main"
 "ratisbon" = "regensburg"
+"ratisbonne" = "regensburg"
 "aix-la-chapelle" = "aachen"
+"aquisgrán" = "aachen"
+"aix la chapelle" = "aachen"
 "hamburgh" = "hamburg"
-"trier" = "trier"
+"hambourg" = "hamburg"
+"trêves" = "trier"
 "treves" = "trier"
+"mayence" = "mainz"
+"mogontiacum" = "mainz"
+"strasburg" = "straßburg"  # Strasbourg = French; this is the now-French city
+"prussia" = "preußen"
+"saxony" = "sachsen"
+"upper saxony" = "sachsen"
+"lower saxony" = "niedersachsen"
+"westphalia" = "westfalen"
+"east frisia" = "ostfriesland"
+"black forest" = "schwarzwald"
+"swabia" = "schwaben"
+"franconia" = "franken"
+"bavarian forest" = "bayerischer wald"
+"vienna" = "wien"
 
-# Frankfurt disambiguation (Main vs Oder)
-# Don't map plain "frankfurt" → "frankfurt am main" since Frankfurt (Oder) exists
+# ── Federal state English / regional variants ──
+# Pulled from Wikidata SPARQL (cf. P31 = Q1221156 "German federal state")
+"bavaria" = "bayern"
+"bavière" = "bayern"
+"baviera" = "bayern"
+"bavorsko" = "bayern"
+"bawaria" = "bayern"
+"beieren" = "bayern"
+"saxony-anhalt" = "sachsen-anhalt"
+"saxony anhalt" = "sachsen-anhalt"
+"saxe-anhalt" = "sachsen-anhalt"
+"saksonia-anhalt" = "sachsen-anhalt"
+"sasko-anhaltsko" = "sachsen-anhalt"
+"thuringia" = "thüringen"
+"thuringe" = "thüringen"
+"durynsko" = "thüringen"
+"turyngia" = "thüringen"
+"hesse" = "hessen"
+"hesensko" = "hessen"
+"hesja" = "hessen"
+"north rhine-westphalia" = "nordrhein-westfalen"
+"north rhine westphalia" = "nordrhein-westfalen"
+"rhénanie-du-nord-westphalie" = "nordrhein-westfalen"
+"nadrenia północna-westfalia" = "nordrhein-westfalen"
+"noordrijn-westfalen" = "nordrhein-westfalen"
+"rhineland-palatinate" = "rheinland-pfalz"
+"rhineland palatinate" = "rheinland-pfalz"
+"rhénanie-palatinat" = "rheinland-pfalz"
+"nadrenia-palatynat" = "rheinland-pfalz"
+"porýní-falc" = "rheinland-pfalz"
+"mecklenburg-western pomerania" = "mecklenburg-vorpommern"
+"mecklenburg-vorpommern" = "mecklenburg-vorpommern"
+"mecklembourg-poméranie-occidentale" = "mecklenburg-vorpommern"
+"meklemburgia-pomorze przednie" = "mecklenburg-vorpommern"
+"baden-württemberg" = "baden-württemberg"
+"baden-wurttemberg" = "baden-württemberg"
+"baden-wuerttemberg" = "baden-württemberg"
+"baden wurttemberg" = "baden-württemberg"
+"bade-wurtemberg" = "baden-württemberg"
+"saksen" = "sachsen"
+"saksonia" = "sachsen"
+"sasko" = "sachsen"
+"saxe" = "sachsen"
+"basse-saxe" = "niedersachsen"
+"dolna saksonia" = "niedersachsen"
+"dolní sasko" = "niedersachsen"
+"saare" = "saarland"
+"sarre" = "saarland"
+"sársko" = "saarland"
+# Schleswig-Holstein, Brandenburg, Bremen, Berlin, Hamburg
+# match natively across languages so no entry needed.
+
+# Additional French / English / Polish exonyms for German cities
+# (filled in from Wikidata, deduped against entries above)
+"francfort-sur-le-main" = "frankfurt am main"
+"francfort-sur-l'oder" = "frankfurt (oder)"
+"louisbourg" = "ludwigsburg"
+"magdebourg" = "magdeburg"
+"neubrandenbourg" = "neubrandenburg"
+"offenbourg" = "offenburg"
+"sarrebruck" = "saarbrücken"
+"wurtzbourg" = "würzburg"
+"prague" = "prag"  # German exonym for Praha
+"berlijn" = "berlin"
+"berlín" = "berlin"
+"hamburk" = "hamburg"
+"brema" = "bremen"
+
+# ── Historical / dialect / former-GDR names ──
+"karl-marx-stadt" = "chemnitz"
+"karl marx stadt" = "chemnitz"
+"stalinstadt" = "eisenhüttenstadt"
+"hindenburg" = "zabrze"  # Now in Poland — left for documentation only
+"breslau" = "wrocław"     # Now in Poland — keep mapping but expect no DE hit
+
+# ── Disambiguation ──
 "frankfurt main" = "frankfurt am main"
 "frankfurt/main" = "frankfurt am main"
 "frankfurt (main)" = "frankfurt am main"
+"frankfurt am main" = "frankfurt am main"
 "frankfurt oder" = "frankfurt (oder)"
 "frankfurt/oder" = "frankfurt (oder)"
 "frankfurt (oder)" = "frankfurt (oder)"
-
-# Other common variants
 "freiburg breisgau" = "freiburg im breisgau"
 "freiburg/breisgau" = "freiburg im breisgau"
+"freiburg im breisgau" = "freiburg im breisgau"
+"halle saale" = "halle (saale)"
+"halle/saale" = "halle (saale)"
+"halle (saale)" = "halle (saale)"
+"münster westfalen" = "münster"
+"münster (westfalen)" = "münster"
+"münster i. westf." = "münster"
+
+# ── Common landmark exonyms / informal names ──
+"brandenburg gate" = "brandenburger tor"
+"berlin wall" = "berliner mauer"
+"reichstag building" = "reichstag"
+"cologne cathedral" = "kölner dom"
+"munich olympic stadium" = "olympiastadion münchen"
+"berlin olympic stadium" = "olympiastadion berlin"
+
+# ── Compound city + district shortcuts (frequent user inputs) ──
+"berlin mitte" = "mitte"
+"berlin-mitte" = "mitte"

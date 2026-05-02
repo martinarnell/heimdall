@@ -315,18 +315,28 @@ pub fn pack(
                 )?;
 
                 // Split compound bilingual names (e.g. "Casteddu/Cagliari", "Bolzano - Bozen")
+                //
+                // Demoted via /128 — same demotion as per-word indexing.
+                // Without this, German disambiguation suffixes like
+                // "Frankenberg/Sachsen" inject the city into the "sachsen"
+                // posting list at full town importance, drowning out the
+                // actual State record. The bilingual-aliases use case
+                // ("Bolzano/Bozen") still works because the city's full
+                // base importance even after /128 leaves enough head room
+                // to outrank random non-bilingual hits.
+                let split_demoted = ((importance as u32 / 128).max(1)) as u16;
                 for sep in [" / ", " - ", "/"] {
                     if primary_lower.contains(sep) {
                         for part in primary_lower.split(sep) {
                             let part = part.trim();
                             if !part.is_empty() && part != primary_lower {
-                                write!(exact_writer, "{}\t{}\t{}\t{}\n", part, id, importance, pop_flag)?;
+                                write!(exact_writer, "{}\t{}\t{}\t{}\n", part, id, split_demoted, pop_flag)?;
                                 exact_count += 1;
                                 // Also write normalized (diacritics-stripped) variants of each split part
                                 // so that e.g. "san sebastián" also generates "san sebastian"
                                 for norm_part in normalizer.normalize(part) {
                                     if !norm_part.is_empty() && norm_part != part {
-                                        write!(exact_writer, "{}\t{}\t{}\t{}\n", norm_part, id, importance, pop_flag)?;
+                                        write!(exact_writer, "{}\t{}\t{}\t{}\n", norm_part, id, split_demoted, pop_flag)?;
                                         exact_count += 1;
                                     }
                                 }

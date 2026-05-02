@@ -121,6 +121,13 @@ state_url = "https://download.geofabrik.de/europe/germany-updates/state.txt"
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/de/photon-db-de-250720.tar.bz2"
 md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/de/photon-db-de-250720.tar.bz2.md5"
 
+# BKG Geographische Namen (GN250) — official German place-name registry,
+# ~170K named features (settlements, water, mountains, landmarks). Annual
+# update; ETag cacheable. License: dl-de/by-2-0.
+[country.de.places_source]
+type = "gn250"
+url = "https://daten.gdz.bkg.bund.de/produkte/sonstige/gn250/aktuell/gn250.utm32s.csv.zip"
+
 # ── Great Britain ──────────────────────────────────────────────────────────
 
 [country.gb]
