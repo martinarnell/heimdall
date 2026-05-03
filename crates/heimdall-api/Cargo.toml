@@ -10,6 +10,7 @@ path = "src/main.rs"
 [dependencies]
 heimdall-core = { path = "../heimdall-core" }
 heimdall-normalize = { path = "../heimdall-normalize" }
+heimdall-auth = { path = "../heimdall-auth" }
 axum.workspace = true
 tokio.workspace = true
 tower.workspace = true
@@ -21,6 +22,8 @@ tracing-subscriber.workspace = true
 clap.workspace = true
 reqwest.workspace = true
 sha2.workspace = true
+hex = "0.4"
+rand = "0.8"
 indicatif.workspace = true
 tar.workspace = true
 zstd.workspace = true

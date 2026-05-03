@@ -5,6 +5,7 @@ members = [
     "crates/heimdall-normalize",
     "crates/heimdall-nn",
     "crates/heimdall-api",
+    "crates/heimdall-auth",
     "crates/heimdall-compare",
 ]
 resolver = "2"
