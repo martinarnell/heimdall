@@ -103,12 +103,34 @@ pub fn parse_address_query(input: &str) -> Option<AddressQuery> {
     })
 }
 
-/// Split "Kungsgatan 15B" into ("Kungsgatan", "15B")
+/// Split a street-and-number phrase into (street, number).
+///
+/// Handles both number conventions:
+///   number-after  ("Kungsgatan 15B")  — Nordic, English, Dutch
+///   number-first  ("10 Rue de Rivoli", "10bis avenue Foch") — French,
+///                                Spanish, Italian, Belgian
+///
+/// Returns None when the input is just a street with no number, or just
+/// a postcode/number with no street to attach it to.
 fn split_street_number(s: &str) -> Option<(String, String)> {
     let words: Vec<&str> = s.split_whitespace().collect();
     if words.len() < 2 { return None; }
 
-    // Find the first word that starts with a digit
+    // ── Number-first: "10 rue ...", "10bis avenue ...", "1ter rue ..."
+    // The first word starts with a digit and the rest looks like a
+    // recognisable street thoroughfare. We require a known street-type
+    // keyword in words[1..] so a stray "75001 Paris" or "100 something"
+    // doesn't get mis-parsed as an address.
+    if words[0].chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)
+        && looks_like_house_number(words[0])
+        && words.len() >= 3
+        && contains_street_keyword(&words[1..])
+    {
+        return Some((words[1..].join(" "), words[0].to_owned()));
+    }
+
+    // ── Number-after: "Kungsgatan 15B", "Friedrichstraße 100"
+    // Find the first word that starts with a digit at index >= 1.
     for i in 1..words.len() {
         let word = words[i];
         if word.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
@@ -119,6 +141,71 @@ fn split_street_number(s: &str) -> Option<(String, String)> {
     }
 
     None
+}
+
+/// True when the token plausibly *is* a house number (1, 12, 5b, 10bis,
+/// 1ter). Plain integers up to 4 digits qualify; longer strings are
+/// rejected to prevent postcodes (75001) from matching. Trailing
+/// alphabetic suffixes ("b", "bis", "ter", "quater") common in Nordic /
+/// Romance numbering are accepted.
+fn looks_like_house_number(s: &str) -> bool {
+    if s.is_empty() { return false; }
+    let bytes = s.as_bytes();
+    if !bytes[0].is_ascii_digit() { return false; }
+    let digit_end = bytes.iter().position(|b| !b.is_ascii_digit()).unwrap_or(bytes.len());
+    if digit_end == 0 || digit_end > 4 { return false; }
+    if digit_end == bytes.len() { return true; }
+    // Trailing must be a short alpha suffix
+    let suffix = &s[digit_end..];
+    if suffix.len() > 6 { return false; }
+    suffix.chars().all(|c| c.is_ascii_alphabetic())
+}
+
+/// True when any of these tokens is a recognised street-type keyword.
+/// Multilingual (we run on the same parser regardless of country): French
+/// (rue/avenue/boulevard/...), German (straße/strasse/platz/...), English,
+/// Italian, Spanish, Dutch. Match is case-insensitive on the first
+/// thoroughfare-only token; we don't accept "saint" / "saint-" alone since
+/// those are part of place names, not street types.
+fn contains_street_keyword(tokens: &[&str]) -> bool {
+    const STREET_KEYWORDS: &[&str] = &[
+        // French
+        "rue", "avenue", "av", "av.", "boulevard", "bd", "bd.", "blvd",
+        "allée", "allee", "all", "all.", "chemin", "ch", "ch.",
+        "impasse", "imp", "imp.", "place", "pl", "pl.", "passage", "pass",
+        "route", "rte", "voie", "quai", "qu", "qu.", "cours", "crs",
+        "promenade", "prom", "prom.", "esplanade", "rond-point",
+        "square", "sq", "sq.", "cité", "cite", "villa", "venelle",
+        "sentier", "ruelle", "faubourg", "faub", "fbg", "parvis",
+        // German
+        "straße", "strasse", "str.", "str", "weg", "platz", "gasse",
+        "allee", "ufer", "damm", "ring", "chaussee", "promenade", "graben",
+        "markt", "steig", "stieg", "brücke", "brucke",
+        // English
+        "street", "st", "st.", "road", "rd", "rd.", "lane", "ln",
+        "drive", "dr", "dr.", "court", "ct", "way",
+        "highway", "hwy", "parkway", "pkwy", "terrace", "ter",
+        "circle", "cir", "trail", "tr", "tr.",
+        // Italian
+        "via", "viale", "piazza", "pza", "p.zza", "vicolo", "corso",
+        "largo", "salita", "lungomare",
+        // Spanish / Catalan / Portuguese
+        "calle", "c.", "avenida", "avda", "carrer", "plaza", "plaça",
+        "paseo", "rambla", "ronda", "travesía", "travesia", "praça",
+        // Dutch / Flemish
+        "straat", "laan", "plein", "weg", "kade", "gracht",
+        "singel", "dijk", "lei",
+    ];
+    for tok in tokens {
+        let lower = tok.to_lowercase();
+        // Strip trailing punctuation (commas etc.) — we already split on
+        // whitespace but the post-split token can still carry a comma.
+        let trimmed = lower.trim_matches(|c: char| !c.is_alphanumeric() && c != '.');
+        if STREET_KEYWORDS.contains(&trimmed) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Extract trailing city name after the number: "Kungsgatan 15 Stockholm" → "Stockholm"
@@ -644,5 +731,70 @@ mod tests {
         assert_eq!(q.housenumber, "15");
         assert_eq!(q.postcode, Some("11456".to_owned()));
         assert_eq!(q.city, Some("Stockholm".to_owned()));
+    }
+
+    // ── Number-first parsing (French / Italian / Spanish) ───────────────
+
+    #[test]
+    fn test_parse_french_address() {
+        let q = parse_address_query("10 Rue de Rivoli, Paris").unwrap();
+        assert_eq!(q.street, "rue de rivoli");
+        assert_eq!(q.housenumber, "10");
+        assert_eq!(q.city, Some("Paris".to_owned()));
+    }
+
+    #[test]
+    fn test_parse_french_avenue() {
+        let q = parse_address_query("1 Avenue des Champs-Élysées, Paris").unwrap();
+        assert_eq!(q.street, "avenue des champs-élysées");
+        assert_eq!(q.housenumber, "1");
+        assert_eq!(q.city, Some("Paris".to_owned()));
+    }
+
+    #[test]
+    fn test_parse_french_boulevard_abbrev() {
+        // "Bd" is in our keyword list — we expect this to parse as an
+        // address even though the suffix is abbreviated. Normalisation
+        // happens later via the per-country abbreviations map.
+        let q = parse_address_query("1 Bd de la Madeleine, Paris").unwrap();
+        assert_eq!(q.street, "bd de la madeleine");
+        assert_eq!(q.housenumber, "1");
+    }
+
+    #[test]
+    fn test_parse_italian_address() {
+        let q = parse_address_query("12 Via Roma, Milano").unwrap();
+        assert_eq!(q.street, "via roma");
+        assert_eq!(q.housenumber, "12");
+    }
+
+    #[test]
+    fn test_parse_spanish_address() {
+        let q = parse_address_query("5 Calle Mayor, Madrid").unwrap();
+        assert_eq!(q.street, "calle mayor");
+        assert_eq!(q.housenumber, "5");
+    }
+
+    #[test]
+    fn test_french_postcode_not_parsed_as_address() {
+        // "75001 Paris" must NOT parse as address — "75001" is a
+        // postcode (5 digits), and there's no recognisable street
+        // keyword after it. Falls through to the postcode pipeline.
+        assert!(parse_address_query("75001 Paris").is_none());
+    }
+
+    #[test]
+    fn test_house_number_with_bis_suffix() {
+        let q = parse_address_query("10bis avenue Foch, Paris").unwrap();
+        assert_eq!(q.street, "avenue foch");
+        assert_eq!(q.housenumber, "10bis");
+    }
+
+    #[test]
+    fn test_german_address_still_works() {
+        // Number-after pattern (German / Nordic / English).
+        let q = parse_address_query("Friedrichstraße 100, Berlin").unwrap();
+        assert_eq!(q.street, "friedrichstraße");
+        assert_eq!(q.housenumber, "100");
     }
 }

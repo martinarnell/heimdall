@@ -1,53 +1,407 @@
-# French place name normalizer
-# Street type abbreviations, diacritics stripping, no phonetic encoding.
-# French street names use fixed vocabulary (Rue, Avenue, Boulevard, etc.)
+# French place-name normalizer
+# Covers French diacritics (é→e, à→a, etc.), street suffixes,
+# English/German/Italian/Spanish/Dutch exonyms for major French cities,
+# régional English variants, historical names, abbreviations.
+# Phonetic engine disabled — French street/town vocabulary is fixed
+# enough that exact + Levenshtein covers fuzziness; the phonetic
+# encoders we ship are tuned for Germanic/Slavic phonology and would
+# mangle "Saint-Étienne" type inputs.
 
 [phonetic]
 engine = "none"
 
 [abbreviations]
-# Street type abbreviations (normalize long → short canonical form)
-"rue" = "r"
-"avenue" = "av"
-"boulevard" = "bd"
-"allée" = "all"
-"chemin" = "ch"
-"impasse" = "imp"
-"place" = "pl"
-"route" = "rte"
-"passage" = "pass"
-"voie" = "v"
+# Religious / honorific (standalone tokens only)
+"st" = "saint"
+"st." = "saint"
+"ste" = "sainte"
+"ste." = "sainte"
+"sts" = "saints"
+"mt" = "mont"
+"mt." = "mont"
 
-# Religious/honorific
-"saint" = "st"
-"sainte" = "ste"
+# Street type abbreviations — keep canonical forms long, expand short
+# to long. The address pipeline normalises both sides so either spelling
+# works, but we keep the canonical the OSM-typical full form.
+"r." = "rue"
+"av" = "avenue"
+"av." = "avenue"
+"ave" = "avenue"
+"ave." = "avenue"
+"bd" = "boulevard"
+"bd." = "boulevard"
+"blv" = "boulevard"
+"blv." = "boulevard"
+"blvd" = "boulevard"
+"blvd." = "boulevard"
+"all" = "allée"
+"all." = "allée"
+"ch" = "chemin"
+"ch." = "chemin"
+"imp" = "impasse"
+"imp." = "impasse"
+"pl" = "place"
+"pl." = "place"
+"pa" = "passage"
+"pas" = "passage"
+"pass" = "passage"
+"pass." = "passage"
+"rte" = "route"
+"rte." = "route"
+"sq" = "square"
+"sq." = "square"
+"qu" = "quai"
+"qu." = "quai"
+"crs" = "cours"
+"prom" = "promenade"
+"prom." = "promenade"
+"cite" = "cité"
+"vil" = "villa"
+"villa" = "villa"
+
+# Stations / transport
+"gare" = "gare"
+
+# Cardinal directions
+"n." = "nord"
+"s." = "sud"
+"e." = "est"
+"o." = "ouest"
 
 [stopwords]
+# Generic admin / geographic words that add no signal
 words = [
     "france",
     "fr",
+    "république",
+    "republique",
+    "république française",
+    "republique francaise",
+    "métropolitaine",
+    "metropolitaine",
+    "région",
+    "regions",
+    "region",
+    "département",
+    "departement",
+    "departments",
+    "arrondissement",
+    "arrondissements",
+    "commune",
+    "communes",
+    "communauté",
+    "communaute",
+    "communauté de communes",
+    "communaute de communes",
+    "métropole",
+    "metropole",
+    "intercommunalité",
+    "intercommunalite",
+    "epci",
+    "ville",
+    "villes",
+    "ville de",
+    "préfecture",
+    "prefecture",
+    "sous-préfecture",
+    "sous-prefecture",
+    # Outre-mer / overseas markers
+    "outre-mer",
+    "outremer",
+    "dom",
+    "drom",
+    "tom",
 ]
 
-[known_variants]
-# Major cities — map common spellings to canonical
-"paris" = "paris"
-"marseille" = "marseille"
-"lyon" = "lyon"
-
 [diacritics]
-# French accented characters → ASCII equivalents
+# French accents → ASCII. Bidirectional via the per-word indexer:
+# "Ile-de-France" / "Île-de-France" both resolve.
 "é" = "e"
 "è" = "e"
 "ê" = "e"
 "ë" = "e"
 "à" = "a"
 "â" = "a"
+"ä" = "a"
 "ç" = "c"
 "î" = "i"
 "ï" = "i"
 "ô" = "o"
+"ö" = "o"
 "ù" = "u"
 "û" = "u"
 "ü" = "u"
+"ÿ" = "y"
 "œ" = "oe"
 "æ" = "ae"
+"ñ" = "n"
+
+[char_equivalences]
+# Apostrophe handling — French elision ("L'Authie", "Côte d'Azur").
+# The address pipeline tokenises around apostrophes, so this only matters
+# for the place-name FST. Both straight and curly forms map together.
+"'" = "'"
+"’" = "'"
+
+# ── Suffix expansions for compound tokens ──────────────────────────────
+# French rarely concatenates street suffixes the way German does
+# ("Friedrichstr." → "Friedrichstraße") — French keeps them separate
+# ("rue Lafayette", not "Lafayetterue"). So the suffix table is small,
+# only covering numbered arrondissements and cardinal-direction
+# compounds that show up in OSM.
+[suffix_abbreviations]
+"-st-" = "-saint-"
+"-ste-" = "-sainte-"
+"-mt-" = "-mont-"
+
+[known_variants]
+# ──────────────────────────────────────────────────────────────────────
+# Major-city exonyms (English / German / Italian / Spanish / Dutch /
+# Portuguese / older spellings)
+# ──────────────────────────────────────────────────────────────────────
+
+# Paris — universally known
+"paris" = "paris"
+
+# Marseille
+"marseilles" = "marseille"   # English plural form
+"marsella" = "marseille"     # Spanish
+"marsiglia" = "marseille"    # Italian
+"marselha" = "marseille"     # Portuguese
+"marsylia" = "marseille"     # Polish
+"marsilya" = "marseille"     # Turkish
+
+# Lyon
+"lyons" = "lyon"             # English
+"lione" = "lyon"             # Italian
+"león de francia" = "lyon"   # Spanish (rare)
+
+# Toulouse
+"tolosa" = "toulouse"        # Italian/Catalan/Spanish
+
+# Nice
+"nizza" = "nice"             # German/Italian
+"niza" = "nice"              # Spanish
+"nica" = "nice"              # Portuguese
+
+# Bordeaux
+"burdeos" = "bordeaux"       # Spanish
+"bordéus" = "bordeaux"       # Portuguese
+
+# Strasbourg
+"strassburg" = "strasbourg"  # German
+"straßburg" = "strasbourg"   # German with eszett
+"strasburg" = "strasbourg"   # English alt
+
+# Mulhouse
+"mülhausen" = "mulhouse"     # German
+"muelhausen" = "mulhouse"    # German ASCII
+"mulhausen" = "mulhouse"
+
+# Reims
+"rheims" = "reims"           # English archaic
+
+# Lille
+"rijsel" = "lille"           # Dutch/Flemish
+
+# Dunkerque
+"dunkirk" = "dunkerque"      # English
+"duinkerke" = "dunkerque"    # Dutch
+"duinkerken" = "dunkerque"   # Dutch alt
+"dünkirchen" = "dunkerque"   # German
+
+# Calais — same in most languages
+
+# Le Havre
+"havre" = "le havre"
+
+# Cherbourg
+"cherburg" = "cherbourg"
+
+# Boulogne-sur-Mer
+"boulogne sur mer" = "boulogne-sur-mer"
+
+# Saint-Étienne — diacritic-free fallback
+"saint-etienne" = "saint-étienne"
+"saint etienne" = "saint-étienne"
+"st-etienne" = "saint-étienne"
+"st-étienne" = "saint-étienne"
+
+# Other diacritic-free city forms (covers users typing without accents)
+"besancon" = "besançon"
+"orleans" = "orléans"
+"nimes" = "nîmes"
+"chalons-en-champagne" = "châlons-en-champagne"
+"chalons en champagne" = "châlons-en-champagne"
+"chalon-sur-saone" = "chalon-sur-saône"
+"angouleme" = "angoulême"
+"chambery" = "chambéry"
+"melun" = "melun"
+"perigueux" = "périgueux"
+"villeurbane" = "villeurbanne"
+"saumur" = "saumur"
+"saint-die-des-vosges" = "saint-dié-des-vosges"
+"chateauroux" = "châteauroux"
+
+# ──────────────────────────────────────────────────────────────────────
+# Régions — English / German / Italian / Spanish exonyms
+# (13 metropolitan + 5 outre-mer)
+# ──────────────────────────────────────────────────────────────────────
+
+# Île-de-France
+"ile-de-france" = "île-de-france"
+"ile de france" = "île-de-france"
+"isla de francia" = "île-de-france"  # Spanish
+
+# Auvergne-Rhône-Alpes
+"auvergne-rhone-alpes" = "auvergne-rhône-alpes"
+"auvergne rhone alpes" = "auvergne-rhône-alpes"
+"auvergne-rhônes-alpes" = "auvergne-rhône-alpes"
+"rhone-alpes" = "auvergne-rhône-alpes"  # pre-2016 region; absorbed
+"rhône-alpes" = "auvergne-rhône-alpes"
+"auvergne" = "auvergne-rhône-alpes"     # pre-2016 region
+
+# Hauts-de-France
+"hauts-de-france" = "hauts-de-france"
+"nord-pas-de-calais" = "hauts-de-france"  # pre-2016
+"picardie" = "hauts-de-france"            # pre-2016
+"nord pas de calais picardie" = "hauts-de-france"
+
+# Nouvelle-Aquitaine
+"nouvelle-aquitaine" = "nouvelle-aquitaine"
+"nouvelle aquitaine" = "nouvelle-aquitaine"
+"aquitaine" = "nouvelle-aquitaine"        # pre-2016
+"limousin" = "nouvelle-aquitaine"         # pre-2016
+"poitou-charentes" = "nouvelle-aquitaine" # pre-2016
+
+# Occitanie
+"occitanie" = "occitanie"
+"languedoc-roussillon" = "occitanie"      # pre-2016
+"midi-pyrénées" = "occitanie"             # pre-2016
+"midi-pyrenees" = "occitanie"
+"languedoc" = "occitanie"
+
+# Provence-Alpes-Côte d'Azur
+"provence-alpes-côte d'azur" = "provence-alpes-côte d'azur"
+"provence-alpes-cote d'azur" = "provence-alpes-côte d'azur"
+"paca" = "provence-alpes-côte d'azur"
+"provence" = "provence-alpes-côte d'azur"
+"côte d'azur" = "provence-alpes-côte d'azur"
+"cote d'azur" = "provence-alpes-côte d'azur"
+"french riviera" = "provence-alpes-côte d'azur"
+
+# Grand Est
+"grand est" = "grand est"
+"alsace" = "grand est"                    # pre-2016
+"lorraine" = "grand est"                  # pre-2016
+"champagne-ardenne" = "grand est"         # pre-2016
+"alsace champagne-ardenne lorraine" = "grand est"
+
+# Pays de la Loire
+"pays de la loire" = "pays de la loire"
+"pays-de-la-loire" = "pays de la loire"
+
+# Bretagne
+"bretagne" = "bretagne"
+"brittany" = "bretagne"                   # English
+"bretaña" = "bretagne"                    # Spanish
+"bretanha" = "bretagne"                   # Portuguese
+"brittagne" = "bretagne"                  # English archaic
+"breizh" = "bretagne"                     # Breton endonym
+
+# Normandie
+"normandie" = "normandie"
+"normandy" = "normandie"                  # English
+"normandía" = "normandie"                 # Spanish
+"normandia" = "normandie"                 # Italian/Portuguese
+"basse-normandie" = "normandie"           # pre-2016
+"haute-normandie" = "normandie"           # pre-2016
+
+# Bourgogne-Franche-Comté
+"bourgogne-franche-comté" = "bourgogne-franche-comté"
+"bourgogne franche-comte" = "bourgogne-franche-comté"
+"burgundy" = "bourgogne-franche-comté"    # English (Bourgogne)
+"borgogna" = "bourgogne-franche-comté"    # Italian
+"borgoña" = "bourgogne-franche-comté"     # Spanish
+"bourgogne" = "bourgogne-franche-comté"   # pre-2016
+"franche-comté" = "bourgogne-franche-comté"  # pre-2016
+"franche comte" = "bourgogne-franche-comté"
+
+# Centre-Val de Loire
+"centre-val de loire" = "centre-val de loire"
+"centre val de loire" = "centre-val de loire"
+"loire valley" = "centre-val de loire"
+"val de loire" = "centre-val de loire"
+
+# Corse
+"corse" = "corse"
+"corsica" = "corse"                       # English/Italian
+"córcega" = "corse"                       # Spanish
+"corsega" = "corse"                       # ASCII
+"córsega" = "corse"                       # Portuguese
+
+# ── Outre-mer ─────────────────────────────────────────────────────────
+"guadeloupe" = "guadeloupe"
+"guadalupe" = "guadeloupe"               # Spanish
+"martinique" = "martinique"
+"martinica" = "martinique"               # Spanish
+"reunion" = "la réunion"
+"la réunion" = "la réunion"
+"la reunion" = "la réunion"
+"réunion" = "la réunion"
+"reunion island" = "la réunion"
+"guyane" = "guyane"
+"guyane française" = "guyane"
+"french guiana" = "guyane"
+"guayana francesa" = "guyane"
+"guiana francesa" = "guyane"
+"mayotte" = "mayotte"
+
+# ──────────────────────────────────────────────────────────────────────
+# Historical / former names
+# ──────────────────────────────────────────────────────────────────────
+"lutetia" = "paris"                       # Roman Paris
+"lutèce" = "paris"
+"massalia" = "marseille"                  # Greek/Roman
+"massilia" = "marseille"                  # Roman
+"lugdunum" = "lyon"                       # Roman Lyon
+"narbo martius" = "narbonne"              # Roman
+"argentoratum" = "strasbourg"             # Roman
+
+# ──────────────────────────────────────────────────────────────────────
+# Common landmarks (canonical OSM names — covers users typing variants)
+# ──────────────────────────────────────────────────────────────────────
+"eiffel tower" = "tour eiffel"
+"the eiffel tower" = "tour eiffel"
+"torre eiffel" = "tour eiffel"            # Italian/Spanish
+"eiffelturm" = "tour eiffel"              # German
+"tour de eiffel" = "tour eiffel"
+"the louvre" = "musée du louvre"
+"louvre museum" = "musée du louvre"
+"notre dame" = "notre-dame de paris"
+"notre dame de paris" = "notre-dame de paris"
+"notre-dame" = "notre-dame de paris"
+"arc de triomphe de l'étoile" = "arc de triomphe"
+"arc of triumph" = "arc de triomphe"
+"sacre coeur" = "sacré-cœur"
+"sacre-coeur" = "sacré-cœur"
+"basilique du sacré coeur" = "basilique du sacré-cœur"
+"sacred heart basilica" = "basilique du sacré-cœur"
+"versailles palace" = "château de versailles"
+"palace of versailles" = "château de versailles"
+"chateau de versailles" = "château de versailles"
+"mont saint michel" = "mont-saint-michel"
+"mont st michel" = "mont-saint-michel"
+"mont st-michel" = "mont-saint-michel"
+"abbey of mont saint-michel" = "mont-saint-michel"
+# Mont Blanc — the actual mountain (highest peak in W. Europe) is in OSM
+# under "Mont Blanc / Monte Bianco" (FR/IT bilingual). A small Gascon
+# village "Monblanc" (no 't') has alt_name=Mont Blanc which puts it on
+# the same exact-key as the mountain via the alt-name index pass; the
+# village's FST entry is at full importance while the mountain's slash-
+# split entry is /128-demoted. Without redirecting "mont blanc" to the
+# canonical bilingual form first, the lookup lands on the Gascon
+# Monblanc instead of the mountain.
+"mont blanc" = "mont blanc / monte bianco"
+"montblanc" = "mont blanc / monte bianco"
+"chamonix mont blanc" = "chamonix-mont-blanc"

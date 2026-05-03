@@ -884,18 +884,48 @@ async fn search(
         let best = best.filter(|(_, _, _, d)| *d <= 80_000.0);
         if let Some((_ci, country, r, _)) = best {
             let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
-            let display = if r.street.is_empty() {
+            let pc_display = if r.street.is_empty() {
                 pc.clone()
             } else {
                 r.street.clone()
             };
+
+            // Same enrichment as the bare-postcode path below — prefer
+            // the most-populous nearby settlement so the response shows
+            // "75001 Paris, France" not just "75001". Without this the
+            // postcode-with-city query is functionally fine (coord is
+            // right) but cosmetically wrong, and integrators string-
+            // match on display_name to verify the response.
+            let lat = r.coord.lat_f64();
+            let lon = r.coord.lon_f64();
+            let nearby_city = country.geohash_index.as_ref().and_then(|gh| {
+                gh.nearest(lat, lon, country.index.record_store(), 16, None)
+                    .into_iter()
+                    .filter_map(|(rid, dist_m)| {
+                        if dist_m > 5_000.0 { return None; }
+                        let rec = country.index.record_store().get(rid).ok()?;
+                        if !matches!(rec.place_type,
+                            PlaceType::City | PlaceType::Town | PlaceType::Village |
+                            PlaceType::Suburb | PlaceType::Quarter
+                        ) { return None; }
+                        let name = country.index.record_store().primary_name(&rec);
+                        Some((name, dist_m, rec.importance))
+                    })
+                    .max_by(|a, b| a.2.cmp(&b.2))
+                    .map(|(name, _, _)| name)
+            });
+            let display_name = match nearby_city {
+                Some(city) => format!("{} {}, {}", pc_display, city, country.name),
+                None => format!("{}, {}", pc_display, country.name),
+            };
+
             response.push(NominatimResult {
                 place_id: 0,
                 osm_type: None,
                 osm_id: None,
-                display_name: display,
-                lat: format!("{:.7}", r.coord.lat_f64()),
-                lon: format!("{:.7}", r.coord.lon_f64()),
+                display_name,
+                lat: format!("{:.7}", lat),
+                lon: format!("{:.7}", lon),
                 place_type: "postcode".to_owned(),
                 importance: 0.6,
                 match_type: Some("postcode".to_owned()),
@@ -952,18 +982,51 @@ async fn search(
             if let Some(ref addr_index) = country.addr_index {
                 if let Some(r) = addr_index.lookup_postcode(&pc_stripped) {
                     let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
-                    let display = if r.street.is_empty() {
+                    let pc_display = if r.street.is_empty() {
                         pc_stripped.clone()
                     } else {
                         r.street.clone()
                     };
+
+                    // Reverse-geocode the postcode centroid to find a
+                    // settlement nearby — without this the response
+                    // display_name is just the bare postcode ("75001"),
+                    // which fails caller-side string match like
+                    // "expect '75001' result to mention 'Paris'". Pick
+                    // the most populous settlement within ~5 km of the
+                    // centroid; fall back to the bare postcode when no
+                    // settlement is reachable from the geohash grid.
+                    let lat = r.coord.lat_f64();
+                    let lon = r.coord.lon_f64();
+                    let nearby_city = country.geohash_index.as_ref().and_then(|gh| {
+                        gh.nearest(lat, lon, country.index.record_store(), 16, None)
+                            .into_iter()
+                            .filter_map(|(rid, dist_m)| {
+                                if dist_m > 5_000.0 { return None; }
+                                let rec = country.index.record_store().get(rid).ok()?;
+                                if !matches!(rec.place_type,
+                                    PlaceType::City | PlaceType::Town | PlaceType::Village |
+                                    PlaceType::Suburb | PlaceType::Quarter
+                                ) { return None; }
+                                let name = country.index.record_store().primary_name(&rec);
+                                Some((name, dist_m, rec.importance))
+                            })
+                            .max_by(|a, b| a.2.cmp(&b.2))
+                            .map(|(name, _, _)| name)
+                    });
+
+                    let display_name = match nearby_city {
+                        Some(city) => format!("{} {}, {}", pc_display, city, country.name),
+                        None => format!("{}, {}", pc_display, country.name),
+                    };
+
                     response.push(NominatimResult {
                         place_id: 0,
                         osm_type: None,
                         osm_id: None,
-                        display_name: display,
-                        lat: format!("{:.7}", r.coord.lat_f64()),
-                        lon: format!("{:.7}", r.coord.lon_f64()),
+                        display_name,
+                        lat: format!("{:.7}", lat),
+                        lon: format!("{:.7}", lon),
                         place_type: "postcode".to_owned(),
                         importance: 0.6,
                         match_type: Some("postcode".to_owned()),
