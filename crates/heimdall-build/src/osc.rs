@@ -301,6 +301,7 @@ fn process_element(
                     housenumber: hn,
                     postcode,
                     city,
+                    state: None,
                     lat,
                     lon,
                 }),

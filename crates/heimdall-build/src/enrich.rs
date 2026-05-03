@@ -473,12 +473,109 @@ pub fn enrich(parquet_path: &Path, output_dir: &Path) -> Result<EnrichResult> {
     // Step 4: Write outputs
     // -----------------------------------------------------------------------
 
-    // admin.bin — the hierarchy table (loaded at query time)
-    let admin_bytes = postcard::to_allocvec(&admin_entries).expect("postcard serialize admin");
     let admin_path = output_dir.join("admin.bin");
-    std::fs::write(&admin_path, &admin_bytes)?;
-    heimdall_core::compressed_io::compress_file(&admin_path, 19)?;
-    info!("admin.bin: {:.1} KB ({} entries)", admin_bytes.len() as f64 / 1024.0, admin_entries.len());
+
+    // US: tiger.rs already wrote an authoritative admin.bin from Census
+    // shapefiles (56 states + 3,143 counties). Overwriting it with the
+    // OSM-derived hierarchy throws that work away and yields a flaky
+    // nearest-centroid admin near borders. Strategy: keep the TIGER file
+    // intact, then remap admin_map.bin entries (currently pointing into
+    // our OSM-derived `admin_entries`) onto the TIGER IDs by name match.
+    // The OSM PIP / nearest-centroid pipeline still ran above — we only
+    // change which IDs the address/place records reference at the end.
+    let is_us = dir_name.contains("-us")
+        || dir_name.contains("united-states")
+        || dir_name.contains("america");
+    let preserve_tiger_admin = is_us && admin_path.exists();
+
+    let final_admin_count = if preserve_tiger_admin {
+        let tiger_bytes = heimdall_core::compressed_io::read_maybe_compressed(&admin_path)?;
+        let tiger_entries: Vec<AdminEntry> = postcard::from_bytes(&tiger_bytes)
+            .or_else(|_| bincode::deserialize(&tiger_bytes))
+            .map_err(|e| anyhow::anyhow!("TIGER admin.bin deserialize failed: {}", e))?;
+        info!(
+            "Preserving TIGER admin.bin ({} entries); remapping admin_map.bin via name match",
+            tiger_entries.len()
+        );
+
+        // Name → id, lowercased. State-level entries (parent_id None) live in
+        // admin1_by_name; county-level (parent_id Some) in admin2_by_name.
+        // Multi-county-name collisions ("Washington County" exists in 31
+        // states) are resolved by the OSM admin's parent name when we have
+        // it — the OSM admin1 we matched to TIGER state pins the lookup.
+        let mut admin1_by_name: HashMap<String, u16> = HashMap::new();
+        // (state_id, county_name_lower) → county_id
+        let mut admin2_by_state_name: HashMap<(u16, String), u16> = HashMap::new();
+        // Fallback when we don't know the state: county_name_lower → county_id (last write wins)
+        let mut admin2_by_name_only: HashMap<String, u16> = HashMap::new();
+        for e in &tiger_entries {
+            let key = e.name.to_lowercase();
+            if e.parent_id.is_none() {
+                admin1_by_name.insert(key, e.id);
+            } else {
+                admin2_by_name_only.insert(key.clone(), e.id);
+                if let Some(pid) = e.parent_id {
+                    admin2_by_state_name.insert((pid, key), e.id);
+                }
+            }
+        }
+
+        // Build OSM admin id → name lookup so we can map OSM IDs in
+        // admin_map → name → TIGER id. Both county and muni entries.
+        let osm_id_to_name: HashMap<u16, (String, Option<u16>)> = admin_entries
+            .iter()
+            .map(|e| (e.id, (e.name.to_lowercase(), e.parent_id)))
+            .collect();
+
+        let mut remapped_hits = 0usize;
+        let mut remapped_misses = 0usize;
+        let mut new_admin_map: HashMap<i64, (u16, u16)> = HashMap::with_capacity(admin_map.len());
+
+        for (osm_id, (osm_a1, osm_a2)) in admin_map.iter() {
+            // a1 (state)
+            let new_a1 = osm_id_to_name
+                .get(osm_a1)
+                .and_then(|(name, _)| admin1_by_name.get(name).copied())
+                .unwrap_or(u16::MAX);
+
+            // a2 (county) — prefer state-scoped lookup so "Washington
+            // County" resolves to the right state's county.
+            let new_a2 = if let Some((cname, _)) = osm_id_to_name.get(osm_a2) {
+                if new_a1 != u16::MAX {
+                    admin2_by_state_name
+                        .get(&(new_a1, cname.clone()))
+                        .copied()
+                        .or_else(|| admin2_by_name_only.get(cname).copied())
+                        .unwrap_or(u16::MAX)
+                } else {
+                    admin2_by_name_only.get(cname).copied().unwrap_or(u16::MAX)
+                }
+            } else {
+                u16::MAX
+            };
+
+            if new_a1 != u16::MAX || new_a2 != u16::MAX {
+                remapped_hits += 1;
+            } else {
+                remapped_misses += 1;
+            }
+            new_admin_map.insert(*osm_id, (new_a1, new_a2));
+        }
+
+        info!(
+            "TIGER remap: {} records mapped, {} unmappable (kept as u16::MAX)",
+            remapped_hits, remapped_misses
+        );
+        admin_map = new_admin_map;
+        tiger_entries.len()
+    } else {
+        // Non-US (or no TIGER file): write the OSM-derived hierarchy as before.
+        let admin_bytes = postcard::to_allocvec(&admin_entries).expect("postcard serialize admin");
+        std::fs::write(&admin_path, &admin_bytes)?;
+        heimdall_core::compressed_io::compress_file(&admin_path, 19)?;
+        info!("admin.bin: {:.1} KB ({} entries)", admin_bytes.len() as f64 / 1024.0, admin_entries.len());
+        admin_entries.len()
+    };
 
     // admin_map.bin — osm_id → (admin1_id, admin2_id) mapping (used by pack step)
     let map_bytes = bincode::serialize(&admin_map)?;
@@ -486,7 +583,7 @@ pub fn enrich(parquet_path: &Path, output_dir: &Path) -> Result<EnrichResult> {
     info!("admin_map.bin: {:.1} MB ({} entries)", map_bytes.len() as f64 / 1e6, admin_map.len());
 
     Ok(EnrichResult {
-        admin_count: admin_entries.len(),
+        admin_count: final_admin_count,
     })
 }
 

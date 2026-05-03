@@ -344,6 +344,7 @@ fn read_cnefe_csv_reader<R: Read>(reader: R) -> Result<Vec<RawAddress>> {
             housenumber,
             postcode,
             city,
+            state: None,
             lat,
             lon,
         });

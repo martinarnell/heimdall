@@ -178,6 +178,7 @@ fn read_prg_csv(csv_path: &Path) -> Result<Vec<RawAddress>> {
             housenumber: housenumber.to_string(),
             postcode,
             city,
+            state: None,
             lat,
             lon,
         });
@@ -344,6 +345,7 @@ fn parse_prg_gml_reader<R: Read + BufRead>(reader: R) -> Result<Vec<RawAddress>>
                             housenumber: addr.housenumber,
                             postcode,
                             city,
+                            state: None,
                             lat,
                             lon,
                         });

@@ -319,30 +319,84 @@ fn resolve_city(
     normalizer: &Normalizer,
     global_index: Option<&GlobalIndex>,
 ) -> (Option<u16>, Option<Coord>) {
-    let city_candidates = normalizer.normalize(city);
+    resolve_city_with_state(city, country, country_idx, normalizer, global_index, None::<&[u16]>)
+}
 
-    // Try per-country FST first (populated in full mode)
+/// Resolve a city name to (admin2_id, coord), optionally constrained to a
+/// set of admin1 IDs (state). When `state_admin1_filter` is non-empty, only
+/// records whose `admin1_id` is in the slice are considered — so "Washington"
+/// with state=DC returns Washington-DC, not Washington-state or Washington-
+/// county. The slice form lets us pass every admin1 entry whose name matches
+/// the queried state (OSM relations sometimes produce duplicate entries per
+/// state under different OSM tag combinations).
+fn resolve_city_with_state(
+    city: &str,
+    country: &CountryIndex,
+    country_idx: usize,
+    normalizer: &Normalizer,
+    global_index: Option<&GlobalIndex>,
+    state_admin1_filter: Option<&[u16]>,
+) -> (Option<u16>, Option<Coord>) {
+    let city_candidates = normalizer.normalize(city);
+    let store = country.index.record_store();
+
+    // When constrained by state, prefer the global posting list — it has
+    // every same-name record, not just the FST's first hit. Then we can
+    // pick the best one inside the requested state.
+    if let (Some(a1_filter), Some(global)) = (state_admin1_filter, global_index) {
+        if !a1_filter.is_empty() {
+            let mut best: Option<(u16, u16, Coord)> = None; // (importance, admin2, coord)
+            for candidate in &city_candidates {
+                for posting in global.exact_lookup(candidate) {
+                    if posting.country_id as usize != country_idx { continue; }
+                    let record = match store.get(posting.record_id) { Ok(r) => r, Err(_) => continue };
+                    if !a1_filter.contains(&record.admin1_id) { continue; }
+                    let imp = record.importance;
+                    if best.as_ref().map(|(b, _, _)| imp > *b).unwrap_or(true) {
+                        best = Some((imp, record.admin2_id, record.coord));
+                    }
+                }
+            }
+            if let Some((_, a2, coord)) = best {
+                let muni_id = if a2 > 0 { Some(a2) } else { None };
+                return (muni_id, Some(coord));
+            }
+        }
+    }
+    if let Some(a1_filter) = state_admin1_filter {
+        if !a1_filter.is_empty() {
+            // Posting list missed (small per-country mode). Walk the per-country
+            // FST sidecar's same-name records to pick the in-state record.
+            for candidate in &city_candidates {
+                for record_id in country.index.exact_lookup_all(candidate) {
+                    if let Ok(record) = store.get(record_id) {
+                        if !a1_filter.contains(&record.admin1_id) { continue; }
+                        let muni_id = if record.admin2_id > 0 { Some(record.admin2_id) } else { None };
+                        return (muni_id, Some(record.coord));
+                    }
+                }
+            }
+        }
+    }
+
+    // Default path — first hit wins (per-country FST, then global postings).
     for candidate in &city_candidates {
         if let Some(record_id) = country.index.exact_lookup(candidate) {
             let muni_id = country.index.record_admin2(record_id).filter(|&a2| a2 > 0);
-            let coord = country.index.record_store().get(record_id).ok().map(|r| r.coord);
+            let coord = store.get(record_id).ok().map(|r| r.coord);
             if muni_id.is_some() || coord.is_some() {
                 return (muni_id, coord);
             }
         }
     }
-
-    // Fallback: use global index postings to find the city, then resolve
-    // via the country's record store (which IS loaded even in lightweight mode)
     if let Some(global) = global_index {
         for candidate in &city_candidates {
             let postings = global.exact_lookup(candidate);
-            // Postings are sorted by importance desc — pick the best match for this country
             for posting in &postings {
                 if posting.country_id as usize == country_idx {
                     let record_id = posting.record_id;
                     let muni_id = country.index.record_admin2(record_id).filter(|&a2| a2 > 0);
-                    let coord = country.index.record_store().get(record_id).ok().map(|r| r.coord);
+                    let coord = store.get(record_id).ok().map(|r| r.coord);
                     return (muni_id, coord);
                 }
             }
@@ -781,11 +835,22 @@ async fn search(
         // Fall through to the normal pipeline with the synthetic query
     }
 
-    // ZIP code detection
-    if ZipIndex::is_us_zip(&query_text) {
+    // ZIP code detection (5-digit and ZIP+4 — strip the +4 and look up the
+    // 5-digit prefix; coordinate accuracy gain from +4 is < ZIP-area scale
+    // anyway so the prefix is the canonical lookup key). Also handles the
+    // "90210 Beverly Hills" / "Beverly Hills 90210" forms — the user pasted
+    // a ZIP next to a city, and the ZIP alone is enough to disambiguate.
+    let zip5_lookup_key: Option<String> = if ZipIndex::is_us_zip(&query_text) {
+        Some(query_text.trim().to_owned())
+    } else if let Some(z) = ZipIndex::parse_us_zip4(&query_text) {
+        Some(z)
+    } else {
+        ZipIndex::parse_us_zip_with_city(&query_text).map(|(z, _city)| z)
+    };
+    if let Some(ref zip5) = zip5_lookup_key {
         for (_ci, country) in &target_countries {
             if let Some(ref zip_idx) = country.zip_index {
-                if let Some(zr) = zip_idx.lookup(query_text.trim()) {
+                if let Some(zr) = zip_idx.lookup(zip5) {
                     let display = if zr.city.is_empty() {
                         format!("{}, {}", zr.zip, zr.state)
                     } else {
@@ -819,6 +884,67 @@ async fn search(
                     });
                     return Ok(Json(response));
                 }
+            }
+        }
+        // ZIP not in fst_zip.fst (TIGER ZCTAs miss ~9000 unique/PO-Box ZIPs
+        // like 20500 White House). Fall back to the postcode FST built from
+        // address points — it has wider coverage. Re-route the query through
+        // that path with a clean 5-digit form so split_postcode_city doesn't
+        // try to interpret leading digits as a Swedish-style "111 22"
+        // postcode (the source of the "20 500, United States" bug).
+        // We do the postcode-FST lookup here directly to format the display
+        // as a clean US ZIP, and fall through to place-name search if it
+        // also misses.
+        for (_ci, country) in &target_countries {
+            let cc = std::str::from_utf8(&country.code).unwrap_or("??");
+            if cc != "US" { continue; }
+            let addr_index = match &country.addr_index { Some(a) => a, None => continue };
+            if let Some(r) = addr_index.lookup_postcode(zip5) {
+                let lat = r.coord.lat_f64();
+                let lon = r.coord.lon_f64();
+                // Find the most-populous nearby settlement so the display
+                // shows "20500 — Washington, DC" not "20 500, United States".
+                // Use zoom=12 to filter to City/Town/Village types up-front
+                // so we don't waste the result budget on POIs that crowd out
+                // the actual settlement record at central-city ZIPs.
+                let nearby = country.geohash_index.as_ref().and_then(|gh| {
+                    gh.nearest(lat, lon, country.index.record_store(), 32, Some(12))
+                        .into_iter()
+                        .filter_map(|(rid, dist_m)| {
+                            if dist_m > 12_000.0 { return None; }
+                            let rec = country.index.record_store().get(rid).ok()?;
+                            let name = country.index.record_store().primary_name(&rec);
+                            Some((name, rec.importance))
+                        })
+                        .max_by(|a, b| a.1.cmp(&b.1))
+                        .map(|(name, _)| name)
+                });
+                let display = match nearby {
+                    Some(city) => format!("{} — {}", zip5, city),
+                    None => format!("{}, United States", zip5),
+                };
+                response.push(NominatimResult {
+                    place_id: 0,
+                    osm_type: None,
+                    osm_id: None,
+                    display_name: display,
+                    lat: format!("{:.7}", lat),
+                    lon: format!("{:.7}", lon),
+                    place_type: "postcode".to_owned(),
+                    importance: 0.55,
+                    match_type: Some("zip".to_owned()),
+                    address: if params.addressdetails > 0 {
+                        Some(AddressDetails {
+                            house_number: None, road: None, suburb: None,
+                            city: None, town: None, village: None, county: None,
+                            state: None,
+                            postcode: Some(zip5.clone()),
+                            country: Some("United States".to_owned()),
+                            country_code: Some("us".to_owned()),
+                        })
+                    } else { None },
+                });
+                return Ok(Json(response));
             }
         }
     }
@@ -1068,7 +1194,38 @@ async fn search(
     }
 
     let query_text = strip_us_unit_designator(&query_text);
-    let (query_text, _detected_state) = strip_us_state_suffix(&query_text);
+    let (query_text, detected_state) = strip_us_state_suffix(&query_text);
+
+    // If a `, MA`/`, California` suffix was detected, find the matching US
+    // admin1 IDs so we can scope city resolution to that state. Without this
+    // "Springfield, MA" picks Springfield MO (the most-populous Springfield)
+    // and street lookups inside it return Springfield MO street records.
+    // Returns ALL admin entries whose name matches the state — OSM relations
+    // sometimes produce duplicate admin1 entries per state (one each from
+    // different OSM tags), and any record may legitimately reference any of
+    // them. Only meaningful for the US country index — admin1 IDs aren't
+    // comparable across countries.
+    let detected_state_admin1: Option<(usize, Vec<u16>)> = detected_state
+        .as_ref()
+        .and_then(|abbr| us_state_abbr_to_name(abbr))
+        .and_then(|state_name| {
+            for &(ci, country) in &target_countries {
+                if &country.code != b"US" { continue; }
+                let mut ids: Vec<u16> = Vec::new();
+                for entry in country.index.admin_entries() {
+                    if entry.parent_id.is_some() { continue; } // skip US counties
+                    let n = entry.name.to_lowercase();
+                    if n == state_name
+                        || (n.starts_with(state_name)
+                            && n[state_name.len()..].trim_start().starts_with('('))
+                    {
+                        ids.push(entry.id);
+                    }
+                }
+                if !ids.is_empty() { return Some((ci, ids)); }
+            }
+            None
+        });
 
     // ------------------------------------------------------------------
     // City-context disambiguation (Bug A). If the query is "X, Y" we
@@ -1095,7 +1252,44 @@ async fn search(
             if words.len() >= 2
                 && words.last().map(|w| w.chars().next().map(|c| c.is_alphabetic()).unwrap_or(false)).unwrap_or(false)
             {
-                (Some(words.last().unwrap().to_string()), true)
+                // Skip whitespace-anchor when the FULL query already matches
+                // a strong place name. "Las Vegas" → would otherwise anchor
+                // on "Vegas" (the small UT neighbourhood) and city-filter out
+                // Las Vegas NV. Same for "New York" anchoring on "York",
+                // "San Francisco" anchoring on "Francisco". If the full
+                // multi-word string normalizes to a real place with
+                // importance ≥ the trailing word's match, treat the full
+                // string as the canonical and skip the trailing-word anchor.
+                let full_lower = query_text.to_lowercase();
+                let last_lower = words.last().unwrap().to_lowercase();
+                let mut full_imp: u16 = 0;
+                let mut last_imp: u16 = 0;
+                for &(_ci, country) in &target_countries {
+                    let full_cands = country.normalizer.normalize(&full_lower);
+                    for c in &full_cands {
+                        for rid in country.index.exact_lookup_all(c) {
+                            if let Ok(rec) = country.index.record_store().get(rid) {
+                                if rec.importance > full_imp { full_imp = rec.importance; }
+                            }
+                        }
+                    }
+                    let last_cands = country.normalizer.normalize(&last_lower);
+                    for c in &last_cands {
+                        for rid in country.index.exact_lookup_all(c) {
+                            if let Ok(rec) = country.index.record_store().get(rid) {
+                                if rec.importance > last_imp { last_imp = rec.importance; }
+                            }
+                        }
+                    }
+                }
+                // Use the trailing-word anchor only if it's clearly more
+                // prominent than the full-string match. Otherwise the full
+                // string is the canonical name.
+                if full_imp == 0 || last_imp > full_imp + 80 {
+                    (Some(words.last().unwrap().to_string()), true)
+                } else {
+                    (None, false)
+                }
             } else {
                 (None, false)
             }
@@ -1132,18 +1326,48 @@ async fn search(
                 // record-store importance score (population × type ×
                 // wikidata) does the job — major settlements always
                 // outscore farm/locality entries.
+                // When the query carries a state suffix ("Springfield, MA"),
+                // hard-filter to records inside that state so a Springfield in
+                // a different state can't win on raw importance. Without the
+                // filter, MO's Springfield (importance 0.772) outranks MA's
+                // (0.748) and the address pipeline scans the wrong streets.
+                let state_filter_ci = detected_state_admin1.as_ref().map(|(ci, _)| *ci);
+                let state_filter_a1: Option<&Vec<u16>> = detected_state_admin1.as_ref().map(|(_, a1)| a1);
+
                 let mut best: Option<(u16, usize, Option<u16>, Option<u16>, Option<Coord>)> = None;
-                for &(ci, country) in &target_countries {
-                    let candidates = country.normalizer.normalize(&last);
-                    for cand in &candidates {
-                        if let Some(record_id) = country.index.exact_lookup(cand) {
-                            if let Ok(record) = country.index.record_store().get(record_id) {
+                // Also iterate posting-list duplicates so the FST's first hit
+                // for "springfield" doesn't predetermine which Springfield we
+                // anchor on. Without this we'd get one record per name across
+                // all countries, picking by importance — but the FST returns
+                // *one* of the same-name records, not all. The global index
+                // (when loaded) carries postings for every name; check it
+                // first, then fall back to per-country exact lookups.
+                if let Some(ref global) = state.global_index {
+                    let normalizer = target_countries.first().map(|&(_, c)| &c.normalizer);
+                    if let Some(norm) = normalizer {
+                        let cands = norm.normalize(&last);
+                        for cand in &cands {
+                            let postings = global.exact_lookup(cand);
+                            for posting in &postings {
+                                let ci = posting.country_id as usize;
+                                if let Some(ref filter_ci) = state_filter_ci {
+                                    if ci != *filter_ci { continue; }
+                                }
+                                let country = match state.countries.get(ci) {
+                                    Some(c) => c, None => continue,
+                                };
+                                let record = match country.index.record_store().get(posting.record_id) {
+                                    Ok(r) => r, Err(_) => continue,
+                                };
                                 if settlement_only {
                                     let is_settlement = matches!(record.place_type,
                                         PlaceType::City | PlaceType::Town | PlaceType::Village
                                             | PlaceType::Hamlet | PlaceType::Suburb
                                             | PlaceType::Quarter | PlaceType::Neighbourhood);
                                     if !is_settlement { continue; }
+                                }
+                                if let Some(want_a1) = state_filter_a1 {
+                                    if !want_a1.contains(&record.admin1_id) { continue; }
                                 }
                                 let imp = record.importance;
                                 if best.as_ref().map(|(b, _, _, _, _)| imp > *b).unwrap_or(true) {
@@ -1155,8 +1379,77 @@ async fn search(
                         }
                     }
                 }
+                for &(ci, country) in &target_countries {
+                    if let Some(ref filter_ci) = state_filter_ci {
+                        if ci != *filter_ci { continue; }
+                    }
+                    let candidates = country.normalizer.normalize(&last);
+                    for cand in &candidates {
+                        if let Some(record_id) = country.index.exact_lookup(cand) {
+                            if let Ok(record) = country.index.record_store().get(record_id) {
+                                if settlement_only {
+                                    let is_settlement = matches!(record.place_type,
+                                        PlaceType::City | PlaceType::Town | PlaceType::Village
+                                            | PlaceType::Hamlet | PlaceType::Suburb
+                                            | PlaceType::Quarter | PlaceType::Neighbourhood);
+                                    if !is_settlement { continue; }
+                                }
+                                if let Some(want_a1) = state_filter_a1 {
+                                    if !want_a1.contains(&record.admin1_id) { continue; }
+                                }
+                                let imp = record.importance;
+                                if best.as_ref().map(|(b, _, _, _, _)| imp > *b).unwrap_or(true) {
+                                    let a1 = if record.admin1_id > 0 { Some(record.admin1_id) } else { None };
+                                    let a2 = if record.admin2_id > 0 { Some(record.admin2_id) } else { None };
+                                    best = Some((imp, ci, a1, a2, Some(record.coord)));
+                                }
+                            }
+                        }
+                        // When state-filtered we also need to scan the
+                        // posting-list sidecar — exact_lookup returns ONE
+                        // record_id per name; same-named records (every
+                        // Springfield) live as siblings.
+                        if state_filter_a1.is_some() {
+                            for record_id in country.index.exact_lookup_all(cand) {
+                                if let Ok(record) = country.index.record_store().get(record_id) {
+                                    if settlement_only {
+                                        let is_settlement = matches!(record.place_type,
+                                            PlaceType::City | PlaceType::Town | PlaceType::Village
+                                                | PlaceType::Hamlet | PlaceType::Suburb
+                                                | PlaceType::Quarter | PlaceType::Neighbourhood);
+                                        if !is_settlement { continue; }
+                                    }
+                                    if let Some(want_a1) = state_filter_a1 {
+                                        if !want_a1.contains(&record.admin1_id) { continue; }
+                                    }
+                                    let imp = record.importance;
+                                    if best.as_ref().map(|(b, _, _, _, _)| imp > *b).unwrap_or(true) {
+                                        let a1 = if record.admin1_id > 0 { Some(record.admin1_id) } else { None };
+                                        let a2 = if record.admin2_id > 0 { Some(record.admin2_id) } else { None };
+                                        best = Some((imp, ci, a1, a2, Some(record.coord)));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 if let Some((_, ci, a1, a2, coord)) = best {
                     ctx = Some((Some(ci), a1, a2, coord));
+                }
+            }
+        }
+        // Even with no last-token to anchor on (e.g. a single-word "Springfield"
+        // followed by a state suffix), the detected state is itself enough
+        // context to break ambiguity. This also gives the rerank loop below
+        // an admin1 anchor for queries like "Springfield, MA" that would
+        // otherwise put MO at the top by raw importance.
+        if ctx.is_none() {
+            if let Some((ci, ref a1s)) = detected_state_admin1 {
+                if let Some(&a1) = a1s.first() {
+                    let coord = state.countries.get(ci)
+                        .and_then(|c| c.index.admin_entry(a1))
+                        .map(|e| e.coord);
+                    ctx = Some((Some(ci), Some(a1), None, coord));
                 }
             }
         }
@@ -1281,8 +1574,16 @@ async fn search(
         // Address parsing
         if let Some(ref addr_index) = country.addr_index {
             if let Some(addr_query) = parse_address_query(&query_text) {
+                // If the user named a state ("..., MA" / "..., DC"), scope
+                // the city resolution to that state. Without this, "Main St,
+                // Springfield, MA" resolves "Springfield" to MO and looks up
+                // streets in the wrong city.
+                let state_a1: Option<&[u16]> = detected_state_admin1
+                    .as_ref()
+                    .filter(|(filter_ci, _)| *filter_ci == ci)
+                    .map(|(_, a1)| a1.as_slice());
                 let (mut muni_id, mut city_coord) = if let Some(city) = &addr_query.city {
-                    resolve_city(city, country, ci, &country.normalizer, state.global_index.as_ref())
+                    resolve_city_with_state(city, country, ci, &country.normalizer, state.global_index.as_ref(), state_a1)
                 } else {
                     (None, None)
                 };
@@ -1322,7 +1623,26 @@ async fn search(
                     }
                 }
 
-                let addr_results = addr_index.lookup(&addr_query, muni_id, city_coord);
+                // The addr FST keys are normalized at build time
+                // ("avenue" → "ave"); the user's "Pennsylvania Avenue"
+                // wouldn't match "pennsylvania ave:DC_id". Try every
+                // normalized variant of the street and merge the best
+                // result. Trying all variants is cheap because each is one
+                // FST lookup.
+                let street_cands_for_addr = country.normalizer.normalize(&addr_query.street);
+                let mut addr_results: Vec<heimdall_core::addr_index::AddrResult> = Vec::new();
+                for sc in &street_cands_for_addr {
+                    let mut variant = addr_query.clone();
+                    variant.street = sc.clone();
+                    let r = addr_index.lookup(&variant, muni_id, city_coord);
+                    if !r.is_empty() {
+                        addr_results = r;
+                        break;
+                    }
+                }
+                if addr_results.is_empty() {
+                    addr_results = addr_index.lookup(&addr_query, muni_id, city_coord);
+                }
                 let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
                 for (i, r) in addr_results.into_iter().enumerate() {
                     response.push(NominatimResult {
@@ -1350,7 +1670,11 @@ async fn search(
             // Street-only lookup
             if let Some((street, city_str)) = parse_street_query(&query_text) {
                 let street_normalized = country.normalizer.normalize(&street);
-                let (muni_id, city_coord) = resolve_city(&city_str, country, ci, &country.normalizer, state.global_index.as_ref());
+                let state_a1: Option<&[u16]> = detected_state_admin1
+                    .as_ref()
+                    .filter(|(filter_ci, _)| *filter_ci == ci)
+                    .map(|(_, a1)| a1.as_slice());
+                let (muni_id, city_coord) = resolve_city_with_state(&city_str, country, ci, &country.normalizer, state.global_index.as_ref(), state_a1);
 
                 let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
                 for s in &street_normalized {
@@ -1425,7 +1749,11 @@ async fn search(
                     false
                 }) {
                     let street_normalized = norm.normalize(&street);
-                    let (muni_id, city_coord) = resolve_city(&city_str, country, ci, norm, global_ref);
+                    let state_a1: Option<&[u16]> = detected_state_admin1
+                        .as_ref()
+                        .filter(|(filter_ci, _)| *filter_ci == ci_copy)
+                        .map(|(_, a1)| a1.as_slice());
+                    let (muni_id, city_coord) = resolve_city_with_state(&city_str, country, ci, norm, global_ref, state_a1);
 
                     let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
                     for s in &street_normalized {
@@ -1734,7 +2062,7 @@ async fn search(
                 let (ci, rid) = decode_place_id(r.place_id);
                 if let Some(country) = state.countries.get(ci) {
                     if let Ok(rec) = country.index.record_store().get(rid) {
-                        return city_context_tier(
+                        let tier = city_context_tier(
                             ci,
                             rec.admin1_id,
                             rec.admin2_id,
@@ -1744,6 +2072,21 @@ async fn search(
                             ctx_a2,
                             ctx_coord,
                         );
+                        // city_context only carries ONE admin1 id; OSM
+                        // sometimes produces multiple admin1 entries per
+                        // US state (e.g. Texas has both id=57 and id=58
+                        // because two OSM relations match). Treat any
+                        // detected_state_admin1 hit as tier 2 (same state)
+                        // even when the canonical city_context.a1 happened
+                        // to pick the other duplicate.
+                        if tier < 2 {
+                            if let Some((det_ci, ref a1_set)) = detected_state_admin1 {
+                                if det_ci == ci && a1_set.contains(&rec.admin1_id) {
+                                    return 2;
+                                }
+                            }
+                        }
+                        return tier;
                     }
                 }
             }
@@ -1780,11 +2123,22 @@ async fn search(
     // (Nacka Strand, Skara Sommarland, Höga Kusten) — not "place IN
     // city". The whitespace city-context heuristic shouldn't override
     // a verbatim hit.
+    // When the query explicitly named a US state ("Springfield, MA"), the
+    // exact-match exception below is too lenient — Springfield MO still
+    // wins because its name matches character-for-character. With an
+    // explicit state, we want a hard filter: drop everything that doesn't
+    // hit tier ≥ 2 (same admin1). Without an explicit state, keep the
+    // exact-match exception so "Stortorget Göteborg" still surfaces a
+    // verbatim "Stortorget" hit even if it sits outside Göteborg.
     let mut paired: Vec<(NominatimResult, u8)> = response
         .into_iter()
         .zip(response_tiers.into_iter())
         .filter(|(r, t)| {
             if city_context.is_none() { return true; }
+            if detected_state.is_some() {
+                // Explicit state suffix → only same-state results survive.
+                return *t >= 2;
+            }
             if *t > 0 { return true; }
             matches!(r.match_type.as_deref(), Some("exact" | "address" | "street"))
         })
@@ -2534,10 +2888,22 @@ fn strip_us_state_suffix(s: &str) -> (String, Option<String>) {
 
     let words: Vec<&str> = trimmed.split_whitespace().collect();
     if words.len() >= 2 {
+        // Trailing 2-letter abbreviation: "Portland OR".
         let last = words[words.len() - 1];
         if last.len() == 2 && last.chars().all(|c| c.is_ascii_alphabetic()) {
             if let Some(abbr) = match_us_state(last) {
                 let rest = words[..words.len()-1].join(" ");
+                return (rest, Some(abbr));
+            }
+        }
+        // Trailing full state name — try increasingly-many trailing words
+        // so multi-word names ("New York", "North Carolina", "District of
+        // Columbia") match too. Accept the longest match (3 words first,
+        // then 2, then 1) to not strip "York" out of "New York".
+        for take in (1..=3.min(words.len() - 1)).rev() {
+            let cand = words[words.len() - take..].join(" ");
+            if let Some(abbr) = match_us_state(&cand) {
+                let rest = words[..words.len() - take].join(" ");
                 return (rest, Some(abbr));
             }
         }
@@ -2554,33 +2920,64 @@ fn match_us_state(s: &str) -> Option<String> {
         "IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH",
         "NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT",
         "VT","VA","WA","WV","WI","WY",
+        // Territories the US Postal Service ships to with two-letter codes.
+        "PR","VI","GU","AS","MP",
     ];
     if ABBREVS.contains(&upper.as_str()) {
         return Some(upper);
     }
 
-    let lower = s.trim().to_lowercase();
-    let mapping: &[(&str, &str)] = &[
-        ("alabama","AL"),("alaska","AK"),("arizona","AZ"),("arkansas","AR"),
-        ("california","CA"),("colorado","CO"),("connecticut","CT"),("delaware","DE"),
-        ("district of columbia","DC"),("florida","FL"),("georgia","GA"),("hawaii","HI"),
-        ("idaho","ID"),("illinois","IL"),("indiana","IN"),("iowa","IA"),
-        ("kansas","KS"),("kentucky","KY"),("louisiana","LA"),("maine","ME"),
-        ("maryland","MD"),("massachusetts","MA"),("michigan","MI"),("minnesota","MN"),
-        ("mississippi","MS"),("missouri","MO"),("montana","MT"),("nebraska","NE"),
-        ("nevada","NV"),("new hampshire","NH"),("new jersey","NJ"),("new mexico","NM"),
-        ("new york","NY"),("north carolina","NC"),("north dakota","ND"),("ohio","OH"),
-        ("oklahoma","OK"),("oregon","OR"),("pennsylvania","PA"),("rhode island","RI"),
-        ("south carolina","SC"),("south dakota","SD"),("tennessee","TN"),("texas","TX"),
-        ("utah","UT"),("vermont","VT"),("virginia","VA"),("washington","WA"),
-        ("west virginia","WV"),("wisconsin","WI"),("wyoming","WY"),
-    ];
-    for (name, abbr) in mapping {
-        if lower == *name {
-            return Some(abbr.to_string());
+    for (name, abbr) in US_STATE_NAME_TO_ABBR {
+        if upper.eq_ignore_ascii_case(name) {
+            return Some((*abbr).to_string());
         }
     }
 
+    None
+}
+
+/// State/territory abbreviation → canonical full name. Used to translate the
+/// detected `, MA` suffix back into the admin1 name we'll find in admin.bin.
+const US_STATE_NAME_TO_ABBR: &[(&str, &str)] = &[
+    ("alabama","AL"),("alaska","AK"),("arizona","AZ"),("arkansas","AR"),
+    ("california","CA"),("colorado","CO"),("connecticut","CT"),("delaware","DE"),
+    ("district of columbia","DC"),("washington d.c.","DC"),("washington dc","DC"),
+    ("florida","FL"),("georgia","GA"),("hawaii","HI"),("hawaiʻi","HI"),
+    ("idaho","ID"),("illinois","IL"),("indiana","IN"),("iowa","IA"),
+    ("kansas","KS"),("kentucky","KY"),("louisiana","LA"),("maine","ME"),
+    ("maryland","MD"),("massachusetts","MA"),("michigan","MI"),("minnesota","MN"),
+    ("mississippi","MS"),("missouri","MO"),("montana","MT"),("nebraska","NE"),
+    ("nevada","NV"),("new hampshire","NH"),("new jersey","NJ"),("new mexico","NM"),
+    ("new york","NY"),("north carolina","NC"),("north dakota","ND"),("ohio","OH"),
+    ("oklahoma","OK"),("oregon","OR"),("pennsylvania","PA"),("rhode island","RI"),
+    ("south carolina","SC"),("south dakota","SD"),("tennessee","TN"),("texas","TX"),
+    ("utah","UT"),("vermont","VT"),("virginia","VA"),("washington","WA"),
+    ("west virginia","WV"),("wisconsin","WI"),("wyoming","WY"),
+    ("puerto rico","PR"),("virgin islands","VI"),("u.s. virgin islands","VI"),
+    ("guam","GU"),("american samoa","AS"),("northern mariana islands","MP"),
+];
+
+/// Reverse: full state name → 2-letter postal abbreviation (the form most
+/// US users expect to see in addresses). Used to render `12345 — City, MA`
+/// instead of `12345 — City, Massachusetts`.
+fn abbreviate_us_state(name: &str) -> Option<String> {
+    let lower = name.trim().to_lowercase();
+    for (n, abbr) in US_STATE_NAME_TO_ABBR {
+        if lower == *n { return Some((*abbr).to_string()); }
+    }
+    None
+}
+
+/// Reverse: state abbreviation → primary state name (lowercase).
+fn us_state_abbr_to_name(abbr: &str) -> Option<&'static str> {
+    let up = abbr.to_uppercase();
+    // The first entry per abbreviation in the list above is the primary
+    // (canonical) name — return that one.
+    for (name, a) in US_STATE_NAME_TO_ABBR {
+        if *a == up.as_str() {
+            return Some(*name);
+        }
+    }
     None
 }
 

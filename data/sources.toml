@@ -165,8 +165,44 @@ md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/us/
 
 # TIGER/Line 2025 for admin boundaries + ZIP codes (downloaded by tiger-import)
 # OpenAddresses for address data (downloaded by oa-import)
+#
+# In addition to the original 4 TIGER pulls (STATE, COUNTY, ZCTA, PLACE),
+# `run_tiger_import` now downloads:
+#   - COUSUB per strong-MCD state (towns / townships)
+#   - AIANNH national (tribal areas)
+#   - Census Gazetteer 2024 counties (county populations)
+#   - simplemaps US ZIPs CSV (HUD-equivalent ZIP → city crosswalk)
+# All four are best-effort: a failed download warns and the build
+# continues with the remaining sources.
 [country.us.national]
 type = "tiger_oa"
+
+# Augmenting TIGER sources used by `run_tiger_import`. URLs are
+# documentation-only — the importer hardcodes them so it can manage
+# per-state downloads (COUSUB) and best-effort fallbacks itself.
+[country.us.tiger]
+base_url = "https://www2.census.gov/geo/tiger/TIGER2025"
+gazetteer_counties_url = "https://www2.census.gov/geo/docs/maps-data/data/gazetteer/2024_Gazetteer/2024_Gaz_counties_national.zip"
+aiannh_url = "https://www2.census.gov/geo/tiger/TIGER2025/AIANNH/tl_2025_us_aiannh.zip"
+# COUSUB downloaded per state: <base_url>/COUSUB/tl_2025_<STATEFP>_cousub.zip
+# (only fetched for the 21 strong-MCD states — see STRONG_MCD_STATE_FIPS
+# in tiger.rs).
+
+# HUD USPS ZIP-County Crosswalk → ZIP / city / county address-share table.
+# We default to simplemaps' free CC BY 4.0 mirror because the HUD API
+# requires email registration and the public XLSX URLs change quarterly.
+# Switch `type` to "hud" when running with a registered HUD token.
+[country.us.zip_crosswalk]
+type = "simplemaps_uszips"
+url = "https://simplemaps.com/static/data/us-zips/1.91/basic/simplemaps_uszips_basicv1.91.zip"
+
+# USGS GNIS Domestic Names — US federal authoritative gazetteer, ~1M+
+# named features (populated places, schools, churches, cemeteries, summits,
+# lakes, streams, parks, hospitals, airports, bridges). Public domain.
+# Update cadence: rolling (USGS BGN updates monthly).
+[country.us.places_source]
+type = "gnis"
+url = "https://prd-tnm.s3.amazonaws.com/StagedProducts/GeographicNames/DomesticNames/DomesticNames_National_Text.zip"
 tiger_base_url = "https://www2.census.gov/geo/tiger/TIGER2025"
 oa_base_url = "https://data.openaddresses.io/openaddr-collected-us_northeast.zip"
 

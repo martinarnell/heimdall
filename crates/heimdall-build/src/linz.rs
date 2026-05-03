@@ -441,6 +441,7 @@ fn parse_row(row: RawRow) -> Option<RawAddress> {
         housenumber,
         postcode,
         city,
+        state: None,
         lat,
         lon,
     })

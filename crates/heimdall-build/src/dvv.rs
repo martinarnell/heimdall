@@ -166,6 +166,7 @@ fn parse_geojson_page(
             housenumber,
             postcode,
             city,
+            state: None,
             lat,
             lon,
         });

@@ -444,6 +444,7 @@ fn load_and_join_addresses(
                 housenumber,
                 postcode,
                 city,
+                state: None,
                 lat,
                 lon,
             });

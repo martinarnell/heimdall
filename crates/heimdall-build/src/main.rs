@@ -36,8 +36,10 @@ mod rebuild;
 mod ssr;
 mod dagi;
 mod gn250;
+mod gnis;
 mod bdtopo;
 mod tiger;
+mod hud;
 mod oa;
 mod gnaf;
 mod nar;
@@ -202,6 +204,17 @@ enum Commands {
         /// Path to GN250.csv (extracted from gn250.utm32s.csv.zip)
         #[arg(long)]
         csv: PathBuf,
+    },
+
+    /// Merge USGS GNIS Domestic Names into existing OSM places (US)
+    GnisImport {
+        /// Path to index directory (must contain places.parquet)
+        #[arg(short, long)]
+        index: PathBuf,
+
+        /// Path to GNIS distribution ZIP or pre-extracted .txt file
+        #[arg(long)]
+        gnis_input: PathBuf,
     },
 
     /// Merge Photon JSONL dump into an existing index (places + addresses)
@@ -846,6 +859,37 @@ fn main() -> Result<()> {
             );
         }
 
+        Commands::GnisImport { index, gnis_input } => {
+            // Accept either a GNIS .zip distribution or a pre-extracted .txt.
+            let txt_path = if gnis_input
+                .extension()
+                .map_or(false, |e| e.eq_ignore_ascii_case("zip"))
+            {
+                gnis::extract_gnis_txt_from_zip(&gnis_input)?
+            } else {
+                gnis_input.clone()
+            };
+
+            let gnis_places = gnis::read_gnis_places(&txt_path)?;
+
+            let places_parquet = index.join("places.parquet");
+            let osm_places = if places_parquet.exists() {
+                info!("Reading existing places...");
+                read_osm_places(&places_parquet)?
+            } else {
+                vec![]
+            };
+
+            let merged = gnis::merge_gnis_places(&osm_places, &gnis_places);
+
+            info!("Writing merged places.parquet...");
+            photon::write_places_parquet(&merged, &places_parquet)?;
+            info!(
+                "Done! {} total ({} existing + {} GNIS new). Run 'build --skip-extract' to rebuild.",
+                merged.len(), osm_places.len(), merged.len() - osm_places.len(),
+            );
+        }
+
         Commands::MergeDagi { index, json } => {
             let dagi_places = dagi::read_dagi_places(&json)?;
 
@@ -1153,10 +1197,12 @@ fn main() -> Result<()> {
             info!("Starting TIGER/Line 2025 import...");
             let result = tiger::run_tiger_import(&output)?;
             info!("TIGER import complete!");
-            info!("  States:  {}", result.state_count);
-            info!("  Counties: {}", result.county_count);
-            info!("  Places:  {}", result.place_count);
-            info!("  ZIPs:    {}", result.zip_count);
+            info!("  States:        {}", result.state_count);
+            info!("  Counties:      {} ({} with Gazetteer pop)", result.county_count, result.county_pop_count);
+            info!("  Places:        {}", result.place_count);
+            info!("  ZIPs:          {} ({} reassigned via HUD/simplemaps)", result.zip_count, result.hud_updated_count);
+            info!("  Cousubs:       {}", result.cousub_count);
+            info!("  AIANNH areas:  {}", result.aiannh_count);
         }
 
         Commands::OaImport { output, local } => {
@@ -1950,6 +1996,9 @@ pub(crate) fn read_osm_addresses(parquet_path: &Path) -> Result<Vec<extract::Raw
             .as_any().downcast_ref::<StringArray>().unwrap();
         let cities = batch.column_by_name("city").unwrap()
             .as_any().downcast_ref::<StringArray>().unwrap();
+        // `state` is optional — older parquet files predate the column.
+        let states = batch.column_by_name("state")
+            .and_then(|c| c.as_any().downcast_ref::<StringArray>());
         let lats = batch.column_by_name("lat").unwrap()
             .as_any().downcast_ref::<Float64Array>().unwrap();
         let lons = batch.column_by_name("lon").unwrap()
@@ -1962,6 +2011,7 @@ pub(crate) fn read_osm_addresses(parquet_path: &Path) -> Result<Vec<extract::Raw
                 housenumber: housenumbers.value(i).to_owned(),
                 postcode: if postcodes.is_null(i) { None } else { Some(postcodes.value(i).to_owned()) },
                 city: if cities.is_null(i) { None } else { Some(cities.value(i).to_owned()) },
+                state: states.and_then(|s| if s.is_null(i) { None } else { Some(s.value(i).to_owned()) }),
                 lat: lats.value(i),
                 lon: lons.value(i),
             });
@@ -1982,6 +2032,7 @@ pub(crate) fn write_merged_addresses(addresses: &[extract::RawAddress], path: &P
         Field::new("housenumber", DataType::Utf8, false),
         Field::new("postcode", DataType::Utf8, true),
         Field::new("city", DataType::Utf8, true),
+        Field::new("state", DataType::Utf8, true),
         Field::new("lat", DataType::Float64, false),
         Field::new("lon", DataType::Float64, false),
     ]));
@@ -2000,6 +2051,7 @@ pub(crate) fn write_merged_addresses(addresses: &[extract::RawAddress], path: &P
                 Arc::new(StringArray::from(chunk.iter().map(|a| a.housenumber.as_str()).collect::<Vec<_>>())),
                 Arc::new(StringArray::from(chunk.iter().map(|a| a.postcode.as_deref()).collect::<Vec<Option<&str>>>())),
                 Arc::new(StringArray::from(chunk.iter().map(|a| a.city.as_deref()).collect::<Vec<Option<&str>>>())),
+                Arc::new(StringArray::from(chunk.iter().map(|a| a.state.as_deref()).collect::<Vec<Option<&str>>>())),
                 Arc::new(Float64Array::from(chunk.iter().map(|a| a.lat).collect::<Vec<_>>())),
                 Arc::new(Float64Array::from(chunk.iter().map(|a| a.lon).collect::<Vec<_>>())),
             ],

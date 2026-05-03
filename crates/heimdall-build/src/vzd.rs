@@ -134,6 +134,7 @@ pub fn read_vzd_addresses(csv_path: &Path) -> Result<Vec<RawAddress>> {
             housenumber: number,
             postcode,
             city,
+            state: None,
             lat,
             lon,
         });

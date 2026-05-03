@@ -588,6 +588,11 @@ impl HeimdallIndex {
         self.admin.get(id as usize)
     }
 
+    /// All admin entries (for building a name → id lookup at API startup).
+    pub fn admin_entries(&self) -> &[AdminEntry] {
+        &self.admin
+    }
+
     /// Access the underlying record store (for reverse geocoding).
     pub fn record_store(&self) -> &RecordStore {
         &self.records

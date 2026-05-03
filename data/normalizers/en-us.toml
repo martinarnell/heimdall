@@ -1,12 +1,25 @@
-# US English place name normalizer
-# Street type abbreviations, directionals, city nicknames, state stopwords.
-# No phonetic encoding — US English doesn't benefit from Nordic/German phonetic schemes.
+# US English place name normalizer.
+#
+# Covers USPS Pub 28 street-type abbreviations (the canonical mapping the
+# Postal Service uses to standardise addresses), directionals (cardinal +
+# ordinal), state names ↔ abbreviations, ordinal numbers (1st/first), and
+# a long-tail of city nicknames + historical names.
+#
+# No phonetic encoding — US English doesn't benefit from the Nordic /
+# German phonetic schemes. ASCII normalization handles diacritics in
+# Spanish/Hawaiian-origin names (San José, Hawaiʻi, etc.).
 
 [phonetic]
 engine = "none"
 
+# ---------------------------------------------------------------------------
+# Abbreviations — long form → canonical short form
+# ---------------------------------------------------------------------------
+# USPS street-type table (Pub 28). The user types either form and the
+# normalizer collapses to the short form so the FST sees a single
+# canonical key.
 [abbreviations]
-# Street type abbreviations (normalize long → short canonical form)
+# Core street types
 "street" = "st"
 "avenue" = "ave"
 "boulevard" = "blvd"
@@ -23,7 +36,50 @@ engine = "none"
 "expressway" = "expy"
 "freeway" = "fwy"
 "alley" = "aly"
-# Also handle abbreviated input → canonical short
+"way" = "way"
+"square" = "sq"
+"plaza" = "plz"
+"crossing" = "xing"
+"crescent" = "cres"
+"loop" = "loop"
+"path" = "path"
+"pike" = "pike"
+"bridge" = "brg"
+"tunnel" = "tunl"
+"viaduct" = "vis"
+"junction" = "jct"
+"bypass" = "byp"
+"extension" = "ext"
+"gateway" = "gtwy"
+"harbor" = "hbr"
+"harbour" = "hbr"
+"heights" = "hts"
+"hollow" = "holw"
+"island" = "is"
+"key" = "ky"
+"landing" = "lndg"
+"manor" = "mnr"
+"meadows" = "mdws"
+"mews" = "mews"
+"pass" = "pass"
+"point" = "pt"
+"port" = "prt"
+"ranch" = "rnch"
+"ridge" = "rdg"
+"river" = "riv"
+"run" = "run"
+"shore" = "shr"
+"spur" = "spur"
+"summit" = "smt"
+"turnpike" = "tpke"
+"view" = "vw"
+"valley" = "vly"
+"village" = "vlg"
+"vista" = "vis"
+"oval" = "oval"
+"row" = "row"
+
+# Dot-suffix variants (canonical-collapse to short form)
 "st." = "st"
 "ave." = "ave"
 "blvd." = "blvd"
@@ -37,8 +93,14 @@ engine = "none"
 "cir." = "cir"
 "ter." = "ter"
 "trl." = "trl"
+"sq." = "sq"
+"plz." = "plz"
+"jct." = "jct"
+"hts." = "hts"
+"pt." = "pt"
+"vlg." = "vlg"
 
-# Directional abbreviations (normalize long → short)
+# Directionals (long → short)
 "north" = "n"
 "south" = "s"
 "east" = "e"
@@ -51,60 +113,243 @@ engine = "none"
 "s." = "s"
 "e." = "e"
 "w." = "w"
+"ne." = "ne"
+"nw." = "nw"
+"se." = "se"
+"sw." = "sw"
 
-# Common US-specific abbreviations
+# US-specific contractions
 "mount" = "mt"
 "fort" = "ft"
 "saint" = "st"
+"sainte" = "ste"
 "mt." = "mt"
 "ft." = "ft"
+"ste." = "ste"
+"rev." = "rev"
+"dr" = "dr"     # title; same canonical as drive (both 'dr')
 
+# Common ordinals — both word and digit forms collapse to digit form so
+# "1st Ave" and "First Ave" hit the same FST key.
+"first" = "1st"
+"second" = "2nd"
+"third" = "3rd"
+"fourth" = "4th"
+"fifth" = "5th"
+"sixth" = "6th"
+"seventh" = "7th"
+"eighth" = "8th"
+"ninth" = "9th"
+"tenth" = "10th"
+"eleventh" = "11th"
+"twelfth" = "12th"
+"thirteenth" = "13th"
+"fourteenth" = "14th"
+"fifteenth" = "15th"
+"sixteenth" = "16th"
+"seventeenth" = "17th"
+"eighteenth" = "18th"
+"nineteenth" = "19th"
+"twentieth" = "20th"
+
+# State name expansion intentionally NOT in [abbreviations]: that section
+# rewrites every matching token wherever it appears, which would munge
+# street names like "Pennsylvania Avenue" → "PA Avenue" or "Texas
+# Highway" → "TX Highway". The API layer's `strip_us_state_suffix` /
+# `match_us_state` handles state names *only* in the trailing-suffix
+# position, which is the only place they're unambiguous.
+
+# ---------------------------------------------------------------------------
+# Stopwords — words to drop from the candidate stream so they don't
+# pollute the FST lookup as a separate token.
+# ---------------------------------------------------------------------------
 [stopwords]
 words = [
     "united states",
     "united states of america",
     "usa",
+    "u.s.a.",
+    "u.s.",
     "us",
     "america",
+    "the",
+    "city of",
+    "county of",
+    "borough of",
+    "township of",
+    "village of",
+    "town of",
+    "state of",
+    "commonwealth of",
 ]
 
+# ---------------------------------------------------------------------------
+# Known variants — alternate spellings, nicknames, historical names.
+# Maps an alternate form to the canonical form used in the index.
+# ---------------------------------------------------------------------------
 [known_variants]
-# City nicknames → canonical
+# Major-city nicknames
 "nyc" = "new york"
-"la" = "los angeles"
-"dc" = "washington"
-"sf" = "san francisco"
-"chi" = "chicago"
-"philly" = "philadelphia"
-"vegas" = "las vegas"
-"nola" = "new orleans"
-"atl" = "atlanta"
-"bmore" = "baltimore"
-"det" = "detroit"
-"stl" = "st louis"
-"kc" = "kansas city"
-"slc" = "salt lake city"
-"lv" = "las vegas"
-"dfw" = "dallas"
-"jax" = "jacksonville"
-"msp" = "minneapolis"
-"pdx" = "portland"
-"sea" = "seattle"
-# Historic / alternate names
-"new amsterdam" = "new york"
+"ny" = "new york"
 "big apple" = "new york"
-"the big easy" = "new orleans"
-"sin city" = "las vegas"
-"motor city" = "detroit"
-"windy city" = "chicago"
-"mile high city" = "denver"
-"charm city" = "baltimore"
-"steel city" = "pittsburgh"
-"city of angels" = "los angeles"
+"new amsterdam" = "new york"
+"the city" = "new york"
 
+"la" = "los angeles"
+"l.a." = "los angeles"
+"city of angels" = "los angeles"
+"pueblo de los angeles" = "los angeles"
+
+"dc" = "washington"
+"d.c." = "washington"
+"the district" = "washington"
+"the capital" = "washington"
+
+"sf" = "san francisco"
+"s.f." = "san francisco"
+"frisco" = "san francisco"
+"yerba buena" = "san francisco"
+
+"chi" = "chicago"
+"chitown" = "chicago"
+"chi-town" = "chicago"
+"windy city" = "chicago"
+"second city" = "chicago"
+"fort dearborn" = "chicago"
+
+"philly" = "philadelphia"
+"philadelphia pa" = "philadelphia"
+
+"vegas" = "las vegas"
+"lv" = "las vegas"
+"sin city" = "las vegas"
+"the strip" = "las vegas"
+
+"nola" = "new orleans"
+"n.o." = "new orleans"
+"the big easy" = "new orleans"
+"crescent city" = "new orleans"
+
+"atl" = "atlanta"
+"hotlanta" = "atlanta"
+
+"bmore" = "baltimore"
+"b'more" = "baltimore"
+"charm city" = "baltimore"
+
+"det" = "detroit"
+"motor city" = "detroit"
+"motown" = "detroit"
+
+"stl" = "st louis"
+"st. louis" = "st louis"
+"saint louis" = "st louis"
+
+"kc" = "kansas city"
+"k.c." = "kansas city"
+
+"slc" = "salt lake city"
+
+"dfw" = "dallas"
+"big d" = "dallas"
+
+"jax" = "jacksonville"
+
+"msp" = "minneapolis"
+"twin cities" = "minneapolis"
+"minneapolis-saint paul" = "minneapolis"
+
+"pdx" = "portland"
+
+"sea" = "seattle"
+"emerald city" = "seattle"
+"seatown" = "seattle"
+
+"den" = "denver"
+"mile high city" = "denver"
+"the mile high" = "denver"
+
+"phx" = "phoenix"
+
+"tampa bay" = "tampa"
+"st pete" = "saint petersburg"
+"st. pete" = "saint petersburg"
+"saint pete" = "saint petersburg"
+
+"steel city" = "pittsburgh"
+"the burgh" = "pittsburgh"
+"fort pitt" = "pittsburgh"
+
+"queen city" = "charlotte"
+"charlotte nc" = "charlotte"
+
+"music city" = "nashville"
+"nash" = "nashville"
+
+"the alamo city" = "san antonio"
+"satx" = "san antonio"
+
+"inland empire" = "riverside"
+
+"silicon valley" = "san jose"
+"capital of silicon valley" = "san jose"
+
+"cleveland oh" = "cleveland"
+"the land" = "cleveland"
+
+"cinci" = "cincinnati"
+"the queen city" = "cincinnati"
+
+"beantown" = "boston"
+"hub" = "boston"
+
+"buff" = "buffalo"
+"queen city of the lakes" = "buffalo"
+
+"providence ri" = "providence"
+
+# Common typos → canonical
+"pittsburg pa" = "pittsburgh"
+"cincinatti" = "cincinnati"
+"albuqerque" = "albuquerque"
+"alburquerque" = "albuquerque"
+"conneticut" = "connecticut"
+"masachusetts" = "massachusetts"
+"misissippi" = "mississippi"
+"tenessee" = "tennessee"
+"phillidelphia" = "philadelphia"
+"phildelphia" = "philadelphia"
+"sanfrancisco" = "san francisco"
+"newyork" = "new york"
+"losangeles" = "los angeles"
+"lasvegas" = "las vegas"
+"sandiego" = "san diego"
+
+# Borough / neighbourhood synonyms
+"the bronx" = "bronx"
+"the heights" = "washington heights"
+"back bay" = "boston"
+
+# Region nicknames (resolve to representative city / area)
+"dmv" = "washington"
+"socal" = "los angeles"
+"norcal" = "san francisco"
+"east bay" = "oakland"
+"south bay" = "san jose"
+"north bay" = "san rafael"
+"silicon beach" = "santa monica"
+
+# State name → state name (canonical-form synonyms)
+"washington d.c." = "district of columbia"
+"washington dc" = "district of columbia"
+
+# ---------------------------------------------------------------------------
+# Diacritics — normalise to ASCII equivalents so users can search
+# Spanish-origin / Hawaiian / Native American place names without typing
+# the marked letters.
+# ---------------------------------------------------------------------------
 [diacritics]
-# US English is ASCII — no diacritics needed
-# But handle occasional accented imports (café → cafe, naïve → naive)
+# Romance-language vowels
 "é" = "e"
 "è" = "e"
 "ê" = "e"
@@ -113,6 +358,8 @@ words = [
 "à" = "a"
 "â" = "a"
 "ä" = "a"
+"ã" = "a"
+"å" = "a"
 "í" = "i"
 "ì" = "i"
 "î" = "i"
@@ -121,9 +368,39 @@ words = [
 "ò" = "o"
 "ô" = "o"
 "ö" = "o"
+"õ" = "o"
 "ú" = "u"
 "ù" = "u"
 "û" = "u"
 "ü" = "u"
 "ñ" = "n"
 "ç" = "c"
+"ý" = "y"
+"ÿ" = "y"
+"æ" = "ae"
+"œ" = "oe"
+"ø" = "o"
+# Hawaiian — kahakō (macron-marked vowels)
+"ā" = "a"
+"ē" = "e"
+"ī" = "i"
+"ō" = "o"
+"ū" = "u"
+"Ā" = "a"
+"Ē" = "e"
+"Ī" = "i"
+"Ō" = "o"
+"Ū" = "u"
+# Hawaiian ʻokina (glottal stop) and visually-similar punctuation — strip
+# entirely so "Hawaiʻi" matches "Hawaii", "Oʻahu" matches "Oahu",
+# "Kauaʻi" matches "Kauai". `[diacritics]` is one-way replacement, so
+# the empty target safely drops the codepoint without spawning bogus
+# bidirectional candidates.
+"ʻ" = ""
+"ʼ" = ""
+
+# ---------------------------------------------------------------------------
+# Character equivalences — non-letter characters that should normalize
+# but aren't pure diacritics. (Reserved; nothing US-specific yet.)
+# ---------------------------------------------------------------------------
+[char_equivalences]

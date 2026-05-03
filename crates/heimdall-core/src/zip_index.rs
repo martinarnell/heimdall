@@ -256,6 +256,55 @@ impl ZipIndex {
         s.len() == 5 && s.chars().all(|c| c.is_ascii_digit())
     }
 
+    /// Check if a query looks like a US ZIP+4 (`12345-6789` or `123456789`).
+    /// Returns the canonical 5-digit prefix so callers can route the lookup.
+    pub fn parse_us_zip4(s: &str) -> Option<String> {
+        let s = s.trim();
+        // Hyphenated form: 5 digits, '-', 4 digits.
+        if s.len() == 10 && s.as_bytes()[5] == b'-' {
+            let (a, b) = s.split_at(5);
+            let b = &b[1..]; // skip hyphen
+            if a.chars().all(|c| c.is_ascii_digit()) && b.chars().all(|c| c.is_ascii_digit()) {
+                return Some(a.to_owned());
+            }
+        }
+        // Bare 9-digit form (no separator).
+        if s.len() == 9 && s.chars().all(|c| c.is_ascii_digit()) {
+            return Some(s[..5].to_owned());
+        }
+        None
+    }
+
+    /// Detect a "ZIP city" or "city ZIP" or "ZIP+4 city" form. Returns the
+    /// canonical 5-digit ZIP if the query carries a US ZIP code somewhere.
+    /// The remaining city tokens are returned alongside so the caller can
+    /// optionally verify the city matches the ZIP's stored city.
+    pub fn parse_us_zip_with_city(s: &str) -> Option<(String, String)> {
+        let trimmed = s.trim();
+        let words: Vec<&str> = trimmed.split_whitespace().collect();
+        if words.len() < 2 { return None; }
+
+        // Try first token as ZIP (or ZIP+4): "90210 Beverly Hills".
+        let first = words[0].trim_end_matches(',');
+        if Self::is_us_zip(first) {
+            return Some((first.to_owned(), words[1..].join(" ")));
+        }
+        if let Some(z5) = Self::parse_us_zip4(first) {
+            return Some((z5, words[1..].join(" ")));
+        }
+
+        // Try last token as ZIP (or ZIP+4): "Beverly Hills 90210".
+        let last = words[words.len()-1].trim_start_matches(',');
+        if Self::is_us_zip(last) {
+            return Some((last.to_owned(), words[..words.len()-1].join(" ")));
+        }
+        if let Some(z5) = Self::parse_us_zip4(last) {
+            return Some((z5, words[..words.len()-1].join(" ")));
+        }
+
+        None
+    }
+
     fn read_pool_string(&self, offset: u32) -> Option<String> {
         let abs = self.string_pool_offset as usize + offset as usize;
         if abs >= self.data.len() { return None; }
