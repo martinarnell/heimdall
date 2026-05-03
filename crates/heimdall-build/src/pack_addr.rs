@@ -75,6 +75,13 @@ pub fn pack_addresses(
     let mut groups: HashMap<StreetKey, StreetGroup> = HashMap::new();
     let mut total_addresses = 0usize;
     let mut postcode_coords: HashMap<String, Vec<(i32, i32)>> = HashMap::new();
+    // Per-postcode city tally so the postcode response can render
+    // "75001 Paris, France" instead of just the bare digits. We pick
+    // the most common city across all addresses sharing that postcode —
+    // robust to OSM-tagged outlier addresses that mention a neighbouring
+    // commune. Counts are kept tight (max ~8 distinct cities per postcode
+    // is typical) so memory stays modest even on large countries.
+    let mut postcode_cities: HashMap<String, HashMap<String, u32>> = HashMap::new();
 
   for parquet_path in &existing_paths {
     let file = std::fs::File::open(parquet_path)?;
@@ -167,7 +174,17 @@ pub fn pack_addresses(
                         .flat_map(|c| c.to_lowercase())
                         .collect();
                     if norm_pc.len() >= 3 {
-                        postcode_coords.entry(norm_pc).or_default().push((lat_micro, lon_micro));
+                        postcode_coords.entry(norm_pc.clone()).or_default().push((lat_micro, lon_micro));
+                        if !cities_col.is_null(i) {
+                            let city = cities_col.value(i).trim();
+                            if !city.is_empty() {
+                                *postcode_cities
+                                    .entry(norm_pc)
+                                    .or_default()
+                                    .entry(city.to_owned())
+                                    .or_insert(0) += 1;
+                            }
+                        }
                     }
                 }
             }
@@ -265,12 +282,31 @@ pub fn pack_addresses(
                 let n = coords.len() as i64;
                 let avg_lat = (coords.iter().map(|c| c.0 as i64).sum::<i64>() / n) as i32;
                 let avg_lon = (coords.iter().map(|c| c.1 as i64).sum::<i64>() / n) as i32;
-                // Store original-ish display form (insert space before last 3 chars for UK)
-                let display = if norm_pc.len() >= 5 && norm_pc.is_ascii() && norm_pc.chars().all(|c| c.is_alphanumeric()) {
-                    let split = norm_pc.len() - 3;
-                    format!("{} {}", &norm_pc[..split].to_uppercase(), &norm_pc[split..].to_uppercase())
+                // Postcode display = "{canonical_postcode}[ {dominant_city}]".
+                // UK postcodes are split before the last 3 chars
+                // ("SW1A2AA" → "SW1A 2AA"); every other country uses the
+                // canonical compact form (French "75001", German "10115").
+                let canonical = if heimdall_core::addr_index::is_uk_postcode(&norm_pc) {
+                    let upper = norm_pc.to_uppercase();
+                    let split = upper.len() - 3;
+                    format!("{} {}", &upper[..split], &upper[split..])
                 } else {
                     norm_pc.to_uppercase()
+                };
+                // Pick the most-common city seen on addresses with this
+                // postcode so the bare-postcode response renders something
+                // human ("75001 Paris", "10115 Berlin"). Tie-broken by
+                // alphabetical order for determinism. Capped at 64 chars
+                // — no real-world city name is longer, but defensive in
+                // case a malformed feed drops a long string.
+                let dominant_city = postcode_cities.get(&norm_pc).and_then(|tally| {
+                    tally.iter()
+                        .max_by(|a, b| a.1.cmp(b.1).then_with(|| b.0.cmp(a.0)))
+                        .map(|(name, _)| name.clone())
+                });
+                let display = match dominant_city {
+                    Some(city) if city.len() <= 64 => format!("{} {}", canonical, city),
+                    _ => canonical,
                 };
                 (norm_pc, avg_lat, avg_lon, display)
             })

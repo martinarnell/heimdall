@@ -113,6 +113,13 @@ struct SourceState {
     sequence_number: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     local_path: Option<String>,
+    /// Per-zone version tags for sources that ship as N independent files
+    /// (BD TOPO publishes one .7z per département with its own editionDate).
+    /// Keyed by IGN zone code (e.g. "D075", "D971"), value is the last
+    /// successfully ingested editionDate ("2026-03-15"). Allows streaming
+    /// rebuilds that skip unchanged départements without re-downloading.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    zones: Option<std::collections::HashMap<String, String>>,
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -1297,6 +1304,12 @@ fn merge_places_source(
             };
             crate::gn250::read_gn250_places(&csv_path)?
         }
+        // "bdtopo" is intentionally absent here — it's handled by the
+        // streaming downloader in the caller (read_bdtopo_streaming),
+        // which manages its own per-département state and disk lifecycle.
+        // Routing it through merge_places_source's single-path interface
+        // would require dumping all 100+ extracted .gpkgs to disk at
+        // once (~180 GB). The caller should never invoke this branch.
         other => bail!("[{}] Unknown places source type: {}", cc, other),
     };
 
@@ -1576,14 +1589,17 @@ fn build_country_pipeline(
     let download_dir = PathBuf::from(&defaults.download_dir).join(cc);
     std::fs::create_dir_all(&index_dir)?;
 
-    // Copy normalizer TOML
+    // Copy normalizer TOML — always overwrite, not just when missing.
+    // Mid-rebuild edits to data/normalizers/{cc}.toml (e.g. tweaking
+    // a known_variants entry to fix a ranking bug) would otherwise
+    // silently land in the source TOML but not in the served sv.toml,
+    // producing a confusing "I edited the file but the API didn't
+    // see the change" failure mode.
     let dest_toml = index_dir.join("sv.toml");
-    if !dest_toml.exists() {
-        let source = PathBuf::from(&config.normalizer);
-        if source.exists() {
-            std::fs::copy(&source, &dest_toml)?;
-            info!("[{}] Copied normalizer {} → sv.toml", cc, source.display());
-        }
+    let source = PathBuf::from(&config.normalizer);
+    if source.exists() {
+        std::fs::copy(&source, &dest_toml)?;
+        info!("[{}] Copied normalizer {} → sv.toml", cc, source.display());
     }
 
     let photon_only = config.osm.is_none();
@@ -1721,6 +1737,25 @@ fn build_country_pipeline(
                         }
                     }
                 }
+            } else if source_type == "ban" {
+                // BAN (Base Adresse Nationale): the merge step downloads
+                // 100+ per-département CSVs from adresse.data.gouv.fr.
+                // No central URL to pre-download, so the merge function
+                // pulls them on first call and caches in the download dir.
+                // Skipping this branch left France without its 26M
+                // addresses — the rebuild silently dropped national
+                // coverage.
+                if skip_download {
+                    info!("[{}] Skipping BAN merge (--skip-download, requires network access)", cc);
+                } else {
+                    let ban_dir = download_dir.join("ban");
+                    let dummy_path = ban_dir.join("adresses-ban.csv.gz");
+                    let ap = addr_parquet.clone();
+                    let step = time_step(cc, "merge-national", || {
+                        merge_national(cc, source_type, Some(&dummy_path), &ap)
+                    })?;
+                    steps.push(step);
+                }
             } else if let Some(ref url) = national.url {
                 let ss = cs.national.get_or_insert_with(Default::default);
                 let nat_path = rt.block_on(download_source(client, url, &download_dir, ss, skip_download))?;
@@ -1735,27 +1770,71 @@ fn build_country_pipeline(
             }
         }
 
-        // Step 2b: Places source (SSR) → merge into places.parquet
+        // Step 2b: Places source (SSR / DAGI / GN250 / BD TOPO)
+        // → merge into places.parquet.
         if let Some(ref ps) = config.places_source {
-            let gml_path = if let Some(ref local) = ps.local_path {
-                PathBuf::from(local)
-            } else if let Some(ref url) = ps.url {
-                let ss = cs.places_source.get_or_insert_with(Default::default);
-                rt.block_on(download_source(client, url, &download_dir, ss, skip_download))?
-            } else {
-                bail!("[{}] places_source has no url or local_path", cc);
-            };
-
-            let pp = places_parquet.clone();
             let source_type = ps.source_type.clone();
-            let step = time_step(cc, "merge-places-source", || {
-                merge_places_source(cc, &source_type, &gml_path, &pp)
-            })?;
-            steps.push(step);
+            let pp = places_parquet.clone();
+            let ss = cs.places_source.get_or_insert_with(Default::default);
 
-            // Only delete if it was a download (not a local path)
-            if ps.local_path.is_none() {
-                delete_file_if_exists(&gml_path, "places source download", !cleanup);
+            if source_type == "bdtopo" {
+                // BD TOPO ships per-département (101 separate .7z archives,
+                // 200–500 MB each, ~2 GB extracted). Streaming the catalog
+                // one département at a time keeps peak disk usage to ~3 GB
+                // regardless of how many we ingest, and lets the per-zone
+                // editionDate in state.zones drive change detection.
+                // Mirrors the per-département flow used by BAN for addresses.
+                let dl_dir = download_dir.clone();
+                let cc_owned = cc.to_string();
+                let zones_in: std::collections::HashMap<String, String> =
+                    ss.zones.clone().unwrap_or_default();
+                let pp_for_step = pp.clone();
+                let (step, zones_out) = time_step_with(cc, "merge-places-source", || {
+                    let mut zones = zones_in;
+                    let new_places = crate::bdtopo::read_bdtopo_streaming(
+                        &cc_owned,
+                        &mut zones,
+                        &dl_dir,
+                        skip_download,
+                    )?;
+                    let existing = if pp_for_step.exists() {
+                        super::read_osm_places(&pp_for_step)?
+                    } else {
+                        vec![]
+                    };
+                    // SSR's spatial+name dedup is generic over any
+                    // geometry-rich place source — reuse it.
+                    let merged = crate::ssr::merge_ssr_places(&existing, &new_places);
+                    crate::photon::write_places_parquet(&merged, &pp_for_step)?;
+                    let summary = format!(
+                        "+{} places ({} BD TOPO total)",
+                        merged.len() - existing.len(),
+                        new_places.len(),
+                    );
+                    Ok((zones, summary))
+                })?;
+                ss.zones = Some(zones_out);
+                steps.push(step);
+            } else {
+                // Single-file flow: SSR (one GML zip), DAGI (one JSON),
+                // GN250 (one CSV zip). Download once → merge once.
+                let gml_path = if let Some(ref local) = ps.local_path {
+                    PathBuf::from(local)
+                } else if let Some(ref url) = ps.url {
+                    rt.block_on(download_source(client, url, &download_dir, ss, skip_download))?
+                } else {
+                    bail!("[{}] places_source has no url or local_path", cc);
+                };
+
+                let step = time_step(cc, "merge-places-source", || {
+                    merge_places_source(cc, &source_type, &gml_path, &pp)
+                })?;
+                steps.push(step);
+
+                // Only delete if it was a download (not a local path)
+                if ps.local_path.is_none() {
+                    delete_file_if_exists(&gml_path, "places source download", !cleanup);
+                }
             }
         }
 

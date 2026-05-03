@@ -651,6 +651,27 @@ fn build_geo_polygons(
 /// Catches neighboring-country admins that slipped past name-pattern filtering.
 /// Returns true for unknown country dirs (no bbox = no filter).
 fn is_in_country_bbox(lat: f64, lon: f64, dir_name: &str) -> bool {
+    // France's bboxes cover metropolitan + outre-mer (Guadeloupe, Martinique,
+    // La Réunion, Guyane, Mayotte). Without the overseas bboxes the
+    // closed-list régions filter would still keep e.g. "Guadeloupe" in the
+    // pool (its name is in is_french_region), but the bbox check would
+    // reject it because its centroid sits at 16°N — outside metropolitan
+    // France. Mirrors detect_country() in extract.rs.
+    if dir_name.contains("france") || has_cc_token(dir_name, "fr") {
+        let in_metro = (41.33..=51.12).contains(&lat) && (-5.14..=9.56).contains(&lon);
+        let in_guadeloupe = (15.83..=16.53).contains(&lat) && (-61.80..=-61.00).contains(&lon);
+        let in_martinique = (14.39..=14.88).contains(&lat) && (-61.23..=-60.81).contains(&lon);
+        let in_reunion = (-21.39..=-20.87).contains(&lat) && (55.22..=55.84).contains(&lon);
+        let in_guyane = (2.10..=5.80).contains(&lat) && (-54.55..=-51.60).contains(&lon);
+        let in_mayotte = (-13.10..=-12.62).contains(&lat) && (45.00..=45.32).contains(&lon);
+        return in_metro
+            || in_guadeloupe
+            || in_martinique
+            || in_reunion
+            || in_guyane
+            || in_mayotte;
+    }
+
     let bb = if dir_name.contains("germany") || has_cc_token(dir_name, "de") {
         // Slightly tighter than the API server bbox (5.866-55.06 / 5.87-15.04)
         // so we don't keep border-edge French/Polish admins clipping in.
@@ -671,8 +692,6 @@ fn is_in_country_bbox(lat: f64, lon: f64, dir_name: &str) -> bool {
         Some((50.75, 53.47, 3.36, 7.21))
     } else if dir_name.contains("belgium") || has_cc_token(dir_name, "be") {
         Some((49.50, 51.50, 2.55, 6.41))
-    } else if dir_name.contains("france") || has_cc_token(dir_name, "fr") {
-        Some((41.33, 51.12, -5.14, 9.56))
     } else {
         None
     };
@@ -691,6 +710,55 @@ fn has_cc_token(dir_name: &str, cc: &str) -> bool {
         || dir_name.starts_with(&format!("{}-", cc))
         || dir_name.contains(&token_mid)
         || dir_name.ends_with(&token_suf)
+}
+
+/// The 18 French régions (13 metropolitan + 5 outre-mer). Closed set — last
+/// reform was 2016 (Hollande's regional merger) and 2011 (Mayotte); not
+/// expected to change in the index's lifetime. Without this filter, foreign
+/// L4 entries that fall inside the France bbox (Vlaanderen, Wallonie,
+/// Saarland, Rheinland-Pfalz, Liguria, Piemonte, Toscana, Genève, Valais,
+/// Vaud, Valle d'Aosta, Euskadi, Navarra, England) get picked as Paris's
+/// or Lyon's admin1.
+///
+/// Names mirror OSM's primary `name=*` tag — including diacritics. Some
+/// régions also expose `name:fr=*` variants ("Île-de-France" vs
+/// "Ile-de-France"); both are accepted because OSM extractors sometimes
+/// pick whichever was first parsed.
+fn is_french_region(name: &str) -> bool {
+    matches!(
+        name,
+        "Île-de-France"
+            | "Ile-de-France"
+            | "Auvergne-Rhône-Alpes"
+            | "Auvergne-Rhone-Alpes"
+            | "Hauts-de-France"
+            | "Nouvelle-Aquitaine"
+            | "Occitanie"
+            | "Grand Est"
+            | "Provence-Alpes-Côte d'Azur"
+            | "Provence-Alpes-Cote d'Azur"
+            | "Pays de la Loire"
+            | "Bretagne"
+            | "Normandie"
+            | "Bourgogne-Franche-Comté"
+            | "Bourgogne-Franche-Comte"
+            | "Centre-Val de Loire"
+            | "Corse"
+            // Outre-mer
+            | "Guadeloupe"
+            | "Martinique"
+            | "La Réunion"
+            | "Réunion"
+            | "Guyane"
+            | "Mayotte"
+            // Special status: "France métropolitaine" is the L3 union of
+            // metropolitan régions. Useful as a fallback admin1 for places
+            // that don't sit inside a régional polygon (very rare, but
+            // keeps the assignment from picking a foreign State).
+            | "France métropolitaine"
+            | "France metropolitaine"
+            | "France"
+    )
 }
 
 /// The 16 German Bundesländer. Closed set — list hasn't changed since
@@ -777,6 +845,64 @@ fn is_valid_admin_for_country(name: &str, admin_level: u8, dir_name: &str) -> bo
             || name == "Manner-Suomi"                     // Finnish mainland
             || name == "Lappi";                           // Finnish Lapland
         !is_foreign
+    } else if dir_name.contains("france") || dir_name.contains("-fr") {
+        // French admin hierarchy:
+        //   admin_level 3 = "France métropolitaine" (1 entry)
+        //   admin_level 4 = Région (18 régions)
+        //   admin_level 5 = Arrondissement de Paris / quasi-régional layers
+        //   admin_level 6 = Département (~96 metro + 5 DOM)
+        //   admin_level 7 = Arrondissement / EPCI (Métropole, Communauté
+        //                   d'agglomération, etc.)
+        //   admin_level 8 = Commune (~35,000)
+        //   admin_level 9 = Arrondissement municipal (Paris/Lyon/Marseille)
+        match admin_level {
+            // Régions: closed list of 18 + L3 fallback. Without this,
+            // Vlaanderen/Wallonie/Saarland/Liguria/Piemonte etc. (whose
+            // centroids sit inside France's bbox) get picked as Lyon or
+            // Paris's admin1.
+            3..=4 => is_french_region(name),
+            // Départements + EPCIs + communes: reject obvious foreign
+            // patterns. The remaining French structures are too varied
+            // for a closed list (~36k communes), so we filter by
+            // exclusion + bbox.
+            5..=8 => {
+                let is_foreign = name.starts_with("Landkreis ")           // German
+                    || name.starts_with("Stadtkreis ")                     // German
+                    || name.starts_with("Regierungsbezirk ")               // German
+                    || name.starts_with("Verbandsgemeinde ")               // German
+                    || name.starts_with("VVG der ")                        // German
+                    || name.starts_with("VG ")                             // German
+                    || name.starts_with("Bezirk ")                         // German/Swiss
+                    || name.starts_with("Kanton ")                         // German/Swiss
+                    || name.starts_with("Canton ")                         // (mostly Swiss/Lux)
+                    || name.starts_with("Gemeindebezirk ")                 // German
+                    || name.starts_with("Provincie ")                      // Dutch/Belgian
+                    || name.starts_with("Provincia ")                      // Italian/Spanish
+                    || name.starts_with("Comune di ")                      // Italian
+                    || name.starts_with("Provincie ")                      // Belgian
+                    || name.starts_with("Powiat ")                         // Polish
+                    || name.starts_with("powiat ")                         // Polish
+                    || name.starts_with("Gmina ")                          // Polish
+                    || name.starts_with("Region ")                         // Danish/Belgian
+                    || name.ends_with(" Kommune")                          // Danish/Norw
+                    || name.ends_with(" kommun")                           // Swedish
+                    || name.ends_with(" län")                              // Swedish
+                    || name.ends_with(" kraj")                             // Czech
+                    || name.ends_with(" gemeente")                         // Dutch
+                    || name.ends_with(" Gemeinde")                         // German
+                    || name.ends_with(" County")                           // English/Irish
+                    || name.starts_with("County ")                         // Irish
+                    || name == "Vlaanderen"
+                    || name == "Wallonie"
+                    || name == "England"
+                    || name == "Scotland"
+                    || name == "Wales"
+                    || name == "Northern Ireland"
+                    || name == "Cymru";
+                !is_foreign
+            }
+            _ => false,
+        }
     } else if dir_name.contains("germany") || dir_name.contains("-de") {
         // German admin hierarchy:
         //   admin_level 4 = Bundesland (16 states)

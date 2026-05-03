@@ -267,6 +267,21 @@ ram_gb = 6
 [country.fr.osm]
 url = "https://download.geofabrik.de/europe/france-latest.osm.pbf"
 state_url = "https://download.geofabrik.de/europe/france-updates/state.txt"
+# DROM-COM PBFs — Geofabrik publishes the five overseas régions as
+# separate files because the metropolitan extract only covers metro
+# France. Without these, cities like Saint-Denis (Réunion), Pointe-à-
+# Pitre (Guadeloupe), Cayenne (Guyane), Mamoudzou (Mayotte), and
+# Fort-de-France (Martinique) lack admin entries for their région —
+# nearest-centroid then assigns "Corse" or another metro région
+# 10 000 km away as their admin1. Requires osmium on the build host
+# (same merge approach used for Denmark + Greenland + Faroe).
+extra_urls = [
+    "https://download.geofabrik.de/europe/france/reunion-latest.osm.pbf",
+    "https://download.geofabrik.de/europe/france/guadeloupe-latest.osm.pbf",
+    "https://download.geofabrik.de/europe/france/martinique-latest.osm.pbf",
+    "https://download.geofabrik.de/europe/france/guyane-latest.osm.pbf",
+    "https://download.geofabrik.de/europe/france/mayotte-latest.osm.pbf",
+]
 
 [country.fr.photon]
 url = "https://download1.graphhopper.com/public/extracts/by-country-code/fr/photon-db-fr-250720.tar.bz2"
@@ -275,6 +290,23 @@ md5_url = "https://download1.graphhopper.com/public/extracts/by-country-code/fr/
 # BAN per-département CSVs — auto-downloaded by ban-import
 [country.fr.national]
 type = "ban"
+
+# IGN BD TOPO 3.5 — French national topographic database. Adds ~1-2M
+# named places: hamlets / lieux-dits, named hydrography (rivers, lakes),
+# named natural features (peaks, forests), and historic landmarks
+# (châteaux, abbayes, phares, moulins). OSM coverage of these is patchy
+# in rural France; BD TOPO is authoritative.
+#
+# The dataset ships per-département as multi-GB 7z archives (101 zones,
+# 200–500 MB compressed each, ~2 GB extracted). The build streams them
+# one at a time — download → extract → parse → delete — so peak disk
+# stays at ~3 GB regardless of catalog size. Per-zone editionDate is
+# tracked in rebuild-state.json so unchanged départements skip on
+# re-run. The version + current editionDate are constants in bdtopo.rs;
+# bump them there when IGN ships a new quarterly snapshot.
+# Etalab Open License 2.0. Requires p7zip-full on the build host.
+[country.fr.places_source]
+type = "bdtopo"
 
 # ── Switzerland ─────────────────────────────────────────────────────────
 

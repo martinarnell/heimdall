@@ -36,6 +36,7 @@ mod rebuild;
 mod ssr;
 mod dagi;
 mod gn250;
+mod bdtopo;
 mod tiger;
 mod oa;
 mod gnaf;
@@ -100,6 +101,30 @@ enum Commands {
     Stats {
         #[arg(short, long)]
         index: PathBuf,
+    },
+
+    /// Dump admin.bin entries to stdout
+    DumpAdmin {
+        #[arg(short, long)]
+        index: PathBuf,
+    },
+
+    /// Smoke-test BD TOPO parser on a single GeoPackage
+    BdtopoStats {
+        /// Path to a BD TOPO GeoPackage (.gpkg) file
+        #[arg(short, long)]
+        gpkg: PathBuf,
+    },
+
+    /// Smoke-test the BD TOPO streaming downloader against a custom
+    /// département list (download → extract → parse → delete loop).
+    BdtopoStream {
+        /// Comma-separated zone codes (e.g. D075,D063,D02B)
+        #[arg(long)]
+        zones: String,
+        /// Working directory for downloads + extracts
+        #[arg(long, default_value = "data/downloads")]
+        download_dir: PathBuf,
     },
 
     /// Download Lantmäteriet address data and merge with OSM
@@ -1021,6 +1046,92 @@ fn main() -> Result<()> {
                 audit::audit_parquet(&parquet_path)?;
             } else {
                 info!("No places.parquet found at {}", index.display());
+            }
+        }
+
+        Commands::DumpAdmin { index } => {
+            let admin_path = index.join("admin.bin");
+            let bytes = heimdall_core::compressed_io::read_maybe_compressed(&admin_path)?;
+            let entries: Vec<heimdall_core::types::AdminEntry> = postcard::from_bytes(&bytes)
+                .or_else(|_| bincode::deserialize(&bytes))
+                .or_else(|_| {
+                    postcard::from_bytes::<Vec<heimdall_core::types::AdminEntryV2>>(&bytes)
+                        .or_else(|_| bincode::deserialize::<Vec<heimdall_core::types::AdminEntryV2>>(&bytes))
+                        .map(|v| v.into_iter().map(heimdall_core::types::AdminEntry::from).collect())
+                })
+                .expect("admin.bin: schema mismatch");
+            println!("Total admin entries: {}", entries.len());
+            for (i, e) in entries.iter().enumerate() {
+                println!(
+                    "  [{}] name={:?} type={:?} parent={:?} coord=({:.4},{:.4}) pop={}",
+                    i, e.name, e.place_type, e.parent_id, e.coord.lat, e.coord.lon, e.population
+                );
+            }
+        }
+
+        Commands::BdtopoStats { gpkg } => {
+            let places = bdtopo::read_bdtopo_places(&gpkg)?;
+            println!("Total BD TOPO places extracted: {}", places.len());
+            // PlaceType is `#[repr(u8)]`; bucket via the discriminant to
+            // avoid requiring a Hash impl on the enum itself.
+            let mut counts: [usize; 256] = [0; 256];
+            for p in &places {
+                counts[p.place_type as u8 as usize] += 1;
+            }
+            println!("By place_type:");
+            let mut buckets: Vec<(usize, usize)> = counts.iter().enumerate()
+                .filter(|(_, c)| **c > 0)
+                .map(|(i, c)| (i, *c))
+                .collect();
+            buckets.sort_by_key(|(_, c)| std::cmp::Reverse(*c));
+            for (i, c) in buckets {
+                // Reconstruct the PlaceType variant for printing — go via the
+                // first matching record so we don't have to maintain a
+                // discriminant→variant table here.
+                let pt = places.iter()
+                    .find(|p| p.place_type as u8 as usize == i)
+                    .map(|p| p.place_type);
+                println!("  {:?}: {}", pt, c);
+            }
+            println!("Sample (first 20):");
+            for p in places.iter().take(20) {
+                println!(
+                    "  [{:?}] {:?}  ({:.4},{:.4})  osm={}",
+                    p.place_type, p.name, p.lat, p.lon, p.osm_id
+                );
+            }
+        }
+
+        Commands::BdtopoStream { zones, download_dir } => {
+            // Smoke-test the streaming downloader on a custom catalog.
+            // Uses the same flow rebuild.rs does — download, extract,
+            // parse, delete — but writes the resulting RawPlace count
+            // to stdout instead of merging into a parquet.
+            let zone_list: Vec<&'static str> = Box::leak(
+                zones.split(',')
+                    .map(|s| s.trim().to_string().into_boxed_str())
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice()
+            ).iter().map(|s| &**s).collect();
+            // Override the catalog by calling read_bdtopo_streaming with
+            // an in-memory state map that already has every other zone
+            // marked as "already up to date". Cleanest way to scope the
+            // run without changing the public constants.
+            let target = bdtopo::BDTOPO_EDITION_DATE.to_string();
+            let mut state: std::collections::HashMap<String, String> =
+                bdtopo::BDTOPO_DEPARTEMENTS.iter()
+                    .filter(|d| !zone_list.iter().any(|z| z == &**d))
+                    .map(|d| (d.to_string(), target.clone()))
+                    .collect();
+            let raw = bdtopo::read_bdtopo_streaming("fr", &mut state, &download_dir, false)?;
+            println!("Streaming smoke test: {} RawPlace records produced", raw.len());
+            println!("State after run ({} zones tracked):", state.len());
+            let mut zones_sorted: Vec<_> = state.iter()
+                .filter(|(z, _)| zone_list.iter().any(|t| t == &z.as_str()))
+                .collect();
+            zones_sorted.sort_by_key(|(z, _)| z.clone());
+            for (z, d) in zones_sorted {
+                println!("  {} → {}", z, d);
             }
         }
 
