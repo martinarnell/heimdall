@@ -294,6 +294,7 @@ fn read_ban_csv_gz(path: &Path, dept: &str) -> Result<(Vec<RawAddress>, usize)> 
             housenumber,
             postcode,
             city,
+            state: None,
             lat,
             lon,
         });

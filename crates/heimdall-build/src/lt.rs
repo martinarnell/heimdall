@@ -125,6 +125,7 @@ fn try_query_current(conn: &rusqlite::Connection) -> Result<Vec<RawAddress>> {
             housenumber: number.trim().to_string(),
             postcode: postcode.map(|p| p.trim().to_string()).filter(|p| !p.is_empty()),
             city: Some(city.trim().to_string()).filter(|c| !c.is_empty()),
+            state: None,
             lat,
             lon,
         });
@@ -205,6 +206,7 @@ fn try_query_legacy(conn: &rusqlite::Connection) -> Result<Vec<RawAddress>> {
             housenumber: number.trim().to_string(),
             postcode: postcode.map(|p| p.trim().to_string()).filter(|p| !p.is_empty()),
             city: Some(city.trim().to_string()).filter(|c| !c.is_empty()),
+            state: None,
             lat,
             lon,
         });
@@ -283,6 +285,7 @@ fn query_addresses_latlon(conn: &rusqlite::Connection, sql: &str, schema_name: &
             housenumber: number.trim().to_string(),
             postcode: postcode.map(|p| p.trim().to_string()).filter(|p| !p.is_empty()),
             city: Some(city.trim().to_string()).filter(|c| !c.is_empty()),
+            state: None,
             lat,
             lon,
         });

@@ -114,6 +114,7 @@ pub fn read_kartverket_addresses(csv_path: &Path) -> Result<Vec<RawAddress>> {
             housenumber,
             postcode,
             city,
+            state: None,
             lat,
             lon,
         });

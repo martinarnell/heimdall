@@ -251,6 +251,11 @@ data/index-se/
 | Finland | OSM PBF (Geofabrik) | DVV via OGC API (3.7M) | None |
 | Germany | OSM PBF (Geofabrik, ~4GB) | OSM addr:* tags (~20M) | None |
 | GB | Photon extract (Graphhopper) | Photon (905K places, 4.6M addr) | None |
+| United States | OSM PBF (Geofabrik) + USGS GNIS Domestic Names (~1M+ places, public domain) | TIGER/Line 2025 + OpenAddresses | None |
+| United States | TIGER/Line 2025 COUSUB (towns/townships, strong-MCD states only) | — | None (downloaded by tiger-import) |
+| United States | TIGER/Line 2025 AIANNH (federally-recognised tribal areas) | — | None (downloaded by tiger-import) |
+| United States | Census Gazetteer 2024 counties (county populations, backfill) | — | None (downloaded by tiger-import) |
+| United States | simplemaps US ZIPs CSV (CC BY 4.0) — HUD-equivalent ZIP→city crosswalk | — | None (downloaded by tiger-import) |
 | Australia | OSM PBF (Geofabrik) | G-NAF (15.9M, CC BY 4.0) | None |
 | Canada | OSM PBF (Geofabrik) | NAR (15.8M, StatCan Open Licence) | None |
 | New Zealand | OSM PBF (Geofabrik) | LINZ NZ Addresses (2.3M, CC BY 4.0) | Free LINZ account + API token |

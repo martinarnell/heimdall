@@ -134,34 +134,33 @@ fn read_geojson_file(data: &[u8]) -> Result<Vec<OaAddress>> {
 }
 
 /// Read a CSV file from OpenAddresses (newer format).
+/// Uses an RFC-4180 parser so quoted fields containing commas (street names
+/// like "Main St, North", quoted unit designators) survive intact.
 fn read_csv_file(data: &[u8]) -> Result<Vec<OaAddress>> {
     let text = std::str::from_utf8(data).context("Invalid UTF-8 in CSV")?;
     let mut addresses = Vec::new();
-    let mut lines = text.lines();
+    let mut lines = parse_csv(text);
 
-    // Parse header
     let header = match lines.next() {
         Some(h) => h,
         None => return Ok(addresses),
     };
-    let cols: Vec<&str> = header.split(',').collect();
-    let find_col = |name: &str| cols.iter().position(|c| c.trim().eq_ignore_ascii_case(name));
+    let find_col = |name: &str| header.iter().position(|c| c.trim().eq_ignore_ascii_case(name));
 
-    let lon_idx = find_col("LON").or_else(|| find_col("lon"));
-    let lat_idx = find_col("LAT").or_else(|| find_col("lat"));
-    let number_idx = find_col("NUMBER").or_else(|| find_col("number"));
-    let street_idx = find_col("STREET").or_else(|| find_col("street"));
-    let city_idx = find_col("CITY").or_else(|| find_col("city"));
-    let region_idx = find_col("REGION").or_else(|| find_col("region"));
-    let postcode_idx = find_col("POSTCODE").or_else(|| find_col("postcode"));
+    let lon_idx = find_col("LON");
+    let lat_idx = find_col("LAT");
+    let number_idx = find_col("NUMBER");
+    let street_idx = find_col("STREET");
+    let city_idx = find_col("CITY");
+    let region_idx = find_col("REGION");
+    let postcode_idx = find_col("POSTCODE");
 
     let lon_idx = match lon_idx { Some(i) => i, None => return Ok(addresses) };
     let lat_idx = match lat_idx { Some(i) => i, None => return Ok(addresses) };
     let number_idx = match number_idx { Some(i) => i, None => return Ok(addresses) };
     let street_idx = match street_idx { Some(i) => i, None => return Ok(addresses) };
 
-    for line in lines {
-        let fields: Vec<&str> = line.split(',').collect();
+    for fields in lines {
         let get = |idx: usize| fields.get(idx).map(|s| s.trim()).unwrap_or("");
 
         let lon: f64 = match get(lon_idx).parse() { Ok(v) => v, Err(_) => continue };
@@ -183,6 +182,67 @@ fn read_csv_file(data: &[u8]) -> Result<Vec<OaAddress>> {
     }
 
     Ok(addresses)
+}
+
+/// Tiny RFC-4180 parser: handles double-quoted fields with embedded commas,
+/// embedded newlines inside quotes, and the `""` escape for a literal quote.
+/// Returns an iterator yielding one Vec<String> per record. Avoids pulling
+/// the `csv` crate just for this single call site.
+fn parse_csv(text: &str) -> impl Iterator<Item = Vec<String>> + '_ {
+    struct Parser<'a> {
+        chars: std::str::Chars<'a>,
+        done: bool,
+    }
+    impl<'a> Iterator for Parser<'a> {
+        type Item = Vec<String>;
+        fn next(&mut self) -> Option<Vec<String>> {
+            if self.done { return None; }
+            let mut fields: Vec<String> = Vec::new();
+            let mut cur = String::new();
+            let mut in_quotes = false;
+            let mut produced_any = false;
+            loop {
+                let c = match self.chars.next() {
+                    Some(c) => c,
+                    None => {
+                        self.done = true;
+                        if !produced_any && cur.is_empty() && fields.is_empty() {
+                            return None;
+                        }
+                        fields.push(std::mem::take(&mut cur));
+                        return Some(fields);
+                    }
+                };
+                produced_any = true;
+                if in_quotes {
+                    if c == '"' {
+                        // Peek for escaped quote
+                        let mut peek = self.chars.clone();
+                        if peek.next() == Some('"') {
+                            cur.push('"');
+                            self.chars.next();
+                        } else {
+                            in_quotes = false;
+                        }
+                    } else {
+                        cur.push(c);
+                    }
+                } else {
+                    match c {
+                        '"' if cur.is_empty() => in_quotes = true,
+                        ',' => fields.push(std::mem::take(&mut cur)),
+                        '\r' => { /* swallow — \r\n line endings */ }
+                        '\n' => {
+                            fields.push(std::mem::take(&mut cur));
+                            return Some(fields);
+                        }
+                        _ => cur.push(c),
+                    }
+                }
+            }
+        }
+    }
+    Parser { chars: text.chars(), done: false }
 }
 
 // ---------------------------------------------------------------------------
@@ -368,6 +428,7 @@ fn stream_region_to_parquet(
                 housenumber: a.number,
                 postcode: if a.postcode.is_empty() { None } else { Some(a.postcode) },
                 city: if a.city.is_empty() { None } else { Some(a.city) },
+                state: if a.state.is_empty() { None } else { Some(a.state) },
                 lat: a.lat,
                 lon: a.lon,
             });
@@ -406,6 +467,7 @@ fn flush_addr_batch(
             Arc::new(StringArray::from(addresses.iter().map(|a| a.housenumber.as_str()).collect::<Vec<_>>())),
             Arc::new(StringArray::from(addresses.iter().map(|a| a.postcode.as_deref()).collect::<Vec<Option<&str>>>())),
             Arc::new(StringArray::from(addresses.iter().map(|a| a.city.as_deref()).collect::<Vec<Option<&str>>>())),
+            Arc::new(StringArray::from(addresses.iter().map(|a| a.state.as_deref()).collect::<Vec<Option<&str>>>())),
             Arc::new(Float64Array::from(addresses.iter().map(|a| a.lat).collect::<Vec<_>>())),
             Arc::new(Float64Array::from(addresses.iter().map(|a| a.lon).collect::<Vec<_>>())),
         ],
@@ -423,6 +485,7 @@ fn addr_parquet_schema() -> std::sync::Arc<arrow::datatypes::Schema> {
         Field::new("housenumber", DataType::Utf8, false),
         Field::new("postcode", DataType::Utf8, true),
         Field::new("city", DataType::Utf8, true),
+        Field::new("state", DataType::Utf8, true),
         Field::new("lat", DataType::Float64, false),
         Field::new("lon", DataType::Float64, false),
     ]))
@@ -470,6 +533,7 @@ pub fn run_oa_import_local(input_dir: &Path, output_dir: &Path) -> Result<OaResu
                 housenumber: a.number,
                 postcode: if a.postcode.is_empty() { None } else { Some(a.postcode) },
                 city: if a.city.is_empty() { None } else { Some(a.city) },
+                state: if a.state.is_empty() { None } else { Some(a.state) },
                 lat: a.lat,
                 lon: a.lon,
             });

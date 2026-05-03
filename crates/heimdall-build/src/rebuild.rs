@@ -1034,6 +1034,7 @@ fn merge_national(
             Field::new("housenumber", DataType::Utf8, false),
             Field::new("postcode", DataType::Utf8, true),
             Field::new("city", DataType::Utf8, true),
+            Field::new("state", DataType::Utf8, true),
             Field::new("lat", DataType::Float64, false),
             Field::new("lon", DataType::Float64, false),
         ]));
@@ -1068,6 +1069,7 @@ fn merge_national(
                             std::sync::Arc::new(StringArray::from(batch_buf.iter().map(|a| a.housenumber.as_str()).collect::<Vec<_>>())),
                             std::sync::Arc::new(StringArray::from(batch_buf.iter().map(|a| a.postcode.as_deref()).collect::<Vec<Option<&str>>>())),
                             std::sync::Arc::new(StringArray::from(batch_buf.iter().map(|a| a.city.as_deref()).collect::<Vec<Option<&str>>>())),
+                            std::sync::Arc::new(StringArray::from(batch_buf.iter().map(|a| a.state.as_deref()).collect::<Vec<Option<&str>>>())),
                             std::sync::Arc::new(Float64Array::from(batch_buf.iter().map(|a| a.lat).collect::<Vec<_>>())),
                             std::sync::Arc::new(Float64Array::from(batch_buf.iter().map(|a| a.lon).collect::<Vec<_>>())),
                         ],
@@ -1087,6 +1089,7 @@ fn merge_national(
                     std::sync::Arc::new(StringArray::from(batch_buf.iter().map(|a| a.housenumber.as_str()).collect::<Vec<_>>())),
                     std::sync::Arc::new(StringArray::from(batch_buf.iter().map(|a| a.postcode.as_deref()).collect::<Vec<Option<&str>>>())),
                     std::sync::Arc::new(StringArray::from(batch_buf.iter().map(|a| a.city.as_deref()).collect::<Vec<Option<&str>>>())),
+                    std::sync::Arc::new(StringArray::from(batch_buf.iter().map(|a| a.state.as_deref()).collect::<Vec<Option<&str>>>())),
                     std::sync::Arc::new(Float64Array::from(batch_buf.iter().map(|a| a.lat).collect::<Vec<_>>())),
                     std::sync::Arc::new(Float64Array::from(batch_buf.iter().map(|a| a.lon).collect::<Vec<_>>())),
                 ],
@@ -1154,6 +1157,7 @@ fn merge_national_streaming(
         Field::new("housenumber", DataType::Utf8, false),
         Field::new("postcode", DataType::Utf8, true),
         Field::new("city", DataType::Utf8, true),
+        Field::new("state", DataType::Utf8, true),
         Field::new("lat", DataType::Float64, false),
         Field::new("lon", DataType::Float64, false),
     ]));
@@ -1174,6 +1178,7 @@ fn merge_national_streaming(
                 std::sync::Arc::new(StringArray::from(buf.iter().map(|a| a.housenumber.as_str()).collect::<Vec<_>>())),
                 std::sync::Arc::new(StringArray::from(buf.iter().map(|a| a.postcode.as_deref()).collect::<Vec<Option<&str>>>())),
                 std::sync::Arc::new(StringArray::from(buf.iter().map(|a| a.city.as_deref()).collect::<Vec<Option<&str>>>())),
+                std::sync::Arc::new(StringArray::from(buf.iter().map(|a| a.state.as_deref()).collect::<Vec<Option<&str>>>())),
                 std::sync::Arc::new(Float64Array::from(buf.iter().map(|a| a.lat).collect::<Vec<_>>())),
                 std::sync::Arc::new(Float64Array::from(buf.iter().map(|a| a.lon).collect::<Vec<_>>())),
             ],
@@ -1226,12 +1231,18 @@ fn merge_national_us(
     _addr_parquet: &Path,
 ) -> Result<String> {
     // Step A: TIGER import → admin.bin, fst_zip.fst, zip_records.bin, states.json
-    info!("[{}] Running TIGER import (admin boundaries + ZIP codes)...", cc);
+    // Now also pulls COUSUB (towns/townships in strong-MCD states),
+    // AIANNH (tribal areas), Census Gazetteer (county populations) and
+    // the HUD/simplemaps crosswalk (ZIP → city). All of these are
+    // best-effort: a failed download warns and the build continues.
+    info!("[{}] Running TIGER import (admin boundaries + ZIP codes + COUSUB + AIANNH + Gazetteer + HUD)...", cc);
     let tiger_result = crate::tiger::run_tiger_import(index_dir)?;
     info!(
-        "[{}] TIGER: {} states, {} counties, {} places, {} ZIPs",
+        "[{}] TIGER: {} states, {} counties ({} pop), {} places, {} ZIPs ({} HUD-fixed), {} cousubs, {} AIANNH",
         cc, tiger_result.state_count, tiger_result.county_count,
-        tiger_result.place_count, tiger_result.zip_count,
+        tiger_result.county_pop_count, tiger_result.place_count,
+        tiger_result.zip_count, tiger_result.hud_updated_count,
+        tiger_result.cousub_count, tiger_result.aiannh_count,
     );
 
     // Step B: OpenAddresses import → addresses.parquet
@@ -1239,9 +1250,10 @@ fn merge_national_us(
     let oa_result = crate::oa::run_oa_import(index_dir)?;
 
     Ok(format!(
-        "TIGER: {} states + {} counties + {} ZIPs, OA: {} addr",
+        "TIGER: {} states + {} counties + {} ZIPs + {} cousubs + {} AIANNH, OA: {} addr",
         tiger_result.state_count, tiger_result.county_count,
-        tiger_result.zip_count, oa_result.address_count,
+        tiger_result.zip_count, tiger_result.cousub_count,
+        tiger_result.aiannh_count, oa_result.address_count,
     ))
 }
 
@@ -1304,6 +1316,17 @@ fn merge_places_source(
             };
             crate::gn250::read_gn250_places(&csv_path)?
         }
+        "gnis" => {
+            // GNIS: USGS distribution ZIP containing a single .txt file
+            // (DomesticNames_National.txt or similar). Pipe-delimited,
+            // header row, WGS84 decimal-degree coords.
+            let txt_path = if path.extension().map_or(false, |e| e == "zip") {
+                crate::gnis::extract_gnis_txt_from_zip(path)?
+            } else {
+                path.to_path_buf()
+            };
+            crate::gnis::read_gnis_places(&txt_path)?
+        }
         // "bdtopo" is intentionally absent here — it's handled by the
         // streaming downloader in the caller (read_bdtopo_streaming),
         // which manages its own per-département state and disk lifecycle.
@@ -1322,13 +1345,19 @@ fn merge_places_source(
     let merged = match source_type {
         "dagi" => crate::dagi::merge_dagi_places(&existing, &new_places),
         "gn250" => crate::gn250::merge_gn250_places(&existing, &new_places),
+        "gnis" => crate::gnis::merge_gnis_places(&existing, &new_places),
         // Default — SSR's spatial+name dedup works for any geometry-rich
         // place source, so reuse it.
         _ => crate::ssr::merge_ssr_places(&existing, &new_places),
     };
     crate::photon::write_places_parquet(&merged, places_parquet)?;
 
-    let label = match source_type { "dagi" => "DAGI", "gn250" => "GN250", _ => "SSR" };
+    let label = match source_type {
+        "dagi" => "DAGI",
+        "gn250" => "GN250",
+        "gnis" => "GNIS",
+        _ => "SSR",
+    };
     Ok(format!(
         "+{} places ({} {} total)",
         merged.len() - existing.len(),

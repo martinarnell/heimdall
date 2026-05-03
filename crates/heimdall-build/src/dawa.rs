@@ -128,6 +128,7 @@ fn parse_dawa_csv<R: BufRead>(reader: R) -> Result<Vec<RawAddress>> {
             housenumber: husnr.to_owned(),
             postcode,
             city,
+            state: None,
             lat,
             lon,
         });

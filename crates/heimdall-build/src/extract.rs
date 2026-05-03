@@ -22,6 +22,13 @@ use heimdall_core::node_cache::{NodeCache, MmapNodeCache, SortedFileNodeCache};
 // ---------------------------------------------------------------------------
 
 /// A raw address extracted from OSM (node or way centroid)
+///
+/// `state` is the admin1 / region / state component carried by sources that
+/// expose it (OpenAddresses REGION column, NAR PROVINCE, future imports).
+/// Stored as Option<String> so OSM-tagged addresses (which generally lack
+/// addr:state) and country-scoped sources keep working without ceremony.
+/// pack_addr does not yet consume it — see TODO in pack_addr.rs about
+/// scoping the FST key by state to avoid cross-state street collisions.
 #[derive(Debug, Clone)]
 pub struct RawAddress {
     pub osm_id: i64,
@@ -29,6 +36,7 @@ pub struct RawAddress {
     pub housenumber: String,
     pub postcode: Option<String>,
     pub city: Option<String>,
+    pub state: Option<String>,
     pub lat: f64,
     pub lon: f64,
 }
@@ -507,7 +515,7 @@ pub fn extract_places(
                             BufferedWayKind::Address { street, housenumber, postcode, city } => {
                                 if let Some((lat, lon)) = centroid {
                                     addresses.push(RawAddress {
-                                        osm_id: bw.id, street, housenumber, postcode, city, lat, lon,
+                                        osm_id: bw.id, street, housenumber, postcode, city, state: None, lat, lon,
                                     });
                                     addr_ways_resolved += 1;
                                 }
@@ -591,7 +599,7 @@ pub fn extract_places(
             match bw.kind {
                 BufferedWayKind::Address { street, housenumber, postcode, city } => {
                     if let Some((lat, lon)) = centroid {
-                        addresses.push(RawAddress { osm_id: bw.id, street, housenumber, postcode, city, lat, lon });
+                        addresses.push(RawAddress { osm_id: bw.id, street, housenumber, postcode, city, state: None, lat, lon });
                         addr_ways_resolved += 1;
                     }
                 }
@@ -1530,6 +1538,7 @@ fn extract_addr_node<'a>(
                 housenumber,
                 postcode,
                 city,
+                state: None,
                 lat,
                 lon,
             })
@@ -2502,6 +2511,7 @@ fn make_addr_schema() -> std::sync::Arc<arrow::datatypes::Schema> {
         Field::new("housenumber", DataType::Utf8, false),
         Field::new("postcode", DataType::Utf8, true),
         Field::new("city", DataType::Utf8, true),
+        Field::new("state", DataType::Utf8, true),
         Field::new("lat", DataType::Float64, false),
         Field::new("lon", DataType::Float64, false),
     ]))
@@ -2606,6 +2616,7 @@ fn flush_addr_batch(
     let mut housenumbers = Vec::with_capacity(count);
     let mut postcodes: Vec<Option<&str>> = Vec::with_capacity(count);
     let mut cities: Vec<Option<&str>> = Vec::with_capacity(count);
+    let mut states: Vec<Option<&str>> = Vec::with_capacity(count);
     let mut lats = Vec::with_capacity(count);
     let mut lons = Vec::with_capacity(count);
 
@@ -2615,6 +2626,7 @@ fn flush_addr_batch(
         housenumbers.push(a.housenumber.as_str());
         postcodes.push(a.postcode.as_deref());
         cities.push(a.city.as_deref());
+        states.push(a.state.as_deref());
         lats.push(a.lat);
         lons.push(a.lon);
     }
@@ -2627,6 +2639,7 @@ fn flush_addr_batch(
             Arc::new(StringArray::from(housenumbers)),
             Arc::new(StringArray::from(postcodes)),
             Arc::new(StringArray::from(cities)),
+            Arc::new(StringArray::from(states)),
             Arc::new(Float64Array::from(lats)),
             Arc::new(Float64Array::from(lons)),
         ],

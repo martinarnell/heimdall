@@ -254,6 +254,7 @@ fn try_query_joined(conn: &rusqlite::Connection) -> Result<Vec<RawAddress>> {
                 housenumber: housenumber.clone(),
                 postcode: None,
                 city: city_roma.clone(),
+                state: None,
                 lat,
                 lon,
             });
@@ -266,6 +267,7 @@ fn try_query_joined(conn: &rusqlite::Connection) -> Result<Vec<RawAddress>> {
             housenumber,
             postcode: None,
             city: city_kanji,
+            state: None,
             lat,
             lon,
         });
@@ -410,6 +412,7 @@ fn try_query_flat(conn: &rusqlite::Connection) -> Result<Vec<RawAddress>> {
             housenumber,
             postcode: None,
             city,
+            state: None,
             lat,
             lon,
         });

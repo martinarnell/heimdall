@@ -164,6 +164,7 @@ pub fn read_geopackage(gpkg_path: &Path) -> Result<Vec<RawAddress>> {
             housenumber,
             postcode: postcode_str,
             city: city.or(municipality),
+            state: None,
             lat,
             lon,
         });

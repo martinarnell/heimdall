@@ -274,6 +274,7 @@ pub fn parse_es_documents(docs: &[serde_json::Value]) -> PhotonParseResult {
                 housenumber: housenumber.to_owned(),
                 postcode,
                 city,
+                state: None,
                 lat,
                 lon,
             });
@@ -427,6 +428,7 @@ pub fn parse_single_es_document(doc: &serde_json::Value) -> (Option<RawPlace>, O
             housenumber: housenumber.to_owned(),
             postcode,
             city,
+            state: None,
             lat,
             lon,
         })
@@ -631,6 +633,7 @@ pub fn parse(input: &Path) -> Result<PhotonParseResult> {
                 housenumber: housenumber_str.to_owned(),
                 postcode,
                 city,
+                state: None,
                 lat,
                 lon,
             });
@@ -902,6 +905,7 @@ pub fn import(input: &Path, output: &Path) -> Result<PhotonImportResult> {
                 housenumber: housenumber_str.to_owned(),
                 postcode,
                 city,
+                state: None,
                 lat,
                 lon,
             });

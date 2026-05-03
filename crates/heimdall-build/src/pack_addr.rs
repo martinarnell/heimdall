@@ -5,6 +5,14 @@
 ///
 /// FST key: {normalized_street}:{municipality_id} → street_record_id
 /// Also wildcard: {normalized_street}:0 → street_record_id (for no-city queries)
+///
+/// TODO: scope the key by state/admin1 for countries where the same street
+/// + city name repeats across regions (US "Main St" / "Springfield" exists
+/// in dozens of states; AU repeats every metro). RawAddress now carries an
+/// optional `state` field — wire it into StreetKey as a third component
+/// (`{street}:{state_fips}:{muni_id}`) once we've verified the muni_id
+/// fallback in this file doesn't already cover those cases by hashing the
+/// city name into a per-state space.
 
 use std::collections::HashMap;
 use std::path::Path;

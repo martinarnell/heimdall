@@ -233,6 +233,7 @@ fn parse_csv_entry<R: std::io::Read>(
             housenumber,
             postcode,
             city,
+            state: None,
             lat,
             lon,
         });

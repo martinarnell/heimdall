@@ -339,6 +339,7 @@ fn join_addresses(
             housenumber,
             postcode,
             city,
+            state: None,
             lat,
             lon,
         });

@@ -720,6 +720,7 @@ fn stream_address_details(
                 housenumber,
                 postcode,
                 city,
+                state: None,
                 lat,
                 lon,
             });

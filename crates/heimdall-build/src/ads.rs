@@ -138,6 +138,7 @@ pub fn read_ads_addresses(csv_path: &Path) -> Result<Vec<RawAddress>> {
             housenumber: number,
             postcode,
             city,
+            state: None,
             lat,
             lon,
         });
