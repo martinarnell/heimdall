@@ -51,3 +51,14 @@ rebuild*.log
 # ── Local dev notes ──────────────────────────────────────────────────
 /CLAUDE.local.md
 data/index-se-dev
+
+# ── Claude Code per-machine state ────────────────────────────────────
+/.claude/
+
+# ── Local symlinks for dev workflow (machine-specific, would break elsewhere) ──
+/data-test/
+/data/data
+/data/data-dev/
+
+# ── Top-level benchmark artefacts (large, regen via heimdall-compare) ─
+/benchmarks/
