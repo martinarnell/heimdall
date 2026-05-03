@@ -28,6 +28,8 @@ use heimdall_core::reverse::GeohashIndex;
 use heimdall_core::global_index::GlobalIndex;
 use heimdall_normalize::Normalizer;
 
+mod admin;
+mod auth;
 mod fetch;
 mod manifest;
 mod metrics;
@@ -84,6 +86,12 @@ enum Commands {
         /// Additional index search directories
         #[arg(long)]
         data_dir: Vec<PathBuf>,
+    },
+
+    /// Manage auth users + API keys (operates on the auth.db directly).
+    Admin {
+        #[command(subcommand)]
+        cmd: admin::AdminCmd,
     },
 }
 
@@ -3372,19 +3380,39 @@ async fn main() -> anyhow::Result<()> {
                 metrics_handle,
             });
 
-            let app = Router::new()
+            // Initialize auth subsystem (no-op if HEIMDALL_KEY_PEPPER unset).
+            let auth_handle = auth::init_from_env()?;
+
+            let mut app = Router::new()
                 .route("/search", get(search))
                 .route("/autocomplete", get(autocomplete))
                 .route("/reverse", get(reverse))
                 .route("/lookup", get(lookup))
                 .route("/status", get(status))
-                .route("/metrics", get(metrics::handler))
+                .route("/metrics", get(metrics::handler));
+
+            if let Some(handle) = auth_handle {
+                app = app.layer(axum::middleware::from_fn_with_state(
+                    handle.clone(),
+                    auth::middleware,
+                ));
+            }
+
+            let app = app
                 .layer(axum::middleware::from_fn(metrics::track))
                 .with_state(state);
 
             println!("\n  Listening on http://{}\n", bind);
             let listener = tokio::net::TcpListener::bind(&bind).await?;
-            axum::serve(listener, app).await?;
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .await?;
+        }
+
+        Commands::Admin { cmd } => {
+            admin::run(cmd)?;
         }
     }
 
