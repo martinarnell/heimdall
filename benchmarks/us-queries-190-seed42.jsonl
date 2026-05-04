@@ -1,0 +1,196 @@
+{"_meta":{"version":1,"seed":42,"total_queries":195,"categories":{"address":76,"place":57,"fuzzy":28,"reverse":19,"ambiguous":10,"variants":5},"population_weights":[{"code":"US","population_millions":331.0,"weight":1.0,"query_count":180}],"generated_at":"2026-05-04T15:13:46.995357153+00:00"}}
+{"id":"place_us_000023","q":"Oakdale Heights Elementary School","category":"place","country":"US","expected_lat":44.916143,"expected_lon":-123.337591}
+{"id":"fuzzy_us_000026","q":"Hope church","category":"fuzzy","country":"US","expected_lat":35.590728,"expected_lon":-82.533172}
+{"id":"reverse_us_000001","category":"reverse","country":"US","lat":37.99343702074073,"lon":-85.94726061920491,"expected_lat":37.993082,"expected_lon":-85.94642}
+{"id":"reverse_us_000009","category":"reverse","country":"US","lat":34.18238461257656,"lon":-118.6155808773431,"expected_lat":34.183006,"expected_lon":-118.615495}
+{"id":"place_us_000028","q":"Beacon Park Condominiums","category":"place","country":"US","expected_lat":43.013368,"expected_lon":-78.793675}
+{"id":"fuzzy_us_000025","q":"Craigue's ond","category":"fuzzy","country":"US","expected_lat":31.407775,"expected_lon":-82.824997}
+{"id":"addr_us_000004","q":"an Avenue\rBrittanis Way\nJENCKES LN\u000fPerryville Road\tDEWALT CT\u000bFaith Drive\u0010East Main Street\tCoxing Rd\u000eMarengo A 60, Woodbridge","category":"address","country":"US","expected_lat":41.22814,"expected_lon":-73.155089}
+{"id":"addr_us_000006","q":"er Ave\u000eCharles Street\u000bBenton Road\u0005197TH\u0007NOE AVE\u000eBalmville Road\u0011Valley View Drive\u0010Gardnertown Road\u000bN K 421, Westfield Center","category":"address","country":"US","expected_lat":40.842155000000005,"expected_lon":-81.76607}
+{"id":"addr_us_000032","q":"OLE PL\u000fS WATSON STREET\nTINASA WAY\u0013BRADLEY PASTURE WAY\u0011East County D 403","category":"address","country":"US","expected_lat":31.850786000000003,"expected_lon":-85.07521299999999}
+{"id":"place_us_000027","q":"Cold Stone Creamery","category":"place","country":"US","expected_lat":36.9724,"expected_lon":-122.025834}
+{"id":"place_us_000007","q":"South Fork Willow River","category":"place","country":"US","expected_lat":47.068766,"expected_lon":-93.813702}
+{"id":"fuzzy_us_000002","q":"Litte Ausable River","category":"fuzzy","country":"US","expected_lat":44.501099,"expected_lon":-73.590015}
+{"id":"place_us_000042","q":"Delano School","category":"place","country":"US","expected_lat":40.478126,"expected_lon":-78.915581}
+{"id":"addr_us_000075","q":"D PL\u000eCYPRESS ST #16\u000eCYPRESS ST #02\u0010SUMMER WOODS WAY\fBowers Drive\u000bReuter Road 1819, Reston","category":"address","country":"US","expected_lat":38.894312,"expected_lon":-77.142533}
+{"id":"fuzzy_us_000017","q":"Perry Lake Creke","category":"fuzzy","country":"US","expected_lat":46.614001,"expected_lon":-93.959088}
+{"id":"place_us_000054","q":"East Nishnabotna River","category":"place","country":"US","expected_lat":40.918868,"expected_lon":-95.305769}
+{"id":"addr_us_000067","q":"INGS  DR\u0010Winston Falls Ct\u0017General De Gaulle Drive\rSAN PELAYO CT\n8th Street\u0013HEMINGW 12001","category":"address","country":"US","expected_lat":28.878929,"expected_lon":-81.775396}
+{"id":"addr_us_000011","q":"D WAY\u0010N CHURCH AVE 101\u0010N CHURCH AVE 201\fVELDO AVE NE\u0019ISLE ROYALE CT SE APT 244 203","category":"address","country":"US","expected_lat":27.456498999999997,"expected_lon":-82.565822}
+{"id":"addr_us_000042","q":"NT LUKES LANE\rRegent Street\u0011Greenmount Avenue\u0013Rossville Boulevard\u000bRETFORD 6321, Reston","category":"address","country":"US","expected_lat":38.840247,"expected_lon":-77.175365}
+{"id":"place_us_000004","q":"Indian Creek","category":"place","country":"US","expected_lat":42.243962,"expected_lon":-88.071999}
+{"id":"addr_us_000000","q":" AVE N\u0010ATLANTIC BLVD 19\nCR 3141  W\rLAKE STONE DR\u00047404\u0012EAST DARLENE ST ST\u0015STAGE 16506, Atascocita","category":"address","country":"US","expected_lat":29.806102,"expected_lon":-95.135594}
+{"id":"place_us_000026","q":"Union Cemetery","category":"place","country":"US","expected_lat":30.874739,"expected_lon":-88.564183}
+{"id":"addr_us_000016","q":"GILBERT RD  1090\u0015E SUN VALLEY FA 241","category":"address","country":"US","expected_lat":32.656992,"expected_lon":-95.751054}
+{"id":"fuzzy_us_000021","q":"Ildian Creek","category":"fuzzy","country":"US","expected_lat":42.243962,"expected_lon":-88.071999}
+{"id":"fuzzy_us_000000","q":"Wedny's","category":"fuzzy","country":"US","expected_lat":33.797296,"expected_lon":-84.283064}
+{"id":"addr_us_000014","q":"ER BAY AVENUE\u000fState Route 126\bSTHY 218\tPENGRA RD\u0014Wind Whistle Farm 6252","category":"address","country":"US","expected_lat":42.699483,"expected_lon":-76.14205799999999}
+{"id":"ambig_000001","q":"Birmingham","category":"ambiguous"}
+{"id":"reverse_us_000004","category":"reverse","country":"US","lat":34.17587941028375,"lon":-85.16190674670088,"expected_lat":34.176207,"expected_lon":-85.161338}
+{"id":"reverse_us_000003","category":"reverse","country":"US","lat":45.391605955716464,"lon":-122.61147386679748,"expected_lat":45.390777,"expected_lon":-122.611343}
+{"id":"addr_us_000003","q":"TTE\fMACCUMBER CT\u000ePRESTON TRL NE\u000bKENNICOT CT\u0010MOONLIGHT BAY WY\u0012WELCOME COUNTRY LN 211","category":"address","country":"US","expected_lat":31.529024,"expected_lon":-96.534005}
+{"id":"place_us_000021","q":"Building 16","category":"place","country":"US","expected_lat":43.124564,"expected_lon":-77.706557}
+{"id":"place_us_000030","q":"Zeltenreich Reformed Church","category":"place","country":"US","expected_lat":40.073891,"expected_lon":-76.106529}
+{"id":"addr_us_000037","q":"ken Rock Loop\"S DAVIS RD GOLDEN VALLEY 000000000\u000fWALLACE VIEW CT\rADA STROUD RD\u0014HARDING PL CHARLOTTE\u0011WALKER SPRI 108, Triana","category":"address","country":"US","expected_lat":34.736449,"expected_lon":-86.74978200000001}
+{"id":"addr_us_000022","q":"st 112th Terrace\u0016Northeast 111th Street\u000eW 19TH AVE 205\u000eW 19TH AVE 302\u000eW 19TH AVE 214\u000eW 19TH AVE 411\u000eW 8927, Palmetto Bay","category":"address","country":"US","expected_lat":25.575573000000002,"expected_lon":-80.324373}
+{"id":"fuzzy_us_000020","q":"Maxtua Girls Home","category":"fuzzy","country":"US","expected_lat":41.481117,"expected_lon":-111.951913}
+{"id":"addr_us_000018","q":"OD ST\u0011ARMIJO SPRINGS RD\u0013North   Hines Drive\u000bEmmett Walk\u0017Bluegrass Lakes Parkway 491, Highland Place Condominiums","category":"address","country":"US","expected_lat":33.668019,"expected_lon":-84.37091699999999}
+{"id":"reverse_us_000014","category":"reverse","country":"US","lat":39.37511302522679,"lon":-94.39115046588626,"expected_lat":39.375644,"expected_lon":-94.391067}
+{"id":"fuzzy_us_000019","q":"Blue tar Memorial","category":"fuzzy","country":"US","expected_lat":38.880983,"expected_lon":-77.083926}
+{"id":"addr_us_000071","q":" ST NW\u0010COUNTRY VISTA CT\fSPICKARDS LN\fHoover Court\tCheney Dr\u0015North Massasso Street\fDunford 106","category":"address","country":"US","expected_lat":36.126697,"expected_lon":-78.855416}
+{"id":"addr_us_000025","q":"chael Vis\rRACHAEL VISTA\u001cE VIA PASEO DEL NORTE   1012\u0011E CLEARWATER PKWY\bDURBY CT\tEl Adolfo\u0014N DREAM 410","category":"address","country":"US","expected_lat":33.16365,"expected_lon":-86.24934900000001}
+{"id":"place_us_000043_en","q":"US Highway 8","category":"place","country":"US","expected_lat":45.564495,"expected_lon":-88.673317,"variant_of":"place_us_000043","variant_type":"english_alias"}
+{"id":"addr_us_000054","q":"L\u0012N VIA LOS ALTOS CT\u0013East Verdugo Avenue\fLiberty Cove\u0010N SUNNY BROOK CT\fNOBLITT R 24350, Pinnacle Peak Heights","category":"address","country":"US","expected_lat":33.710301,"expected_lon":-111.84048399999999}
+{"id":"addr_us_000008","q":"EL MAR  103\u0013CAMINO DEL MAR  402\u0013CAMINO DEL MAR  409\u0013CAMINO DEL MAR   261, Stirling Village Apartments","category":"address","country":"US","expected_lat":26.171070999999998,"expected_lon":-80.08228}
+{"id":"place_us_000017","q":"Guilford Town Office","category":"place","country":"US","expected_lat":45.169314,"expected_lon":-69.386782}
+{"id":"ambig_000002","q":"Columbus","category":"ambiguous"}
+{"id":"place_us_000045","q":"Mid-Hudson Church of Christ","category":"place","country":"US","expected_lat":41.699353,"expected_lon":-73.925903}
+{"id":"place_us_000018","q":"Mudoim Peak","category":"place","country":"US","expected_lat":40.040439,"expected_lon":-120.435494}
+{"id":"addr_us_000053","q":"CREST CT\u000fS MACARTHUR TER\u0015NIGHTIN 13600, Pines West","category":"address","country":"US","expected_lat":28.247999999999998,"expected_lon":-81.963412}
+{"id":"place_us_000011","q":"Depot Hill Road","category":"place","country":"US","expected_lat":43.70948,"expected_lon":-73.042741}
+{"id":"place_us_000012","q":"Mingus Creek Trail","category":"place","country":"US","expected_lat":35.515299,"expected_lon":-83.331542}
+{"id":"place_us_000051","q":"Mud Lick Run","category":"place","country":"US","expected_lat":39.928255,"expected_lon":-80.222675}
+{"id":"place_us_000010","q":"Blue Star Memorial","category":"place","country":"US","expected_lat":38.880983,"expected_lon":-77.083926}
+{"id":"addr_us_000047","q":"arlin Way\u0010Scots Pine Court\u000fFAY BLVD GASMRT\u0013TIVOLI GARDENS BLVD\u0010VICKERS RIDGE  1120, Cordoba Beach Park","category":"address","country":"US","expected_lat":27.95261,"expected_lon":-82.447406}
+{"id":"addr_us_000023","q":"LEY AVE 000000000\rNORTHCREEK CT\u0007SEEK ST\u0019DEER PATH FARMS RD  ERWIN)QU 4816, Annandale Gardens Apartments","category":"address","country":"US","expected_lat":35.017984,"expected_lon":-89.75417599999999}
+{"id":"fuzzy_us_000014","q":"Makmis Mountain","category":"fuzzy","country":"US","expected_lat":44.088108,"expected_lon":-73.66402}
+{"id":"addr_us_000057","q":"AN LN\u0015UNIONVILLE IND TRL RD\bRio Road\u000bFREEMILE AV\rGREENBRIER CV\u001fACOMA PLACE BU 2150","category":"address","country":"US","expected_lat":34.367773,"expected_lon":-109.96382}
+{"id":"fuzzy_us_000001","q":"ill Street","category":"fuzzy","country":"US","expected_lat":45.564495,"expected_lon":-88.673317}
+{"id":"fuzzy_us_000011","q":"Dup Creek","category":"fuzzy","country":"US","expected_lat":41.225493,"expected_lon":-111.237397}
+{"id":"addr_us_000034","q":" 102-KN\u0014GREENSWARD LN  201-A\u0014GRE 2550, Stirling Village Apartments","category":"address","country":"US","expected_lat":26.092705,"expected_lon":-80.16785899999999}
+{"id":"place_us_000035","q":"Pond Run","category":"place","country":"US","expected_lat":38.663129,"expected_lon":-83.173696}
+{"id":"addr_us_000041","q":"SIS CV\u0016East Swan Ridge Circle\u0010\"MOSER AVE D6-AL\u000f\"MOSER AVE D5-A\u0010\"M 4075","category":"address","country":"US","expected_lat":34.541516,"expected_lon":-109.861378}
+{"id":"addr_us_000027","q":"wood Lane\nMolin Road\u0005FLASH\u0012213TH ST SE UNIT B\u0012213TH ST SE UNIT A\u0012SHELL PL UNIT 100R\u0012SHELL PL UNIT 200 32870","category":"address","country":"US","expected_lat":45.409903,"expected_lon":-92.82751}
+{"id":"addr_us_000021","q":"ircle\u000eRoute 10 North\u0007FENN DR\u0018North Caterpillar Avenue\u0012South Acorn A 1, Villa Victoria","category":"address","country":"US","expected_lat":42.373132,"expected_lon":-71.070824}
+{"id":"place_us_000046","q":"North 8th Street","category":"place","country":"US","expected_lat":37.352425,"expected_lon":-121.892609}
+{"id":"place_us_000056","q":"Wendy's","category":"place","country":"US","expected_lat":33.797296,"expected_lon":-84.283064}
+{"id":"ambig_000008","q":"Cambridge","category":"ambiguous"}
+{"id":"place_us_000037","q":"Bettendorf Post Office","category":"place","country":"US","expected_lat":41.566846,"expected_lon":-90.482654}
+{"id":"addr_us_000044","q":" SW\rWeber Heights\u000bBRAGUETA CT\u0014N DIAMOND LAKE DRIVE\u0014WALL LAKE POINT LOOP\u0013Broadmoor Bo 15","category":"address","country":"US","expected_lat":44.408138,"expected_lon":-70.78916899999999}
+{"id":"addr_us_000052","q":"ray Ave\u0010SUNRISE DUNES CT\u000fALCHESTER DRIVE\u000eAMBER LEAF TRL\u0010AMBER LEAF TRAIL\u0011TWILIGHT TIDES ST\tBASCOM CT\u0010BLACKWATER  4179, Cordoba Beach Park","category":"address","country":"US","expected_lat":27.80994,"expected_lon":-82.73824}
+{"id":"ambig_000004","q":"Vik","category":"ambiguous"}
+{"id":"place_us_000043","q":"Mill Street","category":"place","country":"US","expected_lat":45.564495,"expected_lon":-88.673317}
+{"id":"fuzzy_us_000010","q":"Women's Cente","category":"fuzzy","country":"US","expected_lat":36.738901,"expected_lon":-91.874149}
+{"id":"addr_us_000001","q":"\bSAWLE RD\u000fShaftsbury Road\u0010Browns Gulf Road\rN MOHAWK ROAD\u000fEmmonsburg Road\rWillowbank Pl\u000bVick Park A\u000fN  32","category":"address","country":"US","expected_lat":42.213122,"expected_lon":-75.76965799999999}
+{"id":"place_us_000021_en","q":"Building 16, Chili Avenue","category":"place","country":"US","expected_lat":43.124564,"expected_lon":-77.706557,"variant_of":"place_us_000021","variant_type":"english_alias"}
+{"id":"addr_us_000010","q":" CAMINO AIRE FRESCO\u0010N ROCKY CREST PL\u0011220 SLACK TIDE DR\nE  HYDE ST\u000eE WANDERING  830, Seville Apartment Homes","category":"address","country":"US","expected_lat":30.443757,"expected_lon":-84.268886}
+{"id":"place_us_000014","q":"Sports Page","category":"place","country":"US","expected_lat":42.999249,"expected_lon":-89.004967}
+{"id":"place_us_000050","q":"Osborn Creek","category":"place","country":"US","expected_lat":36.087682,"expected_lon":-80.888492}
+{"id":"addr_us_000028","q":"DEL VERDE DR\u0010E MONTE VISTA DR\u000eN  16201","category":"address","country":"US","expected_lat":30.433556,"expected_lon":-85.037233}
+{"id":"fuzzy_us_000004","q":"Dalton Coverde Bridge","category":"fuzzy","country":"US","expected_lat":43.276847,"expected_lon":-71.811351}
+{"id":"fuzzy_us_000007","q":"Phislips Run","category":"fuzzy","country":"US","expected_lat":41.272175,"expected_lon":-70.012472}
+{"id":"addr_us_000035","q":"NIT 1E LN\fJuarez Court\u000b3D RANGE RD\nPayne Lane\nIRIS #7 DR\tSCOTT PKE\fDiablo Court\fTARK  622, Narin Place","category":"address","country":"US","expected_lat":37.268237,"expected_lon":-77.39600999999999}
+{"id":"ambig_000000","q":"Portland","category":"ambiguous"}
+{"id":"addr_us_000033","q":"ra Court\nW MANTA CV\nOPITZ ROAD\u0011W COUNTY ROAD 382\u0011LAYTON & JONES RD\fSHIPWATCH RD\u0013AN COUNTY ROAD  404\fT C ADAMS RD\u0014B 3813, Gautier","category":"address","country":"US","expected_lat":30.397362,"expected_lon":-88.529387}
+{"id":"addr_us_000064","q":"OAKS RD\rKNOTGRASS ALY\u0013Sterling Woods Lane\u000fJess Wills Road\u000bMinto Court 3260","category":"address","country":"US","expected_lat":36.219836,"expected_lon":-93.132625}
+{"id":"reverse_us_000008","category":"reverse","country":"US","lat":39.916809795628375,"lon":-75.38724836522032,"expected_lat":39.916778,"expected_lon":-75.387693}
+{"id":"addr_us_000045","q":"DG A-UNIT  A106\u001dN BEACH RD -BLDG A-UNIT  A206\u001dN BEACH RD -BLDG F-UNIT  F101\u001d 3300","category":"address","country":"US","expected_lat":26.416266,"expected_lon":-80.06641099999999}
+{"id":"reverse_us_000015","category":"reverse","country":"US","lat":42.55535482647143,"lon":-114.47000705984279,"expected_lat":42.555854,"expected_lon":-114.470068}
+{"id":"fuzzy_us_000015","q":"Premier rank","category":"fuzzy","country":"US","expected_lat":44.935967,"expected_lon":-92.956421}
+{"id":"fuzzy_us_000005","q":"Mid-Hudson Church of shrist","category":"fuzzy","country":"US","expected_lat":41.699353,"expected_lon":-73.925903}
+{"id":"reverse_us_000016","category":"reverse","country":"US","lat":32.58521292004794,"lon":-97.3545979421897,"expected_lat":32.584619,"expected_lon":-97.354934}
+{"id":"addr_us_000069","q":"\u000f101ST ST  # 484\u000f101ST ST  # 316\u000f101ST ST  # 508\u000e101ST ST 2755, Sailfish Point","category":"address","country":"US","expected_lat":27.268397,"expected_lon":-80.267317}
+{"id":"place_us_000041","q":"Makomis Mountain","category":"place","country":"US","expected_lat":44.088108,"expected_lon":-73.66402}
+{"id":"addr_us_000074","q":"S RD\fELISSALDE ST\u000fGulf Tech Drive\tRIPPY RD.\rSunrise Court\tRoys Road\u0010R 22942, Atascocita","category":"address","country":"US","expected_lat":30.135267000000002,"expected_lon":-95.428521}
+{"id":"addr_us_000055","q":" # 110\u0013EASTLAND BLVD # 401\u0013EASTLAND BLVD # 211\u0013EASTLAND BLVD # 310\u0013E 829","category":"address","country":"US","expected_lat":33.516121999999996,"expected_lon":-80.832691}
+{"id":"place_us_000019","q":"Perry Lake Creek","category":"place","country":"US","expected_lat":46.614001,"expected_lon":-93.959088}
+{"id":"place_us_000006","q":"Charter #214565","category":"place","country":"US","expected_lat":48.089034,"expected_lon":-122.148673}
+{"id":"place_us_000013","q":"Dalton Covered Bridge","category":"place","country":"US","expected_lat":43.276847,"expected_lon":-71.811351}
+{"id":"place_us_000039","q":"Ameristar Casino & Hotel","category":"place","country":"US","expected_lat":41.24285,"expected_lon":-95.910315}
+{"id":"addr_us_000020","q":"ningham Drive\u000bEASTWIND LA\u0010N  BURNT CAR WAY\u0010Black Snake Lane\u0011S PIONEER PARKWAY\rKenton Street\u000fCornfield Point\tCh 20W, Town of Westford","category":"address","country":"US","expected_lat":42.61186,"expected_lon":-71.282117}
+{"id":"addr_us_000063","q":"194TH AVE SW 10490, Cottage Grove","category":"address","country":"US","expected_lat":44.870869000000006,"expected_lon":-93.091572}
+{"id":"addr_us_000002","q":"LVD SW\u0010Dawson Boulevard\u000bW RIVERA CT\u000eWoodland Drive\rSproul Street\u000eA 8151, El Mirage","category":"address","country":"US","expected_lat":33.547202,"expected_lon":-112.234093}
+{"id":"fuzzy_us_000023","q":"DepotH ill Road","category":"fuzzy","country":"US","expected_lat":43.70948,"expected_lon":-73.042741}
+{"id":"fuzzy_us_000027","q":"Crooked Cree","category":"fuzzy","country":"US","expected_lat":44.36383,"expected_lon":-75.802655}
+{"id":"addr_us_000068","q":"h 525 West\u000eWilliam Street\fBAY HAVEN LN\bS TR 173\nRiver Road\bKNOLL RD\u0016S Limestone Estates Ln\fNORTH W ROAD\u0012West Hardin  114, Wheatland Of Muhlenberg","category":"address","country":"US","expected_lat":40.415971,"expected_lon":-76.265423}
+{"id":"place_us_000037_en","q":"USPS","category":"place","country":"US","expected_lat":41.566846,"expected_lon":-90.482654,"variant_of":"place_us_000037","variant_type":"english_alias"}
+{"id":"reverse_us_000011","category":"reverse","country":"US","lat":27.48223580472246,"lon":-99.41698491180567,"expected_lat":27.48293,"expected_lon":-99.41679}
+{"id":"fuzzy_us_000018","q":"Wolf Creer","category":"fuzzy","country":"US","expected_lat":36.038329,"expected_lon":-84.160407}
+{"id":"place_us_000003","q":"Lady Island","category":"place","country":"US","expected_lat":30.328534,"expected_lon":-88.207779}
+{"id":"addr_us_000062","q":"2ND ST SE UNIT 1 1220, Rio Bella Heights","category":"address","country":"US","expected_lat":45.604834,"expected_lon":-121.20148400000001}
+{"id":"fuzzy_us_000013","q":"Lhdy Island","category":"fuzzy","country":"US","expected_lat":30.328534,"expected_lon":-88.207779}
+{"id":"ambig_000006","q":"Bergen","category":"ambiguous"}
+{"id":"reverse_us_000013","category":"reverse","country":"US","lat":41.59556407979483,"lon":-93.8339719074455,"expected_lat":41.594938,"expected_lon":-93.833418}
+{"id":"place_us_000033","q":"Chicot Island","category":"place","country":"US","expected_lat":32.107104,"expected_lon":-93.557122}
+{"id":"place_us_000025","q":"Kenny Brook","category":"place","country":"US","expected_lat":42.655117,"expected_lon":-72.153948}
+{"id":"place_us_000015","q":"Vintage Hills","category":"place","country":"US","expected_lat":37.190023,"expected_lon":-93.374957}
+{"id":"addr_us_000051","q":"rik Drive\u0016Northwest Driver Place\u0017Northwest Central Drive\u0017Northwest Wallowa Place\u0019Northwest Rainier Te 113","category":"address","country":"US","expected_lat":44.005618,"expected_lon":-69.153265}
+{"id":"addr_us_000058","q":" West\u000bKEGERISE DR\u0010123-121 E 4TH ST\tDAFINA DR\u000eNor 109","category":"address","country":"US","expected_lat":39.633945000000004,"expected_lon":-119.298219}
+{"id":"addr_us_000038","q":"\u000f44TH AVE  E K14\u0013E 44TH AVE UNIT K17\u0013E 44TH AVE UNIT  126, Bedford Views","category":"address","country":"US","expected_lat":26.833755,"expected_lon":-80.05646200000001}
+{"id":"reverse_us_000000","category":"reverse","country":"US","lat":39.80095618070607,"lon":-104.7571864731375,"expected_lat":39.800723,"expected_lon":-104.757198}
+{"id":"place_us_000044","q":"West Fork Leatherwood Creek","category":"place","country":"US","expected_lat":36.773895,"expected_lon":-79.784554}
+{"id":"addr_us_000056","q":"SSA BEND         ST\u0016OLD STATE ROUTE 34 #26\u000fWATER ST 105 1/\u000fNEWELL LN & 128\u0010CAND 700, The Jungle","category":"address","country":"US","expected_lat":35.759237,"expected_lon":-84.300146}
+{"id":"place_us_000008","q":"Mantua Girls Home","category":"place","country":"US","expected_lat":41.481117,"expected_lon":-111.951913}
+{"id":"reverse_us_000012","category":"reverse","country":"US","lat":44.99560253806839,"lon":-93.18255193990892,"expected_lat":44.995781,"expected_lon":-93.182674}
+{"id":"place_us_000014_en","q":"Sports Page, US-12","category":"place","country":"US","expected_lat":42.999249,"expected_lon":-89.004967,"variant_of":"place_us_000014","variant_type":"english_alias"}
+{"id":"addr_us_000015","q":"ET\u000eWAWONAH STREET\u000fQUAKER RIDGE PL\rEastham Drive\u000fNorcross Street\u0010BERMU 7009, Paradise Hills Townhomes","category":"address","country":"US","expected_lat":33.618371,"expected_lon":-111.930955}
+{"id":"addr_us_000031","q":"\u0011East 115th Street\u0011HUMBLES CHURCH LN\u000eHideaway Drive\rGreyson Drive\u000bE   123, Biscoe","category":"address","country":"US","expected_lat":35.442537,"expected_lon":-79.581453}
+{"id":"place_us_000002","q":"Hope Church","category":"place","country":"US","expected_lat":35.590728,"expected_lon":-82.533172}
+{"id":"addr_us_000072","q":"ARY''S VILLAGE DR\fCOUNTRY SWAN\u0017PARK PLACE BLVD APT 233\tELLIOT AV\u0017PARK PLACE B 463, Rio Pinar South","category":"address","country":"US","expected_lat":28.536128,"expected_lon":-81.22604299999999}
+{"id":"fuzzy_us_000022","q":"Beacon Park Condomiiums","category":"fuzzy","country":"US","expected_lat":43.013368,"expected_lon":-78.793675}
+{"id":"place_us_000038","q":"Phillips Run","category":"place","country":"US","expected_lat":41.272175,"expected_lon":-70.012472}
+{"id":"fuzzy_us_000003","q":"Ameristar aCsino & Hotel","category":"fuzzy","country":"US","expected_lat":41.24285,"expected_lon":-95.910315}
+{"id":"reverse_us_000007","category":"reverse","country":"US","lat":46.10694446745581,"lon":-97.63666499372704,"expected_lat":46.107742,"expected_lon":-97.636486}
+{"id":"fuzzy_us_000006","q":"Pond un","category":"fuzzy","country":"US","expected_lat":38.663129,"expected_lon":-83.173696}
+{"id":"place_us_000036","q":"Westlake","category":"place","country":"US","expected_lat":39.861043,"expected_lon":-88.895181}
+{"id":"addr_us_000048","q":"E\u0017APT 122  WASHINGTON AVE\u0017APT 320  WASHINGTON AVE\u0017APT 206  WASHINGTON AVE\u0017APT 222  WAS 5194, Hanover Township","category":"address","country":"US","expected_lat":40.674910999999994,"expected_lon":-75.499674}
+{"id":"place_us_000018_en","q":"Squaw Peak","category":"place","country":"US","expected_lat":40.040439,"expected_lon":-120.435494,"variant_of":"place_us_000018","variant_type":"english_alias"}
+{"id":"place_us_000022","q":"North Branch Murphy Creek","category":"place","country":"US","expected_lat":46.478145,"expected_lon":-85.377163}
+{"id":"addr_us_000030","q":"R C34\u0010BOARDWALK DR C14\u0010BOARDWALK DR C24\nW TICOA LN\u0012E SUMMERHARVEST D 104, Atwood","category":"address","country":"US","expected_lat":39.792063,"expected_lon":-88.288012}
+{"id":"ambig_000003","q":"Manchester","category":"ambiguous"}
+{"id":"addr_us_000009","q":"LN\nEVESHAM ST\u0013W CHEYENNE RD # 32 5715, Lakeview","category":"address","country":"US","expected_lat":38.007458,"expected_lon":-121.298831}
+{"id":"place_us_000048","q":"Little Ausable River","category":"place","country":"US","expected_lat":44.501099,"expected_lon":-73.590015}
+{"id":"addr_us_000065","q":"ER OAK DR -BLDG K-UNIT  202\u001eWATER OAK DR -BLDG K-UNIT  102\u001eWATER OAK DR -BLDG K-UNIT 8103, Bedford Views","category":"address","country":"US","expected_lat":26.465978,"expected_lon":-80.172443}
+{"id":"addr_us_000073","q":"et\rS  YAKIMA AVE\u001aEast Tecumseh Street North\rCOOPER SQ 650\u0014FLOYD HALL RD (1137)\rRogers Avenue\u000fW TECUMS 143","category":"address","country":"US","expected_lat":36.096942,"expected_lon":-87.743825}
+{"id":"place_us_000000","q":"Women's Center","category":"place","country":"US","expected_lat":36.738901,"expected_lon":-91.874149}
+{"id":"place_us_000034","q":"Pad 1","category":"place","country":"US","expected_lat":38.158256,"expected_lon":-122.456334}
+{"id":"addr_us_000036","q":"SE\u0016BEARSKIN SUBSTATION RD\nW DYER AVE\u000fQueen Anne Road\fHYDRO STREET\u0010Charlotte Str 315, Midway","category":"address","country":"US","expected_lat":35.962269,"expected_lon":-80.425163}
+{"id":"fuzzy_us_000024","q":"VisonBank","category":"fuzzy","country":"US","expected_lat":39.012165,"expected_lon":-95.762956}
+{"id":"reverse_us_000005","category":"reverse","country":"US","lat":42.884347338691875,"lon":-71.97348437627775,"expected_lat":42.884877,"expected_lon":-71.972957}
+{"id":"addr_us_000043","q":"urt\rS  LINDAN AVE\u000fFrontier Avenue\u0010OLDE COVENTRY RD\u0011East 134th Avenue\u000bLINE STREET\u000fS MYRTLEWOOD ST\u000eSYCAMORE MILLS 23460, White Oak","category":"address","country":"US","expected_lat":39.213477,"expected_lon":-76.901038}
+{"id":"place_us_000009","q":"Shingle Creek","category":"place","country":"US","expected_lat":41.154821,"expected_lon":-122.178209}
+{"id":"fuzzy_us_000008","q":"Sports Paeg","category":"fuzzy","country":"US","expected_lat":42.999249,"expected_lon":-89.004967}
+{"id":"fuzzy_us_000009","q":"South Fok Willow River","category":"fuzzy","country":"US","expected_lat":47.068766,"expected_lon":-93.813702}
+{"id":"addr_us_000039","q":"DR A-11\u00048907\fAuburn Drive\u0013SCENIC 1511, Atascocita","category":"address","country":"US","expected_lat":30.017166,"expected_lon":-95.45508500000001}
+{"id":"addr_us_000050","q":"WINDING CREEK BLVD # F-308 1050","category":"address","country":"US","expected_lat":27.512577,"expected_lon":-82.576395}
+{"id":"addr_us_000040","q":"et\u000fLOCKEWOOD DRIVE\u000bEast Street\fYubadam Road\u000fPierce Creek Rd\u000eLockman Circle\fS MADLOCK CT\fWISSING LANE\u000e 1012, Bellevue","category":"address","country":"US","expected_lat":41.399697,"expected_lon":-82.938364}
+{"id":"addr_us_000061","q":"MO CIR\u0014MEDITERRANEAN BVLD N\rNimitz Avenue\nCORNISH CT\u000fMulberry Avenue\u000f 2641, Bedford Views","category":"address","country":"US","expected_lat":26.639376,"expected_lon":-80.136477}
+{"id":"ambig_000005","q":"Victoria","category":"ambiguous"}
+{"id":"addr_us_000013","q":"mar Road\u0012MADISON PIKE RM 18\u000eGREENWOOD SHLS\u0010OTTER CREEK RD E\u0012MADISON PIKE RM 24\u0017Central Place Northeast\u000fPANSY HOLLOW  503, Ten Broeck","category":"address","country":"US","expected_lat":38.229662,"expected_lon":-85.463911}
+{"id":"addr_us_000059","q":"8TH TER 112E\u000fSW 14TH ST 304J\u000fSW 14TH ST 403J\u0011SW 12 555, Miami Stadium Apartments","category":"address","country":"US","expected_lat":25.767775,"expected_lon":-80.220977}
+{"id":"addr_us_000019","q":"PSON AVE\u0004\"#27\nE EAGLE  N\u000bMidway Mall\u000eSanford Street\rMARCH HILL RD\nRita Drive\r 280, West Hills","category":"address","country":"US","expected_lat":40.672895000000004,"expected_lon":-73.40219699999999}
+{"id":"place_us_000040","q":"Atlantic Avenue","category":"place","country":"US","expected_lat":40.683537,"expected_lon":-73.976219}
+{"id":"addr_us_000066","q":"d Ridge Trail\u000bFORTROSE LN\fCALLE DEBRON\fBlythe Drive\u0018Conchas Street Northeast\u0010SKYLINE LODGE RD\u000eNOTTINGHAM KNL\u000eS 17321, Lopez/Kagel Canyons","category":"address","country":"US","expected_lat":34.301517999999994,"expected_lon":-118.51182}
+{"id":"addr_us_000060","q":"eet\rMarcus Avenue\u000bTrail Place\u0016South   Oraton Parkway\u000fW N ISABELLA ST\u0011Paterson Plk Road\bDICKS LN\u0010Spur Drive South\u000fH 113","category":"address","country":"US","expected_lat":40.15439,"expected_lon":-89.377011}
+{"id":"addr_us_000049","q":"DR # F\u0016N MILLWARD STREET #203\rBA 1546, High Crest View","category":"address","country":"US","expected_lat":42.352722,"expected_lon":-89.07154}
+{"id":"addr_us_000026","q":" Rio Pinar Lane\rBullrush Path\u0014West Wildlife Street\fN  FALDO WAY\u0016North Triathlon Avenue\u000fN  PREAKNESS DR\u000eN  RED ASH AV 341, Orion Charter Township","category":"address","country":"US","expected_lat":42.57614,"expected_lon":-83.254289}
+{"id":"reverse_us_000018","category":"reverse","country":"US","lat":28.23379285261494,"lon":-82.73207325990447,"expected_lat":28.233914,"expected_lon":-82.7323}
+{"id":"place_us_000016","q":"nazerene","category":"place","country":"US","expected_lat":39.369957,"expected_lon":-93.50027}
+{"id":"addr_us_000007","q":"\rKenmore Drive\u0011RIATA CROSSING DR\tHWY 98 4D\tAUCUBA LN\u0016General Collins Avenu 1558, Bushnell","category":"address","country":"US","expected_lat":28.895331,"expected_lon":-81.95607}
+{"id":"place_us_000029","q":"Crooked Creek","category":"place","country":"US","expected_lat":44.36383,"expected_lon":-75.802655}
+{"id":"reverse_us_000002","category":"reverse","country":"US","lat":41.57210980850073,"lon":-93.67111458383953,"expected_lat":41.5728,"expected_lon":-93.670372}
+{"id":"addr_us_000024","q":"\u001554th Avenue Northwest\u001015th Place South\u0013SUNRISE BEACH DR NW\bCOUNTY 3\u0011South 284th Place\u000eCANYON VIEW PL\u0015Southeast 284t 451","category":"address","country":"US","expected_lat":44.935348,"expected_lon":-73.61682}
+{"id":"place_us_000024","q":"Weeks Pond","category":"place","country":"US","expected_lat":35.914316,"expected_lon":-77.579373}
+{"id":"place_us_000047","q":"Dip Creek","category":"place","country":"US","expected_lat":41.225493,"expected_lon":-111.237397}
+{"id":"place_us_000053","q":"Deep Creek","category":"place","country":"US","expected_lat":34.68914,"expected_lon":-83.450616}
+{"id":"addr_us_000012","q":"WY 109 UNIT & 556\rJOHN MILL WAY\u000eHULLY GULLY DR\rGREY ACRES LN\u00113B BRENTWOO 1303, Doney Park","category":"address","country":"US","expected_lat":35.221462,"expected_lon":-111.621105}
+{"id":"addr_us_000070","q":" TRAIL\u0012NORTH CARMEL DRIVE\u000eWESTERN CIRCLE\f550th Avenue\u0011Plainfield Street\u0011Camphausen Aven 28, Matunuck","category":"address","country":"US","expected_lat":41.407634,"expected_lon":-71.821015}
+{"id":"place_us_000032","q":"Overlook to landslide and gorge","category":"place","country":"US","expected_lat":42.830495,"expected_lon":-74.041899}
+{"id":"addr_us_000005","q":"Drive\u000fMarshall Street\u0010E ACOMA DR 4220, Pecos Park","category":"address","country":"US","expected_lat":33.327648,"expected_lon":-111.698992}
+{"id":"place_us_000049","q":"Wolf Creek","category":"place","country":"US","expected_lat":36.038329,"expected_lon":-84.160407}
+{"id":"addr_us_000029","q":"\u0015Southeast 105th Court\u0011VEY WAY APT A 103\u000fW 5TH PL APT 18\u000f 3401, Rapid City","category":"address","country":"US","expected_lat":44.053858,"expected_lon":-103.27657599999999}
+{"id":"addr_us_000046","q":"HERIA LN\nRobin Road\u000fW SAN MARTIN AV\u000bCindy LN SE\u000fWest 7th Street\u0010REC 110, Midway","category":"address","country":"US","expected_lat":36.07153,"expected_lon":-80.36323499999999}
+{"id":"place_us_000055","q":"Craigue's Pond","category":"place","country":"US","expected_lat":31.407775,"expected_lon":-82.824997}
+{"id":"place_us_000005","q":"Premier Bank","category":"place","country":"US","expected_lat":44.935967,"expected_lon":-92.956421}
+{"id":"reverse_us_000010","category":"reverse","country":"US","lat":39.18889343576098,"lon":-84.39865873845584,"expected_lat":39.189222,"expected_lon":-84.399404}
+{"id":"addr_us_000017","q":"Woodland Park 2614, Eagle Pointe Cahoon Plantation","category":"address","country":"US","expected_lat":36.719015,"expected_lon":-76.237578}
+{"id":"ambig_000007","q":"Lund","category":"ambiguous"}
+{"id":"fuzzy_us_000016","q":"West ork Leatherwood Creek","category":"fuzzy","country":"US","expected_lat":36.773895,"expected_lon":-79.784554}
+{"id":"place_us_000001","q":"VisionBank","category":"place","country":"US","expected_lat":39.012165,"expected_lon":-95.762956}
+{"id":"place_us_000020","q":"KeyBank","category":"place","country":"US","expected_lat":41.588774,"expected_lon":-85.835104}
+{"id":"place_us_000031","q":"Titlow Beach Park Pond","category":"place","country":"US","expected_lat":47.249833,"expected_lon":-122.550761}
+{"id":"ambig_000009","q":"Hamilton","category":"ambiguous"}
+{"id":"place_us_000052","q":"Bennigan's","category":"place","country":"US","expected_lat":33.381498,"expected_lon":-111.961547}
+{"id":"reverse_us_000017","category":"reverse","country":"US","lat":39.72215231681943,"lon":-104.88981728499486,"expected_lat":39.721552,"expected_lon":-104.890209}
+{"id":"reverse_us_000006","category":"reverse","country":"US","lat":39.38521375908277,"lon":-76.78300310852778,"expected_lat":39.385831,"expected_lon":-76.783615}
+{"id":"fuzzy_us_000012","q":"Mudoim Pek","category":"fuzzy","country":"US","expected_lat":40.040439,"expected_lon":-120.435494}

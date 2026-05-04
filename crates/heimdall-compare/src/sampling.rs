@@ -365,10 +365,12 @@ pub struct CountryData {
 
 /// Detect country code from index directory name.
 pub fn detect_country_code(dir_name: &str) -> String {
-    // Try to extract 2-letter code from "index-XX" pattern
+    // Try to extract 2-letter code from "index-XX" pattern, allowing optional
+    // suffixes like "-dev", "-ngram", "-realm" used by dev/benchmark indices.
     if let Some(suffix) = dir_name.strip_prefix("index-") {
-        if suffix.len() == 2 {
-            return suffix.to_uppercase();
+        let head = suffix.split('-').next().unwrap_or("");
+        if head.len() == 2 && head.chars().all(|c| c.is_ascii_lowercase()) {
+            return head.to_uppercase();
         }
     }
     // Fallback patterns
