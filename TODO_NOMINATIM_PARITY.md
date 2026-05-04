@@ -642,3 +642,82 @@ it's the visible tip of "we built a forward index and bolted on a
 minimal reverse endpoint." Done right, reverse uses the same address
 index forward search uses, plus polygon containment for admin
 attribution. Phase 1 lands that.
+
+---
+
+## Plan review — 2026-05-04
+
+External read of the audit + proposed phase order. Framing is sound;
+seven caveats draw the line cleanly. Three sequencing nits and one
+cross-roadmap interaction worth flagging before Phase 0 starts.
+
+### 1. Consolidate the schema migration
+
+The cross-cutting note above (lines 502–505) says items #1, #2, #5,
+#28 should land together to pay one 192-country reindex tax. The
+phase table then splits them: #1 and #5 sit in Phase 1.2, while #2
+and #28 are in Phase 2.2. Pick one phase. Recommendation: pull #2
+(`class` field) and #28 (POI granularity) **forward** into Phase 1.2.
+
+- `class` is already on Phase 1.2's critical path because `format=jsonv2`
+  (#12) requires it.
+- `class_type: u16` is 2 bytes; folding it in now is cheaper than
+  reindexing twice.
+- The failed-US-rebuild memory is still on the books — minimising
+  reindex cycles matters operationally.
+
+### 2. #9 (display_name pyramid) has an undocumented dep on #10
+
+Phase 1's #9 says "requires polygon containment (#10) for full
+correctness", but #10 lives in Phase 2.1. Make the choice explicit:
+
+- **(a) Accept partial correctness in Phase 1**: build the pyramid
+  from nearest-centroid admin. Wrong near borders (Lund →
+  Staffanstorp), no worse than today. Ship the visible bug fix now.
+- **(b) Pull #10 forward**: 1 week, but removes two `CLAUDE.md`
+  known-issue bullets and the address-FST muni-id collision
+  workaround.
+
+Default recommendation: (a). Ship the visible bug fix in Phase 1,
+make #10 its own discrete Phase 2 milestone.
+
+### 3. Pin a regression baseline before Phase 1 starts
+
+Every Phase 1 item changes response shape, reverse ranking, or the
+`PlaceRecord` schema. Without a frozen baseline, "Sergels Torg now
+works" ships silently with regressions elsewhere (forward recall on
+edge queries, reverse-radius drift, admin attribution near borders).
+
+Concrete: before Phase 0 lands, run
+
+```
+heimdall-compare run --queries <190-query US corpus> \
+  --rps 1 --output baseline-pre-parity.sqlite
+```
+
+against current main and pin the SQLite as a git-tracked baseline.
+Every Phase-1 PR re-runs and posts a delta in the PR description.
+Repeat for SE/NO/DK corpora once they exist.
+
+### 4. Cross-roadmap interaction with rebuild-modes
+
+`TODO_REBUILD_MODES.md` Phase 5 first-slice landed in PR #12
+(2026-05-04, 9933585). The remaining Phase-5 follow-ups are multi-day
+refactors with FST byte-content breaks (idempotent merges in the
+address pipeline, pre-sort `places.parquet`, typed key-buffer for
+`pack.rs`'s TSV path). Phase 2.2 of *this* doc also forces a
+192-country reindex. Cleanest sequencing:
+
+1. Parity Phase 0 + 1 (no schema break — only 2.2 breaks it).
+2. Rebuild-modes Phase-5 follow-ups.
+3. Parity Phase 2 schema bump — one combined reindex picks up
+   both byte-content changes.
+
+Costs ~1 week of calendar time; saves ~2 full US reindex cycles
+(~24 h each).
+
+### Concrete first PR
+
+Phase 0 stable `place_id` via the hash approach
+(`hash(osm_type, osm_id, class, type) → u64`). Narrow scope, no
+schema impact, 2–3 days. Ship before any meaningful user adoption.

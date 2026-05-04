@@ -123,12 +123,18 @@ struct CountryMeta {
 /// Used by /lookup?osm_ids= to resolve OSM references.
 type OsmIdMap = HashMap<(char, u32), (usize, u32)>;
 
+/// Mapping from stable place_id -> (country_index, record_id).
+/// Used by /lookup?place_ids= to resolve persisted place identifiers.
+/// See `stable_place_id` for the hash domain.
+type StablePlaceIdMap = HashMap<u64, (usize, u32)>;
+
 struct AppState {
     countries: Vec<CountryIndex>,
     global_index: Option<GlobalIndex>,
     #[allow(dead_code)]
     country_id_map: HashMap<String, usize>,
     osm_id_map: std::sync::OnceLock<OsmIdMap>,
+    stable_place_id_map: std::sync::OnceLock<StablePlaceIdMap>,
     started_at: std::time::SystemTime,
     metrics_handle: metrics_exporter_prometheus::PrometheusHandle,
 }
@@ -277,6 +283,13 @@ struct NominatimResult {
     match_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     address: Option<AddressDetails>,
+
+    /// Internal: (country_index, record_id) for filters that need to
+    /// re-fetch the underlying record (e.g. city-context tier). `None`
+    /// for synthetic results (address rows, street rows) that aren't
+    /// bound to a record. Not serialised.
+    #[serde(skip)]
+    internal: Option<(u16, u32)>,
 }
 
 #[derive(Debug, Serialize)]
@@ -791,6 +804,7 @@ async fn search(
                                     country_code: Some("us".to_owned()),
                                 })
                             } else { None },
+                        internal: None,
                         });
                         return Ok(Json(response));
                     }
@@ -827,6 +841,7 @@ async fn search(
                                 country_code: Some(cc),
                             })
                         } else { None },
+                    internal: None,
                     });
                     return Ok(Json(response));
                 }
@@ -881,6 +896,7 @@ async fn search(
                                 country_code: Some("us".to_owned()),
                             })
                         } else { None },
+                    internal: None,
                     });
                     return Ok(Json(response));
                 }
@@ -943,6 +959,7 @@ async fn search(
                             country_code: Some("us".to_owned()),
                         })
                     } else { None },
+                internal: None,
                 });
                 return Ok(Json(response));
             }
@@ -1078,6 +1095,7 @@ async fn search(
                         country_code: Some(cc),
                     })
                 } else { None },
+            internal: None,
             });
             postcode_match_found = true;
         }
@@ -1179,6 +1197,7 @@ async fn search(
                                 country_code: Some(cc),
                             })
                         } else { None },
+                    internal: None,
                     });
                     postcode_match_found = true;
                     break;
@@ -1565,6 +1584,7 @@ async fn search(
                                 country_code: Some(cc),
                             })
                         } else { None },
+                    internal: None,
                     });
                     return Ok(Json(response));
                 }
@@ -1644,9 +1664,9 @@ async fn search(
                     addr_results = addr_index.lookup(&addr_query, muni_id, city_coord);
                 }
                 let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
-                for (i, r) in addr_results.into_iter().enumerate() {
+                for r in addr_results.into_iter() {
                     response.push(NominatimResult {
-                        place_id: i as u64,
+                        place_id: 0,
                         osm_type: None,
                         osm_id: None,
                         display_name: format!("{} {}", r.street, r.housenumber),
@@ -1660,6 +1680,7 @@ async fn search(
                                 &r, &addr_query, country, &cc,
                             ))
                         } else { None },
+                    internal: None,
                     });
                 }
                 if response.iter().any(|r| r.match_type.as_deref() == Some("address")) {
@@ -1715,6 +1736,7 @@ async fn search(
                                     country_code: Some(cc.clone()),
                                 })
                             } else { None },
+                        internal: None,
                         });
                         break;
                     }
@@ -1794,6 +1816,7 @@ async fn search(
                                         country_code: Some(cc.clone()),
                                     })
                                 } else { None },
+                            internal: None,
                             });
                             break;
                         }
@@ -1883,8 +1906,10 @@ async fn search(
             if matches!(r.match_type.as_deref(), Some("exact" | "address" | "street")) {
                 return true;
             }
-            if r.place_id == 0 { return false; }
-            let (ci, rid) = decode_place_id(r.place_id);
+            let (ci, rid) = match r.internal {
+                Some((ci, rid)) => (ci as usize, rid),
+                None => return false,
+            };
             if let Some(country) = state.countries.get(ci) {
                 if let Ok(rec) = country.index.record_store().get(rid) {
                     return city_context_tier(ci, rec.admin1_id, rec.admin2_id, rec.coord,
@@ -2056,10 +2081,10 @@ async fn search(
     // index alignment stays correct.
     let response_tiers: Vec<u8> = if let Some((ctx_country, ctx_a1, ctx_a2, ctx_coord)) = city_context {
         response.iter().map(|r| {
-            // Place-name results have a non-zero place_id encoding
-            // (country, record). Address/street results have place_id=0.
-            if r.place_id != 0 {
-                let (ci, rid) = decode_place_id(r.place_id);
+            // Place-name results carry an `internal` ref to their backing
+            // record; address/street rows leave it None.
+            if let Some((ci, rid)) = r.internal {
+                let ci = ci as usize;
                 if let Some(country) = state.countries.get(ci) {
                     if let Ok(rec) = country.index.record_store().get(rid) {
                         let tier = city_context_tier(
@@ -2346,7 +2371,7 @@ async fn reverse(
         }
     }
 
-    let (record_id, distance_m, country_index, country) = match best {
+    let (record_id, distance_m, _country_index, country) = match best {
         Some(b) => b,
         None => return Ok(Json(serde_json::json!({"error": "no results"}))),
     };
@@ -2364,10 +2389,9 @@ async fn reverse(
     };
 
     let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
-    let encoded_place_id = encode_place_id(country_index, record_id);
 
     let mut result = serde_json::json!({
-        "place_id": encoded_place_id,
+        "place_id": stable_place_id(&record),
         "osm_type": osm_type_from_flags(record.flags),
         "osm_id": if record.osm_id != 0 { Some(record.osm_id) } else { None::<u32> },
         "display_name": display_name,
@@ -2429,16 +2453,24 @@ async fn lookup(
                 }
             };
 
-            let (country_index, record_id) = decode_place_id(place_id);
-
-            if country_index >= state.countries.len() {
-                continue; // out of range — omit
+            // place_id == 0 is the synthetic-row sentinel and is never
+            // resolvable — omit silently rather than reject.
+            if place_id == 0 {
+                continue;
             }
+
+            let stable_map = state
+                .stable_place_id_map
+                .get_or_init(|| build_stable_place_id_map(&state.countries));
+            let (country_index, record_id) = match stable_map.get(&place_id) {
+                Some(&v) => v,
+                None => continue, // unknown / stale place_id — omit
+            };
 
             let country = &state.countries[country_index];
             let record = match country.index.record_store().get(record_id) {
                 Ok(r) => r,
-                Err(_) => continue, // out of range — omit
+                Err(_) => continue, // sidecar map points at a dead record — omit
             };
 
             let name = country.index.record_store().primary_name(&record);
@@ -2482,6 +2514,7 @@ async fn lookup(
                 importance: record.importance as f64 / 65535.0,
                 match_type: None,
                 address,
+                internal: Some((country_index as u16, record_id)),
             });
         }
     }
@@ -2544,9 +2577,8 @@ async fn lookup(
                     None
                 };
 
-                let place_id = encode_place_id(country_index, record_id);
                 results.push(NominatimResult {
-                    place_id,
+                    place_id: stable_place_id(&record),
                     osm_type: Some(osm_type_from_flags(record.flags).to_owned()),
                     osm_id: Some(osm_id),
                     display_name,
@@ -2556,6 +2588,7 @@ async fn lookup(
                     importance: record.importance as f64 / 65535.0,
                     match_type: None,
                     address,
+                    internal: Some((country_index as u16, record_id)),
                 });
             }
             // If not found, omit from results (don't error)
@@ -2569,17 +2602,68 @@ async fn lookup(
 // Place ID encoding
 // ---------------------------------------------------------------------------
 
-/// Encode a globally unique place_id: country_index in high bits, record_id in low 24 bits.
-/// Supports up to 256 countries and ~16M records per country.
-fn encode_place_id(country_index: usize, record_id: u32) -> u64 {
-    ((country_index as u64) << 24) | (record_id as u64 & 0x00FF_FFFF)
+/// Stable place_id derived from the record's OSM identity.
+///
+/// FNV-1a 64 over (osm_type_tag, osm_id_le_bytes, place_type) → u64.
+/// Deterministic across binary versions (no random seed) and stable
+/// across rebuilds as long as the upstream OSM object exists with the
+/// same type + place_type — the audit's recommended approach.
+///
+/// Records without an OSM identity (`osm_id == 0` — synthetic/derived
+/// places) return 0 to preserve the existing "address & street rows
+/// have no place_id" semantic that filters elsewhere rely on.
+///
+/// Note: the underlying `PlaceRecord::osm_id` is currently u32-truncated
+/// (audit item #5). When that field widens to u64, this function keeps
+/// the same shape — only the mixed bytes change. Today's place_ids will
+/// not survive that schema bump; the audit calls this out as a one-shot
+/// migration paid by Phase 2.2.
+fn stable_place_id(record: &heimdall_core::types::PlaceRecord) -> u64 {
+    if record.osm_id == 0 {
+        return 0;
+    }
+    const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut h: u64 = FNV_OFFSET;
+    let osm_type_tag: u8 = if record.flags & 0x08 != 0 { b'R' } else { b'N' };
+    h ^= osm_type_tag as u64;
+    h = h.wrapping_mul(FNV_PRIME);
+    for b in record.osm_id.to_le_bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(FNV_PRIME);
+    }
+    h ^= record.place_type as u8 as u64;
+    h = h.wrapping_mul(FNV_PRIME);
+    // Mask to 53 bits so the value fits in JavaScript's safe-integer
+    // range (Number.MAX_SAFE_INTEGER = 2^53 - 1). Without this, JS
+    // clients (Leaflet, Nominatim-compat libraries, jq) lose precision
+    // when round-tripping through their double-based number parser.
+    // 2^53 is still ~9×10^15 — plenty of headroom for the ≤10^9 OSM
+    // objects we'd ever index on a single planet.
+    h &= 0x001f_ffff_ffff_ffff;
+    // Reserve 0 as the "no place_id" sentinel; vanishingly unlikely
+    // post-mask but cheap to guard against.
+    if h == 0 { 1 } else { h }
 }
 
-/// Decode a place_id into (country_index, local_record_id).
-fn decode_place_id(place_id: u64) -> (usize, u32) {
-    let country_index = (place_id >> 24) as usize;
-    let record_id = (place_id & 0x00FF_FFFF) as u32;
-    (country_index, record_id)
+/// Build a sidecar `stable_place_id → (country_index, record_id)` map by
+/// scanning every record across every loaded country. Mirrors
+/// `build_osm_id_map`. Lazy-initialised on first /lookup?place_ids= hit.
+fn build_stable_place_id_map(countries: &[CountryIndex]) -> StablePlaceIdMap {
+    let mut map = HashMap::new();
+    for (ci, country) in countries.iter().enumerate() {
+        let store = country.index.record_store();
+        let count = store.len() as u32;
+        for rid in 0..count {
+            if let Ok(record) = store.get(rid) {
+                let id = stable_place_id(&record);
+                if id != 0 {
+                    map.insert(id, (ci, rid));
+                }
+            }
+        }
+    }
+    map
 }
 
 /// Infer the OSM type string from PlaceRecord flags.
@@ -2662,8 +2746,6 @@ fn posting_to_nominatim(
         _ => name.clone(),
     };
 
-    let place_id = encode_place_id(country_idx, posting.record_id);
-
     let address = if addressdetails {
         let (city, town, village, suburb) =
             place_type_to_settlement(&record.place_type, &name);
@@ -2685,7 +2767,7 @@ fn posting_to_nominatim(
     };
 
     Some(NominatimResult {
-        place_id,
+        place_id: stable_place_id(&record),
         osm_type: Some(osm_type_from_flags(record.flags).to_owned()),
         osm_id: if record.osm_id != 0 { Some(record.osm_id) } else { None },
         display_name: display,
@@ -2695,11 +2777,16 @@ fn posting_to_nominatim(
         importance: record.importance as f64 / 65535.0,
         match_type: Some(match_type_str.to_owned()),
         address,
+        internal: Some((country_idx as u16, posting.record_id)),
     })
 }
 
+/// Build a `NominatimResult` from a `GeoResult` without touching the
+/// per-country record store. `place_id` defaults to 0 and `internal` to
+/// `None`; callers wanting OSM-bound enrichment use
+/// `to_nominatim_enriched` instead, which loads the record and overrides
+/// both fields with the stable hash + internal ref.
 fn to_nominatim(
-    country_index: usize,
     r: GeoResult,
     address_details: bool,
     country_code: &str,
@@ -2740,13 +2827,8 @@ fn to_nominatim(
         None
     };
 
-    let place_id = match r.record_id {
-        Some(rid) => encode_place_id(country_index, rid),
-        None => 0,
-    };
-
     NominatimResult {
-        place_id,
+        place_id: 0,
         osm_type: None,
         osm_id: None,
         display_name,
@@ -2756,10 +2838,14 @@ fn to_nominatim(
         importance: r.importance as f64 / 65535.0,
         match_type: Some(match_type_str.to_owned()),
         address,
+        internal: None,
     }
 }
 
-/// Enriched version of to_nominatim that fills osm_type and osm_id from PlaceRecord.
+/// Enriched version of `to_nominatim` that loads the underlying record
+/// to fill `place_id` (stable hash), `internal` (country/record ref),
+/// `osm_type`, and `osm_id`. Falls back to the bare `to_nominatim`
+/// shape when the GeoResult has no `record_id` or the lookup fails.
 fn to_nominatim_enriched(
     country_index: usize,
     r: GeoResult,
@@ -2768,14 +2854,16 @@ fn to_nominatim_enriched(
     country_name: &str,
     country: &CountryIndex,
 ) -> NominatimResult {
-    let mut result = to_nominatim(country_index, r, address_details, country_code, country_name);
-    if result.place_id != 0 {
-        let (_, local_id) = decode_place_id(result.place_id);
-        if let Ok(record) = country.index.record_store().get(local_id) {
-            result.osm_type = Some(osm_type_from_flags(record.flags).to_owned());
-            if record.osm_id != 0 {
-                result.osm_id = Some(record.osm_id);
-            }
+    let record_ref = r.record_id.and_then(|rid|
+        country.index.record_store().get(rid).ok().map(|rec| (rid, rec))
+    );
+    let mut result = to_nominatim(r, address_details, country_code, country_name);
+    if let Some((rid, rec)) = record_ref {
+        result.place_id = stable_place_id(&rec);
+        result.internal = Some((country_index as u16, rid));
+        result.osm_type = Some(osm_type_from_flags(rec.flags).to_owned());
+        if rec.osm_id != 0 {
+            result.osm_id = Some(rec.osm_id);
         }
     }
     result
@@ -3773,6 +3861,7 @@ async fn main() -> anyhow::Result<()> {
                 global_index,
                 country_id_map,
                 osm_id_map,
+                stable_place_id_map: std::sync::OnceLock::new(),
                 started_at: std::time::SystemTime::now(),
                 metrics_handle,
             });
@@ -3979,6 +4068,7 @@ mod tests {
             importance: 0.5,
             match_type: None,
             address: None,
+        internal: None,
         };
         assert!(result_in_bbox(&r, &bb));
     }
@@ -4000,6 +4090,7 @@ mod tests {
             importance: 0.5,
             match_type: None,
             address: None,
+        internal: None,
         };
         assert!(!result_in_bbox(&r, &bb));
     }
@@ -4021,6 +4112,7 @@ mod tests {
             importance: 0.5,
             match_type: None,
             address: None,
+        internal: None,
         };
         assert!(result_in_bbox(&r, &bb));
     }
@@ -4042,55 +4134,87 @@ mod tests {
             importance: 0.5,
             match_type: None,
             address: None,
+        internal: None,
         };
         assert!(!result_in_bbox(&r, &bb));
     }
 
     // -----------------------------------------------------------------------
-    // Feature 5: Lookup — encode_place_id / decode_place_id
+    // Feature 5: Lookup — stable_place_id (Phase 0)
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn test_place_id_roundtrip() {
-        let (ci, rid) = (3_usize, 12345_u32);
-        let encoded = encode_place_id(ci, rid);
-        let (dci, drid) = decode_place_id(encoded);
-        assert_eq!(dci, ci);
-        assert_eq!(drid, rid);
+    /// Build a minimal `PlaceRecord` for hashing tests.
+    fn rec(osm_id: u32, flags: u8, place_type: PlaceType) -> heimdall_core::types::PlaceRecord {
+        heimdall_core::types::PlaceRecord {
+            coord: heimdall_core::types::Coord::new(0.0, 0.0),
+            admin1_id: 0,
+            admin2_id: 0,
+            importance: 0,
+            place_type,
+            flags,
+            name_offset: 0,
+            osm_id,
+        }
     }
 
     #[test]
-    fn test_place_id_zero() {
-        let encoded = encode_place_id(0, 0);
-        assert_eq!(encoded, 0);
-        let (ci, rid) = decode_place_id(0);
-        assert_eq!(ci, 0);
-        assert_eq!(rid, 0);
+    fn stable_place_id_is_deterministic() {
+        // Same input → same output, regardless of how often we call it.
+        let r = rec(123_456_789, 0x00, PlaceType::City);
+        let id1 = stable_place_id(&r);
+        let id2 = stable_place_id(&r);
+        let id3 = stable_place_id(&rec(123_456_789, 0x00, PlaceType::City));
+        assert_eq!(id1, id2);
+        assert_eq!(id1, id3);
+        assert_ne!(id1, 0);
     }
 
     #[test]
-    fn test_place_id_max_record() {
-        // 24-bit max = 16_777_215
-        let encoded = encode_place_id(0, 0x00FF_FFFF);
-        let (ci, rid) = decode_place_id(encoded);
-        assert_eq!(ci, 0);
-        assert_eq!(rid, 0x00FF_FFFF);
+    fn stable_place_id_distinguishes_osm_type() {
+        // Same osm_id but node vs relation should hash differently.
+        let n = rec(54413, 0x00, PlaceType::City);
+        let r = rec(54413, 0x08, PlaceType::City);
+        assert_ne!(stable_place_id(&n), stable_place_id(&r));
     }
 
     #[test]
-    fn test_place_id_country_bits() {
-        let encoded = encode_place_id(255, 0);
-        let (ci, rid) = decode_place_id(encoded);
-        assert_eq!(ci, 255);
-        assert_eq!(rid, 0);
+    fn stable_place_id_distinguishes_place_type() {
+        // Same OSM identity but different PlaceType (rare in practice but
+        // possible for edge cases) should hash differently.
+        let a = rec(99, 0x00, PlaceType::City);
+        let b = rec(99, 0x00, PlaceType::Town);
+        assert_ne!(stable_place_id(&a), stable_place_id(&b));
     }
 
     #[test]
-    fn test_place_id_large_record_truncates() {
-        // record_id > 24 bits gets masked
-        let encoded = encode_place_id(1, 0x01FF_FFFF);
-        let (_, rid) = decode_place_id(encoded);
-        assert_eq!(rid, 0x00FF_FFFF); // upper bits masked off
+    fn stable_place_id_distinguishes_osm_id() {
+        let a = rec(100, 0x00, PlaceType::City);
+        let b = rec(101, 0x00, PlaceType::City);
+        assert_ne!(stable_place_id(&a), stable_place_id(&b));
+    }
+
+    #[test]
+    fn stable_place_id_synthetic_record_returns_zero() {
+        // osm_id == 0 is the synthetic-row sentinel — the function must
+        // return 0 so address/street rows keep emitting place_id=0 and
+        // the existing filter logic in `r.internal == None` still holds.
+        let r = rec(0, 0x00, PlaceType::City);
+        assert_eq!(stable_place_id(&r), 0);
+        let r2 = rec(0, 0x08, PlaceType::Town);
+        assert_eq!(stable_place_id(&r2), 0);
+    }
+
+    #[test]
+    fn stable_place_id_known_vector() {
+        // Pin one concrete (input, output) pair so any accidental change
+        // to the FNV constants or mixing order is loud rather than silent.
+        // Input: osm_type='N', osm_id=42, place_type=City (value=2).
+        let id = stable_place_id(&rec(42, 0x00, PlaceType::City));
+        // Computed once, asserted forever. If you change FNV constants
+        // or mixing order, this assertion will catch it — that means
+        // every persisted place_id from prior versions just got
+        // invalidated, which is a hostile event for users.
+        assert_eq!(id, 0x0015_a4df_c8c1_13f8);
     }
 
     #[test]
@@ -4207,6 +4331,7 @@ mod tests {
             importance: 0.5,
             match_type: None,
             address: None,
+        internal: None,
         };
         let json = serde_json::to_string(&r).unwrap();
         assert!(!json.contains("address"));
@@ -4240,6 +4365,7 @@ mod tests {
                 country: Some("Sweden".into()),
                 country_code: Some("se".into()),
             }),
+        internal: None,
         };
         let json = serde_json::to_string(&r).unwrap();
         assert!(json.contains("\"address\""));
