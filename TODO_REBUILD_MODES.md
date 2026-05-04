@@ -15,7 +15,7 @@ cold, read the cited code, and start implementing Phase 1.
 
 ## TL;DR — What we're shipping
 
-Four phased tickets, each ships independently:
+Five phased tickets, each ships independently:
 
 | Phase | What | Effort | Win |
 |---|---|---|---|
@@ -23,9 +23,15 @@ Four phased tickets, each ships independently:
 | **2** | Bounded-RAM pack (external sort, tiered FST build) | ~1 week | US peak RAM ~6 GB → ~512 MB |
 | **3** | Adaptive resource budget (`--budget potato/laptop/server`, never-OOM observer) | ~1 week | "1 GB RAM, 10 GB disk" target hit |
 | **4** | Per-step diff (only re-run phases whose inputs changed) | ~1 week | US incremental rebuild 75 min → 10-15 min |
+| **5** | Pre-sort upstream of pack (sort during enrich, drop pack's SortBuffer) | ~3-5 days | Pack wall time -30-50% on every rebuild; cleaner streaming pack |
 
 Phases 1+2 alone unlock "rebuild on a laptop". Phase 3 hits the potato goal.
-Phase 4 is the perf killer for ongoing rebuilds.
+Phase 4 is the perf killer for ongoing rebuilds. Phase 5 is the common-path
+perf win — every rebuild benefits, not just the rare incremental ones.
+
+**Status (May 2026):** Phases 1, 2, 3, 4 implemented (Phases 1-3 merged on
+main; Phase 4 on this branch — see "Phase 4 — shipped" section). Phase 5
+not started.
 
 ---
 
@@ -537,6 +543,264 @@ estimated time: ~18 min
 
 ---
 
+## Phase 4 — shipped (notes for future tweaks)
+
+What landed differs from the original sketch in two notable ways. Both
+are pragmatic narrowings, not regressions; flagging them here so anyone
+returning to the file knows the as-built shape.
+
+1. **Cascade is linear, not graph-aware.** The merge phases
+   (extract → national → places_source → photon) all mutate the same
+   `places.parquet` / `addresses.parquet` pair. They're not independent
+   nodes — re-running national on a parquet that's already been mutated
+   by photon would double-merge addresses. So Phase 4 cascades downstream
+   only: any earlier phase RUN forces every later phase RUN with reason
+   `"cascade from upstream"`. The sketch's "if only Photon changed,
+   skip extract+national" example is partially true today: photon's
+   own checkpoint can SKIP if photon.md5 is unchanged, but if e.g.
+   national.etag changed, we re-run from national onward (national →
+   photon → enrich → pack), not just national.
+
+   The address merge is dedup-aware (spatial cell + name hash), so
+   re-running photon on a post-photon parquet is roughly idempotent in
+   practice — but we don't lean on that yet. Future work could refactor
+   the merge functions to be strictly idempotent and unlock finer-grained
+   cascades.
+
+2. **Enrich has no on-disk sentinel.** Enrich produces an in-memory
+   `Enriched` value that pack consumes directly. The two phases must run
+   as a unit (skipping enrich would leave pack with nothing to read), so
+   the planner welds `enrich.decision = pack.decision` and only writes
+   `pack.done`. `Phase::Enrich` still appears in `--show-plan` output
+   (informationally) and in the cascade order, but it's never persisted.
+
+### What the sentinels store
+
+Each `<phase>.done` is JSON of shape:
+
+```json
+{
+  "phase": "photon",
+  "started_at": 1777886616, "finished_at": 1777886617,
+  "outputs": [{"name": "addresses_photon.parquet", "size_bytes": 524288}, ...],
+  "inputs": {
+    "_format": "v4",
+    "photon.md5": "d92b2770896e2a5fbe0a6e182e0ea6a2"
+  },
+  "summary": "+1144 places  +519 addr"
+}
+```
+
+The `_format` marker distinguishes Phase-4 sentinels from Phase-3-era
+ones (which had no `inputs` field). When the planner sees a legacy
+sentinel it falls back to "skip if outputs present" rather than forcing
+a full rebuild — so first-upgrade is a no-op for users with healthy
+Phase-3 sentinels.
+
+### Per-phase fingerprint keys
+
+| Phase         | Keys |
+|---------------|------|
+| extract       | `osm.sequence`, `osm.etag`, `osm.extra_urls` (sorted, comma-joined) |
+| national      | `national.type`, `national.etag`, `national.sequence` |
+| places_source | `places_source.type`, `places_source.etag`, `places_source.zones` (canonical `D075=2026-03-15,D971=…`) |
+| photon        | `photon.md5`, `photon.etag` |
+| enrich        | (welded to pack — no fingerprint, no sentinel) |
+| pack          | (cascade-only — empty inputs map besides `_format`) |
+
+The `places_source.zones` encoding deliberately sorts before joining so
+that BD TOPO's per-département map is stable across runs even though
+Rust's `HashMap` iteration is randomised.
+
+### Verification
+
+* Unit tests: `crates/heimdall-build/src/checkpoint.rs` (15 tests on
+  diff/cascade/legacy-fallback) and `rebuild::plan_tests` (7 tests on
+  cascade ordering, missing-output invalidation, fingerprint-key
+  encoding).
+* End-to-end test: `crates/heimdall-build/tests/phase4_e2e.sh` builds
+  Luxembourg from scratch (~30 s on a beefy box, ≤2 min on a potato),
+  asserts all sentinels land with `_format=v4`, then re-runs and
+  verifies all-SKIP, then mutates `photon.done`'s recorded md5 and
+  verifies only photon → enrich → pack RUN.
+* `Dockerfile.test-phase4` runs the same script in a clean container —
+  smoke test for ops scripts that pin a specific Rust toolchain.
+
+### Files touched
+
+- `crates/heimdall-build/src/checkpoint.rs` — `inputs: BTreeMap`,
+  `Decision::{Run{reason},Skip}`, `diff()`, `cascade_decide()`, format
+  marker.
+- `crates/heimdall-build/src/rebuild.rs` — `compute_country_plan()`,
+  `extract_inputs/national_inputs/places_source_inputs/photon_inputs()`,
+  `run_phase` and `write_phase_done` updated to take inputs and a
+  `Decision`. `--show-plan` rewired to use the planner.
+- `crates/heimdall-build/src/main.rs` — help text refresh on
+  `--show-plan`.
+- `Dockerfile.test-phase4`, `crates/heimdall-build/tests/phase4_e2e.sh`,
+  `.dockerignore` — e2e harness.
+
+### Open Phase-4 follow-ups (not blocking)
+
+* Idempotent merges → finer-grained cascade (only re-run the changed
+  source's branch). Probably 1-2 weeks of merge-function refactoring.
+* `--force=all` is currently identical to wiping `checkpoints/`; no
+  change needed unless we extend forces to also wipe specific outputs.
+* The cascade reason is currently flat ("cascade from upstream"); a
+  nicer string would be "cascade from photon (input changed)" so users
+  can trace the trigger one step up. Trivial follow-up.
+
+---
+
+## Phase 5 — Pre-sort upstream of pack (3-5 days, the common-path win)
+
+### Goal
+
+Pack becomes a pure streaming pass: read parquet, encode (key, value),
+insert into MapBuilder. No in-memory sort, no SortBuffer, no spill files.
+The sort moves *upstream* into the step that already has the data in RAM
+to do its own work — `enrich`.
+
+This is the "common path" optimisation: every full rebuild benefits, not
+just the rare "only photon changed" incremental rebuilds that Phase 4's
+finer cascade would target.
+
+### Why "upstream" not "during extract"
+
+The original sketch in TODO question #3 said "pre-sort during extract".
+That framing was slightly off: the FST keys for both place and address
+indices include admin info (`admin1_id`, `admin2_id`, `municipality_id`)
+that **extract doesn't know yet** — admin assignment happens in `enrich`
+via point-in-polygon. So extract can't sort by the FST key directly.
+
+The right place is `enrich`. By the time enrich finishes, every place and
+every address has its admin IDs. Sort the in-memory `Vec<RawPlace>` and
+`Vec<RawAddress>` by FST key before writing the parquet back, and pack
+no longer needs to sort.
+
+### Why it matters
+
+After Phase 2's SortBuffer, pack is bounded-RAM but still does a real
+amount of work:
+
+- Push 30M `(String, u32)` pairs to SortBuffer (US): ~1.5 GB written to
+  scratch
+- K-way merge the spill files: another sequential pass over those 1.5 GB
+- *Then* the actual FST construction (which is what we actually want)
+
+Pre-sort eliminates the first two. Rough extrapolation from Luxembourg's
+pack times (1.3 s places + 1.5 s addresses, 22 K + 170 K rows):
+
+| Country | Pack today (est.) | Pack after | Saved/run |
+|---|---|---|---|
+| Luxembourg | ~3 s | ~2 s | ~1 s |
+| Germany | ~90 s | ~50 s | ~40 s |
+| US | ~6 min | ~3 min | ~3 min |
+| Planet | ~30 min | ~15 min | ~15 min |
+
+Numbers are rough — we'll measure on the first DK + DE + US runs and
+update. The "saved per run" applies to **every** rebuild, full or
+incremental.
+
+Secondary wins:
+
+- **Pack code simplifies.** Pure streaming function: read row, build
+  key, insert. No SortBuffer state, no scratch dir, no pressure signal
+  threading.
+- **Less /tmp churn.** SortBuffer's spill files were ~2× the key
+  payload size. On potato hardware that was ~3 GB scratch on US;
+  Phase 5 drops it to zero.
+- **Pack peak RAM drops further** (already low after Phase 2). Pure
+  streaming = O(1) RAM regardless of country size.
+
+### Implementation
+
+#### 5.1 Sort-and-rewrite at the end of `enrich()`
+
+`crates/heimdall-build/src/enrich.rs` currently:
+
+```rust
+fn enrich(places_parquet: &Path, output_dir: &Path) -> Result<EnrichResult> {
+    // 1. Read places.parquet into Vec<RawPlace>
+    // 2. Build admin polygons, point-in-polygon assign
+    // 3. Read addresses.parquet into Vec<RawAddress>, assign admin
+    // 4. Write admin.bin + admin_map.bin
+    // 5. Return EnrichResult
+}
+```
+
+Phase 5 adds step 4b before step 4: sort the two vecs by their FST key,
+then rewrite the parquets. The keys are computed using the same
+normaliser pack uses, so the ordering matches what pack would have
+produced via SortBuffer.
+
+For laptop+ (≥4 GB RAM), single in-memory sort is fine — US 30M rows ×
+~80 B = ~2.4 GB, which fits. For potato (1 GB RAM), reuse the existing
+SortBuffer with the pressure signal so it spills correctly. Wrapping
+the sort with `if monitor.pressure() == Pressure::Hard { external_sort }
+else { in_place_sort }` is a few lines.
+
+#### 5.2 Pack drops SortBuffer
+
+`pack.rs` and `pack_addr.rs` lose their SortBuffer wiring. Read parquet
+rows in order, insert into MapBuilder. Add an invariant assertion:
+`debug_assert!(prev_key <= current_key)` so a misordered upstream is
+caught loud + early rather than producing a broken FST silently.
+
+#### 5.3 FST byte-for-byte parity check
+
+Pack is the most byte-stable part of the build (any reorder produces a
+different FST). To guard against silent regression, add a CI smoke test
+that builds DK both ways (current path with SortBuffer, Phase-5 path
+with pre-sort) and asserts `cmp` of `fst_exact.fst` and `fst_addr.fst`.
+First run is opt-in (`--phase5-parity-check`); after we trust it, drop
+the legacy path.
+
+#### 5.4 Optional: sort key tweak for US
+
+US currently picks up implicit state-grouping via TIGER's per-state
+ingestion. Phase 5 makes it explicit: address sort key
+`(state_fips, muni_id, normalized_street, housenumber)` — same FST
+output, but better IO locality during enrichment iteration. Probably
+not measurably faster; flag for later if benchmarks show otherwise.
+
+### Files to touch
+
+- `crates/heimdall-build/src/enrich.rs` — add the sort + rewrite step,
+  using SortBuffer when pressure is Hard.
+- `crates/heimdall-build/src/pack.rs` — drop SortBuffer; add ordering
+  assertion.
+- `crates/heimdall-build/src/pack_addr.rs` — same.
+- `crates/heimdall-build/src/sort_buffer.rs` — possibly factor the
+  sort path into something `enrich` can call too. Otherwise unchanged.
+- New: `crates/heimdall-build/benches/pack_pre_sort.rs` — micro-bench
+  comparing pack with/without pre-sort on a sample country.
+
+### Risks
+
+- **Silent FST regression.** A subtle key-encoding mismatch between
+  enrich and pack would produce different FST bytes. Mitigation: §5.3
+  parity check.
+- **Memory pressure migrates from pack to enrich.** Enrich already
+  loads everything in RAM for admin assignment, so the marginal cost
+  is just the sort. Verify on potato that DK + LU + DE still complete
+  within the 1 GB cap.
+- **Phase 4 invalidation interaction.** Pre-sorting changes the parquet
+  output of enrich; if a Phase-4 sentinel from before the upgrade
+  records the parquet size, the next run sees different bytes and
+  invalidates. Acceptable — happens once on upgrade.
+
+### Acceptance
+
+- Pack wall time drops measurably on a real country (DK or DE: -30%
+  target).
+- Output FST is byte-identical to the prior path on DK + LU + DE
+  (verified by §5.3 parity check).
+- `--budget potato` build of DK still completes within the 1 GB cap.
+- New micro-benchmark in `crates/heimdall-build/benches/`.
+
+---
+
 ## Open questions / decisions needed
 
 These are flagged for whoever picks this up, NOT decided yet:
@@ -548,9 +812,9 @@ These are flagged for whoever picks this up, NOT decided yet:
    the purpose) or `data/scratch/`? Probably the latter, but make it
    easy to override.
 
-3. **Pre-sort during extract**: should `extract.rs` sort its output
-   parquet rows by `(state, muni_id, street)` so pack doesn't need to
-   sort at all? Big win, but bigger surgery — defer to Phase 2.5.
+3. ~~**Pre-sort during extract**~~ → resolved as **Phase 5** (sort during
+   enrich, not extract — extract doesn't know admin IDs). See "Phase 5"
+   above.
 
 4. **Memory observer cadence**: 1 s polling burns CPU for nothing on
    short builds. Maybe 1 s default but bump to 5 s after the first
@@ -625,19 +889,31 @@ TODO_REBUILD_MODES.md      — this file
 
 ```
 Context: Read CLAUDE.md, then TODO_REBUILD_MODES.md.
-Goal:    Ship Phase 1 as a single PR.
+Goal:    Ship Phase 5 (pre-sort upstream of pack) as a single PR.
 Steps:
-  1. Read rebuild.rs around lines 850-870 and 1610-1925 to understand
-     existing --cleanup behaviour
-  2. Read oa.rs to confirm the per-region cleanup pattern is intact
-  3. Audit which intermediate files actually get cleaned today vs the
-     Phase 1.1 checklist
-  4. Implement the four flags (1.1-1.4) + dry-run preview (1.5)
-  5. Run on a small country first (--country dk --cleanup)
-  6. Verify peak disk via `du -s data/index-dk data/downloads/dk` before/after
-  7. Open PR, request review
+  1. Read enrich.rs end-to-end to understand the in-memory data flow
+     and where places/addresses live by the time admin is assigned.
+  2. Read pack.rs and pack_addr.rs around the SortBuffer integration
+     to see exactly what key encoding pack uses today (must match).
+  3. Sketch the FST key encoding once and reuse the same function in
+     both enrich (sort) and pack (assertion).
+  4. Implement §5.1: sort + rewrite places.parquet and addresses.parquet
+     at the end of enrich(). Use SortBuffer iff pressure is Hard.
+  5. Implement §5.2: drop SortBuffer from pack; add the ordering
+     assertion.
+  6. Implement §5.3: byte-for-byte parity check against the pre-Phase-5
+     path on DK. Land that test FIRST so the rest is just "make it pass".
+  7. Bench on DE and US; record before/after numbers in the PR.
+  8. Open PR, request review.
+
+Earlier-phase pickup notes:
+  * Phase 1, 2, 3 are merged on main (PRs #9 + #10).
+  * Phase 4 is on the current branch — see "Phase 4 — shipped" section
+    above. Don't re-implement; build on top.
 ```
 
 ---
 
-*Last updated: May 2026, by the US-overhaul session. Status: design complete, no implementation yet. Phase 1 estimated at 1 day; the rest is the rebuild-modes project's roadmap.*
+*Last updated: May 2026 (Phase 4 implementation session). Status:
+Phases 1-3 merged, Phase 4 implemented this branch, Phase 5 designed
+but not started. Phase 5 estimated at 3-5 days.*

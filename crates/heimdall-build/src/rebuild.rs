@@ -342,14 +342,13 @@ fn time_step(
     })
 }
 
-/// Phase 3: run a build step that has a checkpoint sentinel, skipping the
-/// work if a prior run already finished it.
+/// Phase 4: run a build step gated by a planner-provided decision.
 ///
 /// Behaviour:
-///   * If `<index>/checkpoints/<phase>.done` exists AND every recorded
-///     output is still on disk, log a "skipping (checkpoint)" line and
-///     return `Ok(None)` — caller does not push a StepEntry.
-///   * Otherwise run `f`, write the sentinel on success, return `Ok(Some(step))`.
+///   * `decision == Skip` → log a "skipping" line, return `Ok(None)`.
+///   * `decision == Run { reason }` → log the reason, run `f`, write the
+///     sentinel (with `inputs` baked in for the next run's diff), return
+///     `Ok(Some(step))`.
 ///
 /// The checkpoint write is best-effort: if disk is full or the dir
 /// disappeared, we log a warning but the rebuild keeps going. The next
@@ -360,20 +359,21 @@ fn run_phase(
     phase: crate::checkpoint::Phase,
     index_dir: &Path,
     outputs: &[&str],
+    decision: &crate::checkpoint::Decision,
+    inputs: std::collections::BTreeMap<String, String>,
     f: impl FnOnce() -> Result<String>,
 ) -> Result<Option<StepEntry>> {
-    if crate::checkpoint::is_done(index_dir, phase) {
+    if matches!(decision, crate::checkpoint::Decision::Skip) {
         info!(
-            "[{}] {} skipped — checkpoint exists ({})",
-            cc,
-            step_name,
-            crate::checkpoint::sentinel_path(index_dir, phase).display(),
+            "[{}] {} SKIP — {}",
+            cc, step_name, decision.reason(),
         );
         return Ok(None);
     }
+    info!("[{}] {} RUN — {}", cc, step_name, decision.reason());
     let step = time_step(cc, step_name, f)?;
     if let Err(e) = crate::checkpoint::PhaseTimer::start(phase)
-        .finish(index_dir, outputs, &step.details)
+        .finish(index_dir, outputs, inputs, &step.details)
     {
         tracing::warn!("[{}] could not write {} checkpoint: {:#}", cc, phase.as_str(), e);
     }
@@ -388,12 +388,188 @@ fn write_phase_done(
     phase: crate::checkpoint::Phase,
     index_dir: &Path,
     outputs: &[&str],
+    inputs: std::collections::BTreeMap<String, String>,
     summary: &str,
 ) {
     if let Err(e) = crate::checkpoint::PhaseTimer::start(phase)
-        .finish(index_dir, outputs, summary)
+        .finish(index_dir, outputs, inputs, summary)
     {
         tracing::warn!("[{}] could not write {} checkpoint: {:#}", cc, phase.as_str(), e);
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Phase 4: input-fingerprint planner
+// ───────────────────────────────────────────────────────────────────────────
+
+/// Per-phase input fingerprints + cascade-aware decisions for one country.
+/// Computed once at the top of `build_country_pipeline` (and reused by
+/// `--show-plan`). The `inputs` map for each phase is what gets baked into
+/// the sentinel; `decision` is what the runner consults.
+struct CountryPlan {
+    extract: PhasePlan,
+    national: PhasePlan,
+    places_source: PhasePlan,
+    photon: PhasePlan,
+    enrich: PhasePlan,
+    pack: PhasePlan,
+}
+
+struct PhasePlan {
+    decision: crate::checkpoint::Decision,
+    inputs: std::collections::BTreeMap<String, String>,
+}
+
+fn extract_inputs(
+    config: &CountryConfig,
+    cs: &CountryState,
+) -> std::collections::BTreeMap<String, String> {
+    let mut m = std::collections::BTreeMap::new();
+    if let Some(osm) = &config.osm {
+        if let Some(ss) = &cs.osm {
+            if let Some(seq) = ss.osm_sequence {
+                m.insert("osm.sequence".into(), seq.to_string());
+            }
+            if let Some(etag) = &ss.etag {
+                m.insert("osm.etag".into(), etag.clone());
+            }
+        }
+        if !osm.extra_urls.is_empty() {
+            // Adding/removing supplementary PBFs (e.g. Greenland) must
+            // invalidate extract.
+            let mut joined = osm.extra_urls.clone();
+            joined.sort();
+            m.insert("osm.extra_urls".into(), joined.join(","));
+        }
+    }
+    m
+}
+
+fn national_inputs(
+    config: &CountryConfig,
+    cs: &CountryState,
+) -> std::collections::BTreeMap<String, String> {
+    let mut m = std::collections::BTreeMap::new();
+    let Some(nat) = &config.national else { return m; };
+    if let Some(t) = &nat.source_type {
+        m.insert("national.type".into(), t.clone());
+    }
+    if let Some(ss) = &cs.national {
+        if let Some(etag) = &ss.etag {
+            m.insert("national.etag".into(), etag.clone());
+        }
+        if let Some(seq) = ss.sequence_number {
+            m.insert("national.sequence".into(), seq.to_string());
+        }
+    }
+    m
+}
+
+fn places_source_inputs(
+    config: &CountryConfig,
+    cs: &CountryState,
+) -> std::collections::BTreeMap<String, String> {
+    let mut m = std::collections::BTreeMap::new();
+    let Some(ps) = &config.places_source else { return m; };
+    m.insert("places_source.type".into(), ps.source_type.clone());
+    if let Some(ss) = &cs.places_source {
+        if let Some(etag) = &ss.etag {
+            m.insert("places_source.etag".into(), etag.clone());
+        }
+        if let Some(zones) = &ss.zones {
+            // Canonicalise: sorted "zone=date,zone=date,..." so a re-run
+            // with the same zones-map produces the same fingerprint.
+            let mut parts: Vec<String> = zones.iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect();
+            parts.sort();
+            m.insert("places_source.zones".into(), parts.join(","));
+        }
+    }
+    m
+}
+
+fn photon_inputs(
+    config: &CountryConfig,
+    cs: &CountryState,
+) -> std::collections::BTreeMap<String, String> {
+    let mut m = std::collections::BTreeMap::new();
+    if config.photon.is_none() { return m; }
+    if let Some(ss) = &cs.photon {
+        if let Some(md5) = &ss.md5 {
+            m.insert("photon.md5".into(), md5.clone());
+        }
+        if let Some(etag) = &ss.etag {
+            m.insert("photon.etag".into(), etag.clone());
+        }
+    }
+    m
+}
+
+/// Compute the per-phase RUN/SKIP plan for one country with cascading
+/// applied: if any earlier phase decides RUN, every later phase is forced
+/// RUN.
+///
+/// Enrich and Pack are bound together: enrich produces an in-memory
+/// `Enriched` value that pack consumes directly, so they must run as a
+/// unit. The planner sets enrich.decision = pack.decision; the pipeline
+/// runs (or skips) both together. We don't write an enrich.done sentinel
+/// because it would always be redundant with pack.done.
+fn compute_country_plan(
+    index_dir: &Path,
+    config: &CountryConfig,
+    cs: &CountryState,
+) -> CountryPlan {
+    use crate::checkpoint::{cascade_decide, Decision, Phase};
+
+    let extract_in = extract_inputs(config, cs);
+    let national_in = national_inputs(config, cs);
+    let places_source_in = places_source_inputs(config, cs);
+    let photon_in = photon_inputs(config, cs);
+    let empty: std::collections::BTreeMap<String, String> = Default::default();
+
+    // Phases for sources the country doesn't use are inert: they never run
+    // and never participate in the cascade. Without this gate, a country
+    // with no places_source (most of them) would always RUN places_source
+    // ("no checkpoint"), cascading nonsense to photon/pack.
+    let (extract_d, c) = if config.osm.is_some() {
+        cascade_decide(index_dir, Phase::Extract, &extract_in, false)
+    } else {
+        (Decision::Skip, false)
+    };
+    let (national_d, c) = if config.national.is_some() {
+        cascade_decide(index_dir, Phase::National, &national_in, c)
+    } else {
+        (Decision::Skip, c)
+    };
+    let (places_source_d, c) = if config.places_source.is_some() {
+        cascade_decide(index_dir, Phase::PlacesSource, &places_source_in, c)
+    } else {
+        (Decision::Skip, c)
+    };
+    let (photon_d, c) = if config.photon.is_some() {
+        cascade_decide(index_dir, Phase::Photon, &photon_in, c)
+    } else {
+        (Decision::Skip, c)
+    };
+    // Pack consults its own sentinel (in case the user --force=pack'd it
+    // even though upstream is fine), then any cascade from above.
+    let (pack_d, _) = cascade_decide(index_dir, Phase::Pack, &empty, c);
+    // Enrich is welded to pack — same RUN/SKIP. Enrich has no on-disk
+    // sentinel of its own; pack.done covers both.
+    let enrich_d = if pack_d.is_run() {
+        Decision::Run { reason: "binds with pack (in-memory data flow)".into() }
+    } else {
+        Decision::Skip
+    };
+
+    CountryPlan {
+        extract: PhasePlan { decision: extract_d, inputs: extract_in },
+        national: PhasePlan { decision: national_d, inputs: national_in },
+        places_source: PhasePlan { decision: places_source_d, inputs: places_source_in },
+        photon: PhasePlan { decision: photon_d, inputs: photon_in },
+        enrich: PhasePlan { decision: enrich_d, inputs: empty.clone() },
+        pack: PhasePlan { decision: pack_d, inputs: empty },
     }
 }
 
@@ -1936,10 +2112,28 @@ fn build_country_pipeline(
     let places_parquet = index_dir.join("places.parquet");
     let addr_parquet = index_dir.join("addresses.parquet");
 
+    // Phase 4 planner: compute RUN/SKIP for every phase up front. Each
+    // PhasePlan carries the current input fingerprint, baked into the
+    // sentinel when the phase actually runs so the next pass can diff it.
+    let plan = compute_country_plan(&index_dir, config, cs);
+    info!(
+        "[{}] plan: extract={} national={} places_source={} photon={} enrich={} pack={}",
+        cc,
+        if plan.extract.decision.is_run() { "RUN" } else { "SKIP" },
+        if plan.national.decision.is_run() { "RUN" } else { "SKIP" },
+        if plan.places_source.decision.is_run() { "RUN" } else { "SKIP" },
+        if plan.photon.decision.is_run() { "RUN" } else { "SKIP" },
+        if plan.enrich.decision.is_run() { "RUN" } else { "SKIP" },
+        if plan.pack.decision.is_run() { "RUN" } else { "SKIP" },
+    );
+
     if photon_only {
         // ── Photon-only pipeline (e.g., GB) ──────────────────────────────
 
-        // Download Photon (only download needed)
+        // Download Photon (only download needed). The Photon merge writes
+        // both places.parquet and addresses.parquet from scratch in this
+        // branch, so we treat it as both the photon and extract source —
+        // tracked under the Photon checkpoint with photon.md5/etag.
         if let Some(ref photon) = config.photon {
             let ss = cs.photon.get_or_insert_with(Default::default);
             rt.block_on(download_source(client, &photon.url, &download_dir, ss))?;
@@ -1948,49 +2142,62 @@ fn build_country_pipeline(
             .and_then(|s| s.local_path.as_ref()).map(PathBuf::from)
             .ok_or_else(|| anyhow::anyhow!("[{}] No Photon download for photon-only country", cc))?;
 
-        let step = time_step(cc, "photon-extract", || {
-            merge_photon(cc, &photon_path, &places_parquet, &addr_parquet, &index_dir)
-        })?;
-        steps.push(step);
+        let pp = places_parquet.clone();
+        let ap = addr_parquet.clone();
+        let id = index_dir.clone();
+        let photon_path_run = photon_path.clone();
+        if let Some(step) = run_phase(
+            cc, "photon-extract", crate::checkpoint::Phase::Photon,
+            &index_dir,
+            &["places.parquet", "addresses.parquet"],
+            &plan.photon.decision,
+            plan.photon.inputs.clone(),
+            || merge_photon(cc, &photon_path_run, &pp, &ap, &id),
+        )? {
+            steps.push(step);
+        }
 
         // Delete Photon download — no longer needed
         tracker.maybe_delete_file(&photon_path, "photon download", delete_dl, false);
 
-        let (step, enriched) = time_step_with(cc, "enrich", || {
-            let r = crate::enrich::enrich(&places_parquet, &index_dir)?;
-            let desc = format!("{} admin regions", r.admin_count);
-            Ok((r, desc))
-        })?;
-        steps.push(step);
+        if plan.pack.decision.is_run() {
+            let (step, enriched) = time_step_with(cc, "enrich", || {
+                let r = crate::enrich::enrich(&places_parquet, &index_dir)?;
+                let desc = format!("{} admin regions", r.admin_count);
+                Ok((r, desc))
+            })?;
+            steps.push(step);
 
-        pack_indices(cc, &index_dir, &places_parquet, &addr_parquet, &enriched, &pack_opts, &mut steps)?;
-        write_phase_done(
-            cc, crate::checkpoint::Phase::Pack, &index_dir,
-            &["records.bin", "fst_exact.fst", "fst_addr.fst", "addr_streets.bin"],
-            "pack-places + pack-addr complete",
-        );
-        write_build_meta(&index_dir, &photon_path, &steps)?;
+            pack_indices(cc, &index_dir, &places_parquet, &addr_parquet, &enriched, &pack_opts, &mut steps)?;
+            write_phase_done(
+                cc, crate::checkpoint::Phase::Pack, &index_dir,
+                &["records.bin", "fst_exact.fst", "fst_addr.fst", "addr_streets.bin"],
+                plan.pack.inputs.clone(),
+                "pack-places + pack-addr complete",
+            );
+            write_build_meta(&index_dir, &photon_path, &steps)?;
+        } else {
+            info!("[{}] enrich+pack SKIP — {}", cc, plan.pack.decision.reason());
+        }
     } else {
         // ── Full OSM pipeline (staggered downloads) ──────────────────────
 
         // Step 1: Download PBF → extract → delete PBF
-        // Phase 3: gate the entire OSM block on the Extract checkpoint.
-        // `--budget potato` deletes the PBF immediately after extract to
-        // keep peak disk low, so on a resume we don't have a PBF anymore
-        // *and* don't need one — we just need places.parquet +
-        // addresses.parquet to feed the next phase. Skip the download
-        // entirely when extract.done already covers it.
-        let extract_already_done =
-            crate::checkpoint::is_done(&index_dir, crate::checkpoint::Phase::Extract);
-        if extract_already_done {
+        // Phase 4: the planner decides RUN/SKIP based on input fingerprint
+        // diff (osm.sequence/etag/extra_urls) AND output presence. When
+        // SKIP, we bypass the PBF download entirely — `--budget potato`
+        // deletes the PBF mid-pipeline, so resume must not re-fetch.
+        let extract_skip = matches!(
+            plan.extract.decision,
+            crate::checkpoint::Decision::Skip,
+        );
+        if extract_skip {
             info!(
-                "[{}] OSM extract skipped — checkpoint exists ({}); PBF download bypassed",
-                cc,
-                crate::checkpoint::sentinel_path(&index_dir, crate::checkpoint::Phase::Extract)
-                    .display(),
+                "[{}] extract SKIP — {}; PBF download bypassed",
+                cc, plan.extract.decision.reason(),
             );
         }
-        if !extract_already_done && config.osm.is_some() {
+        if !extract_skip && config.osm.is_some() {
             let osm = config.osm.as_ref().unwrap();
             let ss = cs.osm.get_or_insert_with(Default::default);
             let pbf_path = rt.block_on(download_source(client, &osm.url, &download_dir, ss))?;
@@ -2025,16 +2232,17 @@ fn build_country_pipeline(
             };
 
             let pp = places_parquet.clone();
-            // Phase 3: extract is the most expensive single step in a US
+            // Phase 3 + 4: extract is the most expensive single step in a US
             // build (~40 min wall clock). Wrap in run_phase so a kill -9
             // mid-pipeline + restart picks up after extract instead of
-            // re-running it. Outputs are the parquet pair that downstream
-            // steps depend on; if the user later runs --cleanup which
-            // deletes them, is_done returns false and we extract again.
+            // re-running it. The plan's input map (osm.sequence + extras)
+            // gets baked in so a future run can detect a moved PBF.
             if let Some(step) = run_phase(
                 cc, "extract", crate::checkpoint::Phase::Extract,
                 &index_dir,
                 &["places.parquet", "addresses.parquet"],
+                &plan.extract.decision,
+                plan.extract.inputs.clone(),
                 || {
                     let r = crate::extract::extract_places(&merged_pbf_path, &pp, min_population, true)?;
                     Ok(format!("{} places  {} addr", r.place_count, r.address_count))
@@ -2057,19 +2265,18 @@ fn build_country_pipeline(
         let mut national_ran = false;
         if let Some(ref national) = config.national {
             let source_type = national.source_type.as_deref().unwrap_or("");
-            // Skip the whole branch if the National checkpoint already
-            // covers it. The branch below has half a dozen `time_step`
+            // Skip the whole branch if the planner says national is
+            // up to date. The branch below has half a dozen `time_step`
             // sites; gating once at the top is cleaner than wrapping each
             // sub-importer.
-            if crate::checkpoint::is_done(&index_dir, crate::checkpoint::Phase::National) {
+            if matches!(plan.national.decision, crate::checkpoint::Decision::Skip) {
                 info!(
-                    "[{}] national merge skipped — checkpoint exists ({})",
-                    cc,
-                    crate::checkpoint::sentinel_path(&index_dir, crate::checkpoint::Phase::National)
-                        .display(),
+                    "[{}] national SKIP — {}",
+                    cc, plan.national.decision.reason(),
                 );
             } else {
                 national_ran = true;
+                info!("[{}] national RUN — {}", cc, plan.national.decision.reason());
 
             if source_type == "tiger_oa" {
                 let id = index_dir.clone();
@@ -2165,6 +2372,7 @@ fn build_country_pipeline(
                 // tiger_oa). We track addresses.parquet which exists after
                 // every flavour, plus the optional national parquet.
                 &["addresses.parquet"],
+                plan.national.inputs.clone(),
                 "national merge complete",
             );
         }
@@ -2173,15 +2381,14 @@ fn build_country_pipeline(
         // → merge into places.parquet.
         let mut places_source_ran = false;
         if let Some(ref ps) = config.places_source {
-            if crate::checkpoint::is_done(&index_dir, crate::checkpoint::Phase::PlacesSource) {
+            if matches!(plan.places_source.decision, crate::checkpoint::Decision::Skip) {
                 info!(
-                    "[{}] places-source merge skipped — checkpoint exists ({})",
-                    cc,
-                    crate::checkpoint::sentinel_path(&index_dir, crate::checkpoint::Phase::PlacesSource)
-                        .display(),
+                    "[{}] places-source SKIP — {}",
+                    cc, plan.places_source.decision.reason(),
                 );
             } else {
             places_source_ran = true;
+            info!("[{}] places-source RUN — {}", cc, plan.places_source.decision.reason());
             let source_type = ps.source_type.clone();
             let pp = places_parquet.clone();
             let ss = cs.places_source.get_or_insert_with(Default::default);
@@ -2249,25 +2456,39 @@ fn build_country_pipeline(
             } // close places-source checkpoint branch
         }
         if places_source_ran {
+            // Re-fingerprint after the merge: BD TOPO mutates ss.zones
+            // mid-step (per-département editionDate map), and ss may have
+            // gained an etag from the download. Capture the post-merge
+            // state so the next run can detect a moved zone.
+            let fresh_inputs = places_source_inputs(config, cs);
             write_phase_done(
                 cc, crate::checkpoint::Phase::PlacesSource, &index_dir,
                 &["places.parquet"],
+                fresh_inputs,
                 "places-source merge complete",
             );
         }
 
-        // Step 3: Download Photon → merge → delete download
-        if let Some(ref photon) = config.photon {
+        // Step 3: Download Photon → merge → delete download.
+        // The download itself is cheap when nothing changed (HEAD-only),
+        // so we always probe; the planner decides whether to actually
+        // re-merge. When `--budget potato` already deleted the photon
+        // tarball after a prior run, change-detection will short-circuit
+        // here and download_source returns the cached file path.
+        if config.photon.is_some()
+            && (plan.photon.decision.is_run() || delete_dl /* ensures cleanup paths still execute */)
+        {
+            let photon = config.photon.as_ref().unwrap();
             let ss = cs.photon.get_or_insert_with(Default::default);
             let photon_path = rt.block_on(download_source(client, &photon.url, &download_dir, ss))?;
 
             let pp = places_parquet.clone();
             let ap = addr_parquet.clone();
             let id = index_dir.clone();
-            // Phase 3 checkpoint: photon merge has the heaviest IO of the
-            // merge phases (4–8 GB JSONL.zst per country). Wrap with
-            // run_phase so a kill mid-merge can resume from the prior
-            // sentinel.
+            let photon_path_run = photon_path.clone();
+            // Phase 4: photon merge has the heaviest IO of the merge phases
+            // (4–8 GB JSONL.zst per country). The planner skips this when
+            // photon.md5 is unchanged AND no upstream phase ran.
             if let Some(step) = run_phase(
                 cc, "merge-photon", crate::checkpoint::Phase::Photon,
                 &index_dir,
@@ -2275,40 +2496,53 @@ fn build_country_pipeline(
                 // places.parquet. Track both so a cleanup that removes
                 // the parquet correctly invalidates the sentinel.
                 &["addresses_photon.parquet", "places.parquet"],
-                || merge_photon(cc, &photon_path, &pp, &ap, &id),
+                &plan.photon.decision,
+                plan.photon.inputs.clone(),
+                || merge_photon(cc, &photon_path_run, &pp, &ap, &id),
             )? {
                 steps.push(step);
             }
 
             tracker.maybe_delete_file(&photon_path, "photon download", delete_dl, false);
+        } else if config.photon.is_some() {
+            info!("[{}] photon SKIP — {}", cc, plan.photon.decision.reason());
         }
 
-        // Step 4: Enrich
-        let (step, enriched) = time_step_with(cc, "enrich", || {
-            let r = crate::enrich::enrich(&places_parquet, &index_dir)?;
-            let desc = format!("{} admin regions", r.admin_count);
-            Ok((r, desc))
-        })?;
-        steps.push(step);
+        // Step 4 + 5/6: Enrich + Pack are welded together — enrich's
+        // in-memory `Enriched` value feeds pack directly. The planner
+        // sets enrich.decision = pack.decision so they always run as a
+        // unit. SKIP only happens when no upstream RUN AND pack.done is
+        // current; in that case the existing FSTs on disk are still good.
+        if plan.pack.decision.is_run() {
+            let (step, enriched) = time_step_with(cc, "enrich", || {
+                let r = crate::enrich::enrich(&places_parquet, &index_dir)?;
+                let desc = format!("{} admin regions", r.admin_count);
+                Ok((r, desc))
+            })?;
+            steps.push(step);
 
-        // Step 5+6: Pack
-        pack_indices(cc, &index_dir, &places_parquet, &addr_parquet, &enriched, &pack_opts, &mut steps)?;
+            pack_indices(cc, &index_dir, &places_parquet, &addr_parquet, &enriched, &pack_opts, &mut steps)?;
 
-        // Phase 3: pack is conceptually two steps (pack-places +
-        // pack-addr). We treat them as a single Pack phase — the
-        // checkpoint records the FST + record-store outputs and is
-        // written once both succeed.
-        write_phase_done(
-            cc, crate::checkpoint::Phase::Pack, &index_dir,
-            &["records.bin", "fst_exact.fst", "fst_addr.fst", "addr_streets.bin"],
-            "pack-places + pack-addr complete",
-        );
+            // Pack is conceptually two steps (pack-places + pack-addr).
+            // We treat them as a single Pack phase — one checkpoint,
+            // covering enrich + both packs. Inputs are empty: the merge
+            // phases above carry the source fingerprints, and pack
+            // re-runs whenever any of them re-ran (cascade).
+            write_phase_done(
+                cc, crate::checkpoint::Phase::Pack, &index_dir,
+                &["records.bin", "fst_exact.fst", "fst_addr.fst", "addr_streets.bin"],
+                plan.pack.inputs.clone(),
+                "pack-places + pack-addr complete",
+            );
 
-        let source_label = cs.osm.as_ref()
-            .and_then(|s| s.local_path.as_ref())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("unknown"));
-        write_build_meta(&index_dir, &source_label, &steps)?;
+            let source_label = cs.osm.as_ref()
+                .and_then(|s| s.local_path.as_ref())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("unknown"));
+            write_build_meta(&index_dir, &source_label, &steps)?;
+        } else {
+            info!("[{}] enrich+pack SKIP — {}", cc, plan.pack.decision.reason());
+        }
     }
 
     // Build-only files (always removed — never used at serving time and not
@@ -2924,7 +3158,11 @@ pub(crate) fn run_rebuild(
         info!("Skipping (unchanged): {}", skipped.join(", "));
     }
 
-    if to_build.is_empty() {
+    // --show-plan should always print a table even when change-detection
+    // reports nothing to rebuild — that's the most common case when the
+    // user is trying to confirm "yes, the index is up to date". Skip the
+    // early return below and fall through to the show-plan block.
+    if to_build.is_empty() && !show_plan {
         info!("Nothing to rebuild — all sources unchanged.");
         return Ok(());
     }
@@ -2947,26 +3185,35 @@ pub(crate) fn run_rebuild(
         }
     }
 
-    // ── Phase 3: --show-plan — print which steps will run vs skip per
-    // country and exit. No downloads, no builds. Useful when a prior
-    // killed run left checkpoints behind and the user wants to confirm
-    // resume-from-checkpoint will Do The Right Thing.
+    // ── Phase 4: --show-plan — print the per-phase RUN/SKIP table with
+    // *reasons* (input changed, output missing, cascade, no checkpoint).
+    // No downloads, no builds. Useful when a prior killed run left
+    // checkpoints behind and the user wants to confirm resume-from-
+    // checkpoint will Do The Right Thing — or when an input fingerprint
+    // moved and they want to verify only the relevant phases re-run.
+    //
+    // Iterate every requested country (not just `to_build`), because the
+    // most common --show-plan use case is "is everything up to date?"
+    // and answering that requires showing every country's status.
     if show_plan {
         info!("=== rebuild plan ============================================");
-        for cc in &to_build {
+        for cc in &countries {
             let country_config = &config.country[cc];
-            let idx = PathBuf::from(&config.defaults.index_dir).join(&country_config.index_name);
+            let idx = PathBuf::from(&config.defaults.index_dir)
+                .join(&country_config.index_name);
+            let cs = state.countries.entry(cc.clone()).or_default();
+            let plan = compute_country_plan(&idx, country_config, cs);
             info!("[{}] {}", cc, idx.display());
-            for phase in [
-                crate::checkpoint::Phase::Extract,
-                crate::checkpoint::Phase::National,
-                crate::checkpoint::Phase::PlacesSource,
-                crate::checkpoint::Phase::Photon,
-                crate::checkpoint::Phase::Enrich,
-                crate::checkpoint::Phase::Pack,
+            for (phase_name, p) in [
+                ("extract",       &plan.extract),
+                ("national",      &plan.national),
+                ("places_source", &plan.places_source),
+                ("photon",        &plan.photon),
+                ("enrich",        &plan.enrich),
+                ("pack",          &plan.pack),
             ] {
-                let done = crate::checkpoint::is_done(&idx, phase);
-                info!("    {:14} {}", phase.as_str(), if done { "SKIP (checkpoint exists)" } else { "RUN" });
+                let tag = if p.decision.is_run() { "RUN " } else { "SKIP" };
+                info!("    {:14} {}  {}", phase_name, tag, p.decision.reason());
             }
         }
         info!("=============================================================");
@@ -3444,5 +3691,266 @@ mod cleanup_tests {
         ]);
         assert_eq!(dir_size_bytes(dir.path()), 1110);
         assert_eq!(dir_size_bytes(std::path::Path::new("/nonexistent/path/xyz123")), 0);
+    }
+}
+
+#[cfg(test)]
+mod plan_tests {
+    //! Phase 4: end-to-end planner tests against synthetic config + state.
+    //!
+    //! These don't touch the network or the filesystem beyond a tempdir;
+    //! they exercise `compute_country_plan` to verify cascade ordering and
+    //! input-fingerprint diffing under all the documented Phase 4 scenarios.
+    use super::*;
+    use crate::checkpoint::{Phase, PhaseTimer};
+    use std::collections::BTreeMap;
+
+    fn dummy_config() -> CountryConfig {
+        CountryConfig {
+            name: "Test".into(),
+            index_name: "index-tt".into(),
+            normalizer: "data/normalizers/sv.toml".into(),
+            ram_gb: 1,
+            osm: Some(OsmSource {
+                url: "http://example/test.pbf".into(),
+                state_url: None,
+                extra_urls: vec![],
+            }),
+            photon: Some(PhotonSource {
+                url: "http://example/photon-tt.tar.bz2".into(),
+                md5_url: None,
+            }),
+            national: Some(NationalSource {
+                source_type: Some("dawa".into()),
+                url: Some("http://example/dawa.json".into()),
+                sequence_url: None,
+            }),
+            places_source: None,
+        }
+    }
+
+    fn state_with(osm_seq: u64, photon_md5: &str, national_etag: &str) -> CountryState {
+        CountryState {
+            osm: Some(SourceState {
+                osm_sequence: Some(osm_seq),
+                ..Default::default()
+            }),
+            photon: Some(SourceState {
+                md5: Some(photon_md5.into()),
+                ..Default::default()
+            }),
+            national: Some(SourceState {
+                etag: Some(national_etag.into()),
+                ..Default::default()
+            }),
+            places_source: None,
+            last_built: None,
+            diff_count_since_full: None,
+        }
+    }
+
+    /// Simulate a successful prior build: write all sentinels with
+    /// the expected outputs in place. Used as the "stable baseline"
+    /// before testing change scenarios.
+    fn seed_built_index(idx: &Path, config: &CountryConfig, cs: &CountryState) {
+        std::fs::create_dir_all(idx).unwrap();
+        // Outputs the planner expects to find.
+        for f in [
+            "places.parquet",
+            "addresses.parquet",
+            "addresses_photon.parquet",
+            "records.bin",
+            "fst_exact.fst",
+            "fst_addr.fst",
+            "addr_streets.bin",
+        ] {
+            std::fs::write(idx.join(f), b"x").unwrap();
+        }
+        PhaseTimer::start(Phase::Extract).finish(
+            idx, &["places.parquet", "addresses.parquet"],
+            extract_inputs(config, cs), "",
+        ).unwrap();
+        PhaseTimer::start(Phase::National).finish(
+            idx, &["addresses.parquet"],
+            national_inputs(config, cs), "",
+        ).unwrap();
+        // No PlacesSource for this test config.
+        PhaseTimer::start(Phase::Photon).finish(
+            idx, &["addresses_photon.parquet", "places.parquet"],
+            photon_inputs(config, cs), "",
+        ).unwrap();
+        PhaseTimer::start(Phase::Pack).finish(
+            idx,
+            &["records.bin", "fst_exact.fst", "fst_addr.fst", "addr_streets.bin"],
+            BTreeMap::new(), "",
+        ).unwrap();
+    }
+
+    #[test]
+    fn no_changes_skips_everything() {
+        let dir = tempfile::tempdir().unwrap();
+        let idx = dir.path();
+        let config = dummy_config();
+        let cs = state_with(100, "md5_a", "etag_a");
+        seed_built_index(idx, &config, &cs);
+
+        let plan = compute_country_plan(idx, &config, &cs);
+        assert!(!plan.extract.decision.is_run(), "extract: {:?}", plan.extract.decision);
+        assert!(!plan.national.decision.is_run(), "national: {:?}", plan.national.decision);
+        assert!(!plan.photon.decision.is_run(), "photon: {:?}", plan.photon.decision);
+        assert!(!plan.pack.decision.is_run(), "pack: {:?}", plan.pack.decision);
+        assert!(!plan.enrich.decision.is_run(), "enrich: {:?}", plan.enrich.decision);
+    }
+
+    #[test]
+    fn photon_md5_change_runs_only_photon_and_downstream() {
+        let dir = tempfile::tempdir().unwrap();
+        let idx = dir.path();
+        let config = dummy_config();
+        let cs_old = state_with(100, "md5_a", "etag_a");
+        seed_built_index(idx, &config, &cs_old);
+
+        let cs_new = state_with(100, "md5_NEW", "etag_a");
+        let plan = compute_country_plan(idx, &config, &cs_new);
+
+        assert!(!plan.extract.decision.is_run(), "PBF unchanged → skip extract");
+        assert!(!plan.national.decision.is_run(), "DAWA etag unchanged → skip national");
+        assert!(plan.photon.decision.is_run(), "photon.md5 moved → run photon");
+        assert!(plan.photon.decision.reason().contains("photon.md5"));
+        assert!(plan.enrich.decision.is_run(), "cascade to enrich");
+        assert!(plan.pack.decision.is_run(), "cascade to pack");
+    }
+
+    #[test]
+    fn osm_sequence_change_cascades_to_all_downstream() {
+        let dir = tempfile::tempdir().unwrap();
+        let idx = dir.path();
+        let config = dummy_config();
+        let cs_old = state_with(100, "md5_a", "etag_a");
+        seed_built_index(idx, &config, &cs_old);
+
+        let cs_new = state_with(101, "md5_a", "etag_a");
+        let plan = compute_country_plan(idx, &config, &cs_new);
+
+        assert!(plan.extract.decision.is_run());
+        assert!(plan.extract.decision.reason().contains("osm.sequence"));
+        assert!(plan.national.decision.is_run(), "cascade");
+        assert!(plan.photon.decision.is_run(), "cascade");
+        assert!(plan.pack.decision.is_run(), "cascade");
+        // Cascade reasons should mention "cascade" so log readers know
+        // it's not the phase's own input that changed.
+        assert!(plan.national.decision.reason().contains("cascade"));
+    }
+
+    #[test]
+    fn missing_pack_outputs_runs_pack_and_enrich() {
+        let dir = tempfile::tempdir().unwrap();
+        let idx = dir.path();
+        let config = dummy_config();
+        let cs = state_with(100, "md5_a", "etag_a");
+        seed_built_index(idx, &config, &cs);
+
+        // Simulate someone deleting the FSTs without touching parquets.
+        std::fs::remove_file(idx.join("records.bin")).unwrap();
+
+        let plan = compute_country_plan(idx, &config, &cs);
+        assert!(!plan.extract.decision.is_run(), "extract parquet still there");
+        assert!(!plan.photon.decision.is_run(), "photon parquet still there");
+        assert!(plan.pack.decision.is_run());
+        assert!(plan.pack.decision.reason().contains("output missing"));
+        assert!(plan.enrich.decision.is_run(), "enrich welds to pack");
+    }
+
+    #[test]
+    fn fresh_index_runs_everything() {
+        let dir = tempfile::tempdir().unwrap();
+        let idx = dir.path();
+        let config = dummy_config();
+        let cs = state_with(100, "md5_a", "etag_a");
+        // No seed — no checkpoints, no outputs.
+
+        let plan = compute_country_plan(idx, &config, &cs);
+        assert!(plan.extract.decision.is_run());
+        assert!(plan.extract.decision.reason().contains("no checkpoint"));
+        assert!(plan.national.decision.is_run());
+        assert!(plan.photon.decision.is_run());
+        assert!(plan.pack.decision.is_run());
+        assert!(plan.enrich.decision.is_run());
+    }
+
+    #[test]
+    fn places_source_zones_change_invalidates() {
+        let dir = tempfile::tempdir().unwrap();
+        let idx = dir.path();
+        let mut config = dummy_config();
+        config.places_source = Some(PlacesSource {
+            source_type: "bdtopo".into(),
+            url: None,
+            local_path: None,
+        });
+        let mut cs_old = state_with(100, "md5_a", "etag_a");
+        let mut zones_old = std::collections::HashMap::new();
+        zones_old.insert("D075".into(), "2026-03-15".into());
+        zones_old.insert("D971".into(), "2026-02-01".into());
+        cs_old.places_source = Some(SourceState {
+            zones: Some(zones_old),
+            ..Default::default()
+        });
+
+        std::fs::create_dir_all(idx).unwrap();
+        for f in [
+            "places.parquet", "addresses.parquet", "addresses_photon.parquet",
+            "records.bin", "fst_exact.fst", "fst_addr.fst", "addr_streets.bin",
+        ] {
+            std::fs::write(idx.join(f), b"x").unwrap();
+        }
+        PhaseTimer::start(Phase::Extract).finish(
+            idx, &["places.parquet", "addresses.parquet"],
+            extract_inputs(&config, &cs_old), "",
+        ).unwrap();
+        PhaseTimer::start(Phase::National).finish(
+            idx, &["addresses.parquet"],
+            national_inputs(&config, &cs_old), "",
+        ).unwrap();
+        PhaseTimer::start(Phase::PlacesSource).finish(
+            idx, &["places.parquet"],
+            places_source_inputs(&config, &cs_old), "",
+        ).unwrap();
+        PhaseTimer::start(Phase::Photon).finish(
+            idx, &["addresses_photon.parquet", "places.parquet"],
+            photon_inputs(&config, &cs_old), "",
+        ).unwrap();
+        PhaseTimer::start(Phase::Pack).finish(
+            idx,
+            &["records.bin", "fst_exact.fst", "fst_addr.fst", "addr_streets.bin"],
+            BTreeMap::new(), "",
+        ).unwrap();
+
+        // Bump one zone's editionDate.
+        let mut zones_new = std::collections::HashMap::new();
+        zones_new.insert("D075".into(), "2026-04-01".into()); // moved
+        zones_new.insert("D971".into(), "2026-02-01".into());
+        let mut cs_new = cs_old.clone();
+        cs_new.places_source.as_mut().unwrap().zones = Some(zones_new);
+
+        let plan = compute_country_plan(idx, &config, &cs_new);
+        assert!(!plan.extract.decision.is_run());
+        assert!(!plan.national.decision.is_run());
+        assert!(plan.places_source.decision.is_run(), "zones changed");
+        assert!(plan.places_source.decision.reason().contains("zones"));
+        assert!(plan.photon.decision.is_run(), "cascade");
+        assert!(plan.pack.decision.is_run(), "cascade");
+    }
+
+    #[test]
+    fn extract_inputs_includes_extra_urls() {
+        let mut config = dummy_config();
+        config.osm.as_mut().unwrap().extra_urls =
+            vec!["http://faroe.pbf".into(), "http://greenland.pbf".into()];
+        let cs = state_with(100, "md5_a", "etag_a");
+        let inp = extract_inputs(&config, &cs);
+        let extras = inp.get("osm.extra_urls").expect("extras present");
+        // Sorted canonical encoding so ordering changes don't false-positive.
+        assert_eq!(extras, "http://faroe.pbf,http://greenland.pbf");
     }
 }
