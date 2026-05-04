@@ -586,8 +586,10 @@ enum Commands {
         #[arg(long, value_parser = parse_byte_size_u64)]
         max_disk: Option<u64>,
 
-        /// Print the planned step list (skip vs. run) and exit. No downloads,
-        /// no builds. Useful with checkpoints from a prior killed run.
+        /// Print the per-phase plan (RUN/SKIP with reasons) and exit. No
+        /// downloads, no builds. Phase 4: each line includes the trigger
+        /// — "input changed: photon.md5 a1b2…→c3d4…", "output missing",
+        /// "cascade from upstream", or "checkpoint up to date".
         #[arg(long)]
         show_plan: bool,
 

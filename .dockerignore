@@ -1,0 +1,14 @@
+# Don't ship the local data dir into Docker builds — it's a 10+ GB symlink
+# tree of prod artefacts (downloads, indices, parquet) that we never need
+# in a Heimdall image. The container fetches its own sources at runtime.
+data/downloads/
+data/index-*/
+data/global/
+data/scratch/
+data/rebuild-state.json
+data/rebuild-report-*.log
+data/data
+target/
+.git/
+**/.DS_Store
+*.swp
