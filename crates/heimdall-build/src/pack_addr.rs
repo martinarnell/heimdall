@@ -237,7 +237,8 @@ pub fn pack_addresses(
     // ~256 MB. For DK / FI / NZ the data fits in memory and the buffer
     // takes its in-RAM fast path — same throughput as the old Vec sort.
     let mut fst_keys: SortBuffer<u32> =
-        SortBuffer::new(pack_opts.sort_mem, &pack_opts.scratch_dir)?;
+        SortBuffer::new(pack_opts.sort_mem, &pack_opts.scratch_dir)?
+            .with_pressure(pack_opts.pressure.clone());
     let street_count = sorted_groups.len();
 
     for (key, mut group) in sorted_groups {

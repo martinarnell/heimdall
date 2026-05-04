@@ -62,6 +62,9 @@ mod osc;
 mod package;
 mod verify;
 mod sort_buffer;
+mod resource_monitor;
+mod budget;
+mod checkpoint;
 
 #[derive(Parser)]
 #[command(name = "heimdall-build", about = "Build a Heimdall geocoder index from OSM data")]
@@ -506,10 +509,6 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
 
-        /// Skip downloading — reuse existing files, fail if missing
-        #[arg(long)]
-        skip_download: bool,
-
         /// Convenience: shorthand for `--keep-downloads=0 --keep-intermediates=0`.
         /// Deletes downloaded sources AND intermediate parquet after each
         /// country, freeing the most disk at the cost of re-fetching everything
@@ -564,6 +563,39 @@ enum Commands {
         /// Maximum RAM budget in GB for parallel builds (0 = unlimited)
         #[arg(long, default_value = "0")]
         ram_budget: u64,
+
+        /// Resource preset: potato | laptop | workstation | server.
+        /// Sugar over `--max-ram`, `--max-disk`, `--sort-mem`, `--jobs`,
+        /// and `--cleanup`. Explicit flags always beat preset defaults.
+        ///   potato:      1 GB RAM, 10 GB disk, 1 thread,  64 MB sort, --cleanup
+        ///   laptop:      4 GB RAM, 30 GB disk, 2 threads, 512 MB sort, --cleanup
+        ///   workstation: 16 GB RAM, 100 GB disk, n cores, 256 MB sort
+        ///   server:      64 GB RAM, 1 TB disk, n cores, 256 MB sort
+        #[arg(long)]
+        budget: Option<budget::Preset>,
+
+        /// Hard RAM cap in bytes (suffixes: K/M/G). Triggers early SortBuffer
+        /// spills at >90% and `Soft` parallelism throttling at >70%. Overrides
+        /// the value implied by `--budget`.
+        #[arg(long, value_parser = parse_byte_size_u64)]
+        max_ram: Option<u64>,
+
+        /// Hard disk cap in bytes (suffixes: K/M/G) for the index dir +
+        /// downloads dir. Pre-flight refuses to start if available disk is
+        /// less than `--max-disk`. Overrides the `--budget` default.
+        #[arg(long, value_parser = parse_byte_size_u64)]
+        max_disk: Option<u64>,
+
+        /// Print the planned step list (skip vs. run) and exit. No downloads,
+        /// no builds. Useful with checkpoints from a prior killed run.
+        #[arg(long)]
+        show_plan: bool,
+
+        /// Comma-separated phase list to force-rerun even if checkpoints
+        /// exist. Values: extract, national, places_source, photon, enrich,
+        /// pack, all. Example: `--force=enrich,pack`.
+        #[arg(long)]
+        force: Option<String>,
     },
 
     /// Download all sources without building (pre-fetch for later rebuild)
@@ -693,6 +725,10 @@ enum Commands {
 /// Used by `--sort-mem`. Suffixes K/M/G are powers of 1024; bare digits
 /// are bytes. Spaces tolerated. Anything else is a CLI error surfaced
 /// by clap as "invalid value for --sort-mem".
+fn parse_byte_size_u64(s: &str) -> std::result::Result<u64, String> {
+    parse_byte_size(s).map(|v| v as u64)
+}
+
 fn parse_byte_size(s: &str) -> std::result::Result<usize, String> {
     let s = s.trim();
     if s.is_empty() {
@@ -1261,7 +1297,7 @@ fn main() -> Result<()> {
                     .filter(|d| !zone_list.iter().any(|z| z == &**d))
                     .map(|d| (d.to_string(), target.clone()))
                     .collect();
-            let raw = bdtopo::read_bdtopo_streaming("fr", &mut state, &download_dir, false)?;
+            let raw = bdtopo::read_bdtopo_streaming("fr", &mut state, &download_dir)?;
             println!("Streaming smoke test: {} RawPlace records produced", raw.len());
             println!("State after run ({} zones tracked):", state.len());
             let mut zones_sorted: Vec<_> = state.iter()
@@ -1533,7 +1569,6 @@ fn main() -> Result<()> {
             country,
             redownload,
             dry_run,
-            skip_download,
             cleanup,
             keep_downloads,
             keep_intermediates,
@@ -1543,32 +1578,108 @@ fn main() -> Result<()> {
             min_population,
             jobs,
             ram_budget,
+            budget: budget_preset,
+            max_ram,
+            max_disk,
+            show_plan,
+            force,
         } => {
-            // Translate the three CLI knobs into a single CleanupOptions.
-            // --cleanup is a shorthand: any explicit --keep-* still wins so a
-            // user can write `--cleanup --keep-downloads=1` to mean
-            // "wipe parquet but keep PBFs around".
+            // Phase 3: resolve --budget preset → ResolvedBudget. Explicit
+            // --max-ram / --max-disk / --sort-mem / --jobs override the
+            // preset's defaults. The preset can also imply --cleanup (potato
+            // / laptop both default to keep_downloads=0).
+            //
+            // Each CLI flag clap parses keeps its own default — we only
+            // forward to the budget resolver as Some(...) when the user
+            // actually customised it. The "did the user customise it?"
+            // check is heuristic for a few flags whose clap defaults are
+            // `0` / unset; that's noted inline.
+            let was_explicit_jobs = jobs > 1;
+            let was_explicit_sort = sort_mem != 256 * 1024 * 1024;
+            let resolved = budget::BudgetOverrides {
+                preset: budget_preset,
+                max_ram_bytes: max_ram,
+                max_disk_bytes: max_disk,
+                max_threads: if was_explicit_jobs { Some(jobs) } else { None },
+                sort_mem_bytes: if was_explicit_sort { Some(sort_mem) } else { None },
+                keep_downloads: keep_downloads,
+                keep_intermediates: keep_intermediates,
+                scratch_dir: scratch_dir.clone(),
+            }.resolve();
+
+            // Carry the --cleanup shorthand through: if the user passed
+            // --cleanup *or* the preset implies cleanup (potato/laptop set
+            // keep_downloads=0), wipe both unless an explicit --keep-* says
+            // otherwise.
+            let preset_implies_cleanup =
+                resolved.keep_downloads == 0 && resolved.keep_intermediates == 0;
             let cleanup_opts = rebuild::CleanupOptions {
-                keep_downloads: keep_downloads.unwrap_or(if cleanup { 0 } else { 1 }),
-                keep_intermediates: keep_intermediates.unwrap_or(if cleanup { 0 } else { 1 }),
+                keep_downloads: keep_downloads.unwrap_or_else(|| {
+                    if cleanup || preset_implies_cleanup { 0 } else { resolved.keep_downloads }
+                }),
+                keep_intermediates: keep_intermediates.unwrap_or_else(|| {
+                    if cleanup || preset_implies_cleanup { 0 } else { resolved.keep_intermediates }
+                }),
                 dry_run: dry_run_cleanup,
             };
-            // Pack-side knobs. scratch_dir defaults are resolved per-country
-            // (each index dir gets its own .scratch/) when None — see
-            // rebuild::resolve_pack_options.
-            let pack_overrides = rebuild::PackOverrides { sort_mem, scratch_dir };
+            let pack_overrides = rebuild::PackOverrides {
+                sort_mem: resolved.sort_mem_bytes,
+                scratch_dir: resolved.scratch_dir.clone(),
+                pressure: None,
+            };
+            // Threads from the preset feed --jobs unless the user passed
+            // --jobs explicitly. potato → 1, laptop → 2, workstation/server
+            // → all cores.
+            let effective_jobs = if was_explicit_jobs { jobs }
+                else if resolved.max_threads > 0 { resolved.max_threads }
+                else { jobs };
+
+            // Forces: parse --force=phase1,phase2 into a Vec<Phase>.
+            let forces: Vec<checkpoint::Phase> = match force.as_deref() {
+                None => Vec::new(),
+                Some("all") | Some("ALL") => vec![
+                    checkpoint::Phase::Extract,
+                    checkpoint::Phase::National,
+                    checkpoint::Phase::PlacesSource,
+                    checkpoint::Phase::Photon,
+                    checkpoint::Phase::Enrich,
+                    checkpoint::Phase::Pack,
+                ],
+                Some(s) => {
+                    let mut v = Vec::new();
+                    for tok in s.split(',') {
+                        match tok.trim().to_ascii_lowercase().as_str() {
+                            "extract" => v.push(checkpoint::Phase::Extract),
+                            "national" => v.push(checkpoint::Phase::National),
+                            "places_source" | "places-source" => v.push(checkpoint::Phase::PlacesSource),
+                            "photon" => v.push(checkpoint::Phase::Photon),
+                            "enrich" => v.push(checkpoint::Phase::Enrich),
+                            "pack" => v.push(checkpoint::Phase::Pack),
+                            "" => continue,
+                            other => anyhow::bail!(
+                                "unknown phase '{}' in --force; valid: extract, national, places_source, photon, enrich, pack, all",
+                                other,
+                            ),
+                        }
+                    }
+                    v
+                }
+            };
+
             rebuild::run_rebuild(
                 &config,
                 &state_file,
                 country.as_deref(),
                 redownload,
                 dry_run,
-                skip_download,
                 cleanup_opts,
                 pack_overrides,
                 min_population,
-                jobs,
+                effective_jobs,
                 ram_budget,
+                resolved,
+                show_plan,
+                forces,
             )?;
         }
 

@@ -342,6 +342,61 @@ fn time_step(
     })
 }
 
+/// Phase 3: run a build step that has a checkpoint sentinel, skipping the
+/// work if a prior run already finished it.
+///
+/// Behaviour:
+///   * If `<index>/checkpoints/<phase>.done` exists AND every recorded
+///     output is still on disk, log a "skipping (checkpoint)" line and
+///     return `Ok(None)` — caller does not push a StepEntry.
+///   * Otherwise run `f`, write the sentinel on success, return `Ok(Some(step))`.
+///
+/// The checkpoint write is best-effort: if disk is full or the dir
+/// disappeared, we log a warning but the rebuild keeps going. The next
+/// run will simply re-do this step.
+fn run_phase(
+    cc: &str,
+    step_name: &str,
+    phase: crate::checkpoint::Phase,
+    index_dir: &Path,
+    outputs: &[&str],
+    f: impl FnOnce() -> Result<String>,
+) -> Result<Option<StepEntry>> {
+    if crate::checkpoint::is_done(index_dir, phase) {
+        info!(
+            "[{}] {} skipped — checkpoint exists ({})",
+            cc,
+            step_name,
+            crate::checkpoint::sentinel_path(index_dir, phase).display(),
+        );
+        return Ok(None);
+    }
+    let step = time_step(cc, step_name, f)?;
+    if let Err(e) = crate::checkpoint::PhaseTimer::start(phase)
+        .finish(index_dir, outputs, &step.details)
+    {
+        tracing::warn!("[{}] could not write {} checkpoint: {:#}", cc, phase.as_str(), e);
+    }
+    Ok(Some(step))
+}
+
+/// Helper: write a phase sentinel after a step that wasn't routed through
+/// `run_phase`. Used for the multi-time_step phases (national, places_source,
+/// pack) where a single Phase covers multiple `time_step` calls.
+fn write_phase_done(
+    cc: &str,
+    phase: crate::checkpoint::Phase,
+    index_dir: &Path,
+    outputs: &[&str],
+    summary: &str,
+) {
+    if let Err(e) = crate::checkpoint::PhaseTimer::start(phase)
+        .finish(index_dir, outputs, summary)
+    {
+        tracing::warn!("[{}] could not write {} checkpoint: {:#}", cc, phase.as_str(), e);
+    }
+}
+
 /// Time a build step that returns a value alongside its description.
 fn time_step_with<T>(
     cc: &str,
@@ -727,70 +782,95 @@ async fn check_country_changed(
 // ───────────────────────────────────────────────────────────────────────────
 
 /// Download a single source file, update state with local path + etag.
-/// If the URL returns 404 and contains "-latest", try to resolve the actual
-/// dated filename from the directory listing (Graphhopper broke -latest symlinks).
-/// Automatically reuses existing local files if they pass size validation.
+///
+/// Behaviour:
+///   1. Try the local-file lookup first. If a usable file exists at the
+///      expected path (or a base-name match without `-latest`), reuse it.
+///   2. Otherwise resolve the URL (Graphhopper broke `-latest` symlinks
+///      so we may have to scrape the directory listing) and download.
+///
+/// Network failures during the size-validation HEAD fall through to "use
+/// what we have on disk" — that's the offline path: change-detection
+/// already decided we're up to date, so we trust the local file.
 async fn download_source(
     client: &reqwest::Client,
     url: &str,
     download_dir: &Path,
     ss: &mut SourceState,
-    skip: bool,
 ) -> Result<PathBuf> {
-    if skip {
-        let filename = url_filename(url);
-        let local = download_dir.join(&filename);
-        if local.exists() {
-            info!("  Reusing existing: {}", local.display());
-            ss.local_path = Some(local.to_string_lossy().to_string());
-            return Ok(local);
+    // Step 1: cheap local-file lookup. If the file is already on disk
+    // under either the literal URL filename or a base-name variant
+    // (`photon-db-se-250720.tar.bz2` vs `photon-db-se-latest.tar.bz2`),
+    // hand it back without touching the network.
+    let filename = url_filename(url);
+    let literal_local = download_dir.join(&filename);
+    if literal_local.exists() && std::fs::metadata(&literal_local).map(|m| m.len()).unwrap_or(0) > 0 {
+        // We still HEAD to detect truncation, but treat any error as
+        // "trust the local file" — that's the offline-mode path.
+        let local_size = std::fs::metadata(&literal_local).map(|m| m.len()).unwrap_or(0);
+        let size_ok = match client.head(url).send().await {
+            Ok(resp) => match resp.content_length() {
+                Some(expected) if expected > 0 => {
+                    if local_size >= expected {
+                        true
+                    } else {
+                        info!("  {} is truncated ({:.1} MB local vs {:.1} MB expected), re-downloading",
+                            literal_local.file_name().unwrap().to_string_lossy(),
+                            local_size as f64 / 1e6, expected as f64 / 1e6);
+                        false
+                    }
+                }
+                _ => true,
+            },
+            Err(_) => true, // Network unreachable — trust the local file (offline path)
+        };
+        if size_ok {
+            info!("  Reusing existing: {} ({:.1} MB)", literal_local.file_name().unwrap().to_string_lossy(), local_size as f64 / 1e6);
+            ss.local_path = Some(literal_local.to_string_lossy().to_string());
+            return Ok(literal_local);
         }
-        // Also check for a file with the base name pattern (without -latest)
+    }
+
+    // Step 1b: base-name fallback for `-latest` URLs whose dated archive
+    // is already on disk from a prior run.
+    if filename.contains("-latest") {
         if let Ok(entries) = std::fs::read_dir(download_dir) {
             let base = filename.split("-latest").next().unwrap_or(&filename);
             for entry in entries.flatten() {
                 let name = entry.file_name();
                 let name_str = name.to_string_lossy();
                 if name_str.starts_with(base) && !name_str.contains("-latest") && !name_str.ends_with(".md5") {
-                    info!("  Reusing existing: {}", entry.path().display());
-                    ss.local_path = Some(entry.path().to_string_lossy().to_string());
-                    return Ok(entry.path());
+                    let path = entry.path();
+                    if std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) > 0 {
+                        info!("  Reusing existing: {}", path.display());
+                        ss.local_path = Some(path.to_string_lossy().to_string());
+                        return Ok(path);
+                    }
                 }
             }
         }
-        bail!("--skip-download: no existing file found for {} in {}", filename, download_dir.display());
     }
 
+    // Step 2: nothing usable on disk — resolve and download.
     let resolved_url = resolve_photon_url(client, url).await;
     let actual_url = resolved_url.as_deref().unwrap_or(url);
     let local = download_dir.join(url_filename(actual_url));
 
-    // If file already exists, check size against server to detect truncation
-    if local.exists() {
+    // The dated filename may already exist even if the literal one didn't
+    // (e.g. URL was `-latest` but on-disk file is `-250720`). Re-check.
+    if local.exists() && std::fs::metadata(&local).map(|m| m.len()).unwrap_or(0) > 0 {
         let local_size = std::fs::metadata(&local).map(|m| m.len()).unwrap_or(0);
-        if local_size > 0 {
-            // HEAD request to check expected size (detect truncated downloads)
-            let size_ok = match client.head(actual_url).send().await {
-                Ok(resp) => match resp.content_length() {
-                    Some(expected) if expected > 0 => {
-                        if local_size >= expected {
-                            true
-                        } else {
-                            info!("  {} is truncated ({:.1} MB local vs {:.1} MB expected), re-downloading",
-                                local.file_name().unwrap().to_string_lossy(),
-                                local_size as f64 / 1e6, expected as f64 / 1e6);
-                            false
-                        }
-                    }
-                    _ => true, // Server didn't report size or returned 0, trust local file
-                },
-                Err(_) => true, // Can't reach server, use what we have
-            };
-            if size_ok {
-                info!("  Reusing existing: {} ({:.1} MB)", local.file_name().unwrap().to_string_lossy(), local_size as f64 / 1e6);
-                ss.local_path = Some(local.to_string_lossy().to_string());
-                return Ok(local);
-            }
+        let size_ok = match client.head(actual_url).send().await {
+            Ok(resp) => match resp.content_length() {
+                Some(expected) if expected > 0 => local_size >= expected,
+                _ => true,
+            },
+            Err(_) => true,
+        };
+        if size_ok {
+            info!("  Reusing existing: {} ({:.1} MB)", local.file_name().unwrap().to_string_lossy(), local_size as f64 / 1e6);
+            ss.local_path = Some(local.to_string_lossy().to_string());
+            return Ok(local);
         }
     }
 
@@ -863,6 +943,10 @@ async fn resolve_photon_url(client: &reqwest::Client, url: &str) -> Option<Strin
 pub struct PackOverrides {
     pub sort_mem: usize,
     pub scratch_dir: Option<std::path::PathBuf>,
+    /// Phase 3: optional global RSS pressure signal, propagated into the
+    /// SortBuffers used by pack_addr. Defaults to disabled — set via
+    /// `with_pressure` once the resource monitor is constructed.
+    pub pressure: Option<crate::resource_monitor::PressureSignal>,
 }
 
 impl PackOverrides {
@@ -875,6 +959,9 @@ impl PackOverrides {
         }
         if let Some(ref dir) = self.scratch_dir {
             opts.scratch_dir = dir.clone();
+        }
+        if let Some(ref sig) = self.pressure {
+            opts.pressure = sig.clone();
         }
         opts
     }
@@ -1816,7 +1903,6 @@ fn build_country_pipeline(
     cs: &mut CountryState,
     defaults: &Defaults,
     min_population: u32,
-    skip_download: bool,
     cleanup_opts: CleanupOptions,
     pack_overrides: &PackOverrides,
     rt: &tokio::runtime::Runtime,
@@ -1856,7 +1942,7 @@ fn build_country_pipeline(
         // Download Photon (only download needed)
         if let Some(ref photon) = config.photon {
             let ss = cs.photon.get_or_insert_with(Default::default);
-            rt.block_on(download_source(client, &photon.url, &download_dir, ss, skip_download))?;
+            rt.block_on(download_source(client, &photon.url, &download_dir, ss))?;
         }
         let photon_path = cs.photon.as_ref()
             .and_then(|s| s.local_path.as_ref()).map(PathBuf::from)
@@ -1878,14 +1964,36 @@ fn build_country_pipeline(
         steps.push(step);
 
         pack_indices(cc, &index_dir, &places_parquet, &addr_parquet, &enriched, &pack_opts, &mut steps)?;
+        write_phase_done(
+            cc, crate::checkpoint::Phase::Pack, &index_dir,
+            &["records.bin", "fst_exact.fst", "fst_addr.fst", "addr_streets.bin"],
+            "pack-places + pack-addr complete",
+        );
         write_build_meta(&index_dir, &photon_path, &steps)?;
     } else {
         // ── Full OSM pipeline (staggered downloads) ──────────────────────
 
         // Step 1: Download PBF → extract → delete PBF
-        if let Some(ref osm) = config.osm {
+        // Phase 3: gate the entire OSM block on the Extract checkpoint.
+        // `--budget potato` deletes the PBF immediately after extract to
+        // keep peak disk low, so on a resume we don't have a PBF anymore
+        // *and* don't need one — we just need places.parquet +
+        // addresses.parquet to feed the next phase. Skip the download
+        // entirely when extract.done already covers it.
+        let extract_already_done =
+            crate::checkpoint::is_done(&index_dir, crate::checkpoint::Phase::Extract);
+        if extract_already_done {
+            info!(
+                "[{}] OSM extract skipped — checkpoint exists ({}); PBF download bypassed",
+                cc,
+                crate::checkpoint::sentinel_path(&index_dir, crate::checkpoint::Phase::Extract)
+                    .display(),
+            );
+        }
+        if !extract_already_done && config.osm.is_some() {
+            let osm = config.osm.as_ref().unwrap();
             let ss = cs.osm.get_or_insert_with(Default::default);
-            let pbf_path = rt.block_on(download_source(client, &osm.url, &download_dir, ss, skip_download))?;
+            let pbf_path = rt.block_on(download_source(client, &osm.url, &download_dir, ss))?;
 
             // Optional supplementary PBFs (e.g. Greenland + Faroe Islands
             // for Denmark). Downloaded fresh each rebuild — no per-source
@@ -1893,7 +2001,7 @@ fn build_country_pipeline(
             let mut extra_paths: Vec<PathBuf> = Vec::new();
             for extra_url in &osm.extra_urls {
                 let mut tmp_state = SourceState::default();
-                let p = rt.block_on(download_source(client, extra_url, &download_dir, &mut tmp_state, skip_download))?;
+                let p = rt.block_on(download_source(client, extra_url, &download_dir, &mut tmp_state))?;
                 extra_paths.push(p);
             }
 
@@ -1917,11 +2025,23 @@ fn build_country_pipeline(
             };
 
             let pp = places_parquet.clone();
-            let step = time_step(cc, "extract", || {
-                let r = crate::extract::extract_places(&merged_pbf_path, &pp, min_population, true)?;
-                Ok(format!("{} places  {} addr", r.place_count, r.address_count))
-            })?;
-            steps.push(step);
+            // Phase 3: extract is the most expensive single step in a US
+            // build (~40 min wall clock). Wrap in run_phase so a kill -9
+            // mid-pipeline + restart picks up after extract instead of
+            // re-running it. Outputs are the parquet pair that downstream
+            // steps depend on; if the user later runs --cleanup which
+            // deletes them, is_done returns false and we extract again.
+            if let Some(step) = run_phase(
+                cc, "extract", crate::checkpoint::Phase::Extract,
+                &index_dir,
+                &["places.parquet", "addresses.parquet"],
+                || {
+                    let r = crate::extract::extract_places(&merged_pbf_path, &pp, min_population, true)?;
+                    Ok(format!("{} places  {} addr", r.place_count, r.address_count))
+                },
+            )? {
+                steps.push(step);
+            }
 
             // Cleanup PBF + extras + merged file (all served their purpose)
             tracker.maybe_delete_file(&pbf_path, "PBF download", delete_dl, false);
@@ -1934,8 +2054,22 @@ fn build_country_pipeline(
         }
 
         // Step 2: Download national source → merge → delete download
+        let mut national_ran = false;
         if let Some(ref national) = config.national {
             let source_type = national.source_type.as_deref().unwrap_or("");
+            // Skip the whole branch if the National checkpoint already
+            // covers it. The branch below has half a dozen `time_step`
+            // sites; gating once at the top is cleaner than wrapping each
+            // sub-importer.
+            if crate::checkpoint::is_done(&index_dir, crate::checkpoint::Phase::National) {
+                info!(
+                    "[{}] national merge skipped — checkpoint exists ({})",
+                    cc,
+                    crate::checkpoint::sentinel_path(&index_dir, crate::checkpoint::Phase::National)
+                        .display(),
+                );
+            } else {
+                national_ran = true;
 
             if source_type == "tiger_oa" {
                 let id = index_dir.clone();
@@ -1945,15 +2079,21 @@ fn build_country_pipeline(
                 })?;
                 steps.push(step);
             } else if source_type == "dvv" {
-                if skip_download {
-                    info!("[{}] Skipping DVV merge (--skip-download, requires API access)", cc);
-                } else {
-                    // DVV downloads at build time via OGC API
-                    let ap = addr_parquet.clone();
-                    let step = time_step(cc, "merge-national", || {
-                        merge_national(cc, source_type, None, &ap)
-                    })?;
-                    steps.push(step);
+                // DVV downloads at build time via OGC API. If the API is
+                // unreachable (e.g. no network), the importer surfaces an
+                // error — warn and continue without national coverage
+                // rather than aborting the entire country.
+                let ap = addr_parquet.clone();
+                match time_step(cc, "merge-national", || {
+                    merge_national(cc, source_type, None, &ap)
+                }) {
+                    Ok(step) => steps.push(step),
+                    Err(e) => {
+                        tracing::warn!(
+                            "[{}] DVV merge failed ({:#}) — continuing without DVV addresses",
+                            cc, e,
+                        );
+                    }
                 }
             } else if source_type == "linz" {
                 // LINZ: download via API if LINZ_API_KEY is set, otherwise skip
@@ -1987,23 +2127,25 @@ fn build_country_pipeline(
                 // 100+ per-département CSVs from adresse.data.gouv.fr.
                 // No central URL to pre-download, so the merge function
                 // pulls them on first call and caches in the download dir.
-                // Skipping this branch left France without its 26M
-                // addresses — the rebuild silently dropped national
-                // coverage.
-                if skip_download {
-                    info!("[{}] Skipping BAN merge (--skip-download, requires network access)", cc);
-                } else {
-                    let ban_dir = download_dir.join("ban");
-                    let dummy_path = ban_dir.join("adresses-ban.csv.gz");
-                    let ap = addr_parquet.clone();
-                    let step = time_step(cc, "merge-national", || {
-                        merge_national(cc, source_type, Some(&dummy_path), &ap)
-                    })?;
-                    steps.push(step);
+                // If the API is unreachable, warn and continue rather
+                // than failing the whole France build.
+                let ban_dir = download_dir.join("ban");
+                let dummy_path = ban_dir.join("adresses-ban.csv.gz");
+                let ap = addr_parquet.clone();
+                match time_step(cc, "merge-national", || {
+                    merge_national(cc, source_type, Some(&dummy_path), &ap)
+                }) {
+                    Ok(step) => steps.push(step),
+                    Err(e) => {
+                        tracing::warn!(
+                            "[{}] BAN merge failed ({:#}) — continuing without BAN addresses",
+                            cc, e,
+                        );
+                    }
                 }
             } else if let Some(ref url) = national.url {
                 let ss = cs.national.get_or_insert_with(Default::default);
-                let nat_path = rt.block_on(download_source(client, url, &download_dir, ss, skip_download))?;
+                let nat_path = rt.block_on(download_source(client, url, &download_dir, ss))?;
 
                 let ap = addr_parquet.clone();
                 let step = time_step(cc, "merge-national", || {
@@ -2013,11 +2155,33 @@ fn build_country_pipeline(
 
                 tracker.maybe_delete_file(&nat_path, "national download", delete_dl, false);
             }
+            } // close national checkpoint branch
+        }
+        if national_ran {
+            write_phase_done(
+                cc, crate::checkpoint::Phase::National, &index_dir,
+                // National outputs vary by importer (addresses_national.parquet
+                // for DAWA/DVV/etc., direct mutation of addresses.parquet for
+                // tiger_oa). We track addresses.parquet which exists after
+                // every flavour, plus the optional national parquet.
+                &["addresses.parquet"],
+                "national merge complete",
+            );
         }
 
         // Step 2b: Places source (SSR / DAGI / GN250 / BD TOPO)
         // → merge into places.parquet.
+        let mut places_source_ran = false;
         if let Some(ref ps) = config.places_source {
+            if crate::checkpoint::is_done(&index_dir, crate::checkpoint::Phase::PlacesSource) {
+                info!(
+                    "[{}] places-source merge skipped — checkpoint exists ({})",
+                    cc,
+                    crate::checkpoint::sentinel_path(&index_dir, crate::checkpoint::Phase::PlacesSource)
+                        .display(),
+                );
+            } else {
+            places_source_ran = true;
             let source_type = ps.source_type.clone();
             let pp = places_parquet.clone();
             let ss = cs.places_source.get_or_insert_with(Default::default);
@@ -2040,7 +2204,6 @@ fn build_country_pipeline(
                         &cc_owned,
                         &mut zones,
                         &dl_dir,
-                        skip_download,
                     )?;
                     let existing = if pp_for_step.exists() {
                         super::read_osm_places(&pp_for_step)?
@@ -2066,7 +2229,7 @@ fn build_country_pipeline(
                 let gml_path = if let Some(ref local) = ps.local_path {
                     PathBuf::from(local)
                 } else if let Some(ref url) = ps.url {
-                    rt.block_on(download_source(client, url, &download_dir, ss, skip_download))?
+                    rt.block_on(download_source(client, url, &download_dir, ss))?
                 } else {
                     bail!("[{}] places_source has no url or local_path", cc);
                 };
@@ -2083,20 +2246,39 @@ fn build_country_pipeline(
                     );
                 }
             }
+            } // close places-source checkpoint branch
+        }
+        if places_source_ran {
+            write_phase_done(
+                cc, crate::checkpoint::Phase::PlacesSource, &index_dir,
+                &["places.parquet"],
+                "places-source merge complete",
+            );
         }
 
         // Step 3: Download Photon → merge → delete download
         if let Some(ref photon) = config.photon {
             let ss = cs.photon.get_or_insert_with(Default::default);
-            let photon_path = rt.block_on(download_source(client, &photon.url, &download_dir, ss, skip_download))?;
+            let photon_path = rt.block_on(download_source(client, &photon.url, &download_dir, ss))?;
 
             let pp = places_parquet.clone();
             let ap = addr_parquet.clone();
             let id = index_dir.clone();
-            let step = time_step(cc, "merge-photon", || {
-                merge_photon(cc, &photon_path, &pp, &ap, &id)
-            })?;
-            steps.push(step);
+            // Phase 3 checkpoint: photon merge has the heaviest IO of the
+            // merge phases (4–8 GB JSONL.zst per country). Wrap with
+            // run_phase so a kill mid-merge can resume from the prior
+            // sentinel.
+            if let Some(step) = run_phase(
+                cc, "merge-photon", crate::checkpoint::Phase::Photon,
+                &index_dir,
+                // Photon writes addresses_photon.parquet *and* mutates
+                // places.parquet. Track both so a cleanup that removes
+                // the parquet correctly invalidates the sentinel.
+                &["addresses_photon.parquet", "places.parquet"],
+                || merge_photon(cc, &photon_path, &pp, &ap, &id),
+            )? {
+                steps.push(step);
+            }
 
             tracker.maybe_delete_file(&photon_path, "photon download", delete_dl, false);
         }
@@ -2111,6 +2293,16 @@ fn build_country_pipeline(
 
         // Step 5+6: Pack
         pack_indices(cc, &index_dir, &places_parquet, &addr_parquet, &enriched, &pack_opts, &mut steps)?;
+
+        // Phase 3: pack is conceptually two steps (pack-places +
+        // pack-addr). We treat them as a single Pack phase — the
+        // checkpoint records the FST + record-store outputs and is
+        // written once both succeed.
+        write_phase_done(
+            cc, crate::checkpoint::Phase::Pack, &index_dir,
+            &["records.bin", "fst_exact.fst", "fst_addr.fst", "addr_streets.bin"],
+            "pack-places + pack-addr complete",
+        );
 
         let source_label = cs.osm.as_ref()
             .and_then(|s| s.local_path.as_ref())
@@ -2527,7 +2719,7 @@ pub(crate) fn run_download(
 
                 // Create a temporary SourceState for the download
                 let mut ss = SourceState::default();
-                match download_source(&client, &url, &download_dir, &mut ss, false).await {
+                match download_source(&client, &url, &download_dir, &mut ss).await {
                     Ok(path) => {
                         let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
                         info!("[{}] {} done ({:.1} MB)", cc, kind, size as f64 / 1e6);
@@ -2606,12 +2798,14 @@ pub(crate) fn run_rebuild(
     country_filter: Option<&str>,
     redownload: bool,
     dry_run: bool,
-    skip_download: bool,
     cleanup_opts: CleanupOptions,
-    pack_overrides: PackOverrides,
+    mut pack_overrides: PackOverrides,
     min_population: u32,
     jobs: usize,
     ram_budget: u64,
+    resolved_budget: crate::budget::ResolvedBudget,
+    show_plan: bool,
+    forces: Vec<crate::checkpoint::Phase>,
 ) -> Result<()> {
     // Soft-warn about rotation-style values: they're accepted today
     // (treated as "keep current") but the multi-version rotation isn't
@@ -2628,6 +2822,36 @@ pub(crate) fn run_rebuild(
             cleanup_opts.keep_intermediates,
         );
     }
+
+    // Phase 3: spawn the RSS observer if the user picked a budget. The
+    // resulting PressureSignal flows into PackOverrides → SortBuffer.
+    // Unbounded ("no preset") leaves the signal disabled, preserving
+    // pre-Phase-3 behaviour.
+    let monitor = if resolved_budget.max_ram_bytes > 0 {
+        let scratch = resolved_budget.scratch_dir.clone()
+            .unwrap_or_else(|| std::path::PathBuf::from("data/scratch"));
+        let m = crate::resource_monitor::ResourceMonitor::spawn(
+            crate::resource_monitor::ResourceBudget {
+                max_ram_bytes: resolved_budget.max_ram_bytes,
+                max_disk_bytes: resolved_budget.max_disk_bytes,
+                max_threads: resolved_budget.max_threads,
+                scratch_dir: scratch,
+            },
+        );
+        info!(
+            "Resource budget: {} RAM cap, {} disk cap, {} thread{}{}",
+            crate::resource_monitor::fmt_bytes(resolved_budget.max_ram_bytes),
+            crate::resource_monitor::fmt_bytes(resolved_budget.max_disk_bytes),
+            resolved_budget.max_threads,
+            if resolved_budget.max_threads == 1 { "" } else { "s" },
+            resolved_budget.preset.map(|p| format!(" (preset: {:?})", p)).unwrap_or_default(),
+        );
+        pack_overrides.pressure = Some(m.signal());
+        Some(m)
+    } else {
+        None
+    };
+
     let config = load_config(config_path)?;
     let mut state = load_state(state_file)?;
 
@@ -2672,29 +2896,23 @@ pub(crate) fn run_rebuild(
     let mut to_build: Vec<String> = Vec::new();
     let mut skipped: Vec<String> = Vec::new();
 
-    if skip_download {
-        // --skip-download: no network at all, build everything requested
-        info!("Skipping change detection (--skip-download)");
-        to_build = countries.clone();
-    } else {
-        info!("Checking for changes...");
-        for cc in &countries {
-            let country_config = &config.country[cc];
-            let cs = state.countries.entry(cc.clone()).or_default();
-            let changed = rt.block_on(check_country_changed(&client, cc, country_config, cs, redownload));
+    info!("Checking for changes...");
+    for cc in &countries {
+        let country_config = &config.country[cc];
+        let cs = state.countries.entry(cc.clone()).or_default();
+        let changed = rt.block_on(check_country_changed(&client, cc, country_config, cs, redownload));
 
-            // Also rebuild if index is missing or incomplete (no meta.json = failed/corrupt build)
-            let index_dir = PathBuf::from(&config.defaults.index_dir).join(&country_config.index_name);
-            let index_complete = index_dir.join("meta.json").exists();
+        // Also rebuild if index is missing or incomplete (no meta.json = failed/corrupt build)
+        let index_dir = PathBuf::from(&config.defaults.index_dir).join(&country_config.index_name);
+        let index_complete = index_dir.join("meta.json").exists();
 
-            if changed || !index_complete {
-                if !changed && !index_complete {
-                    info!("[{}] sources unchanged but index incomplete (no meta.json) — rebuilding", cc);
-                }
-                to_build.push(cc.clone());
-            } else {
-                skipped.push(cc.clone());
+        if changed || !index_complete {
+            if !changed && !index_complete {
+                info!("[{}] sources unchanged but index incomplete (no meta.json) — rebuilding", cc);
             }
+            to_build.push(cc.clone());
+        } else {
+            skipped.push(cc.clone());
         }
     }
 
@@ -2716,87 +2934,181 @@ pub(crate) fn run_rebuild(
         return Ok(());
     }
 
-    // ── Pre-download phase: download all sources in parallel ────────────
-    // Downloads are I/O bound, not RAM bound. Run them all concurrently
-    // so builds can start immediately from local files.
-    if !skip_download {
-        info!("Downloading sources for {} countries in parallel...", to_build.len());
-        let download_start = Instant::now();
-        let mut download_futures: Vec<std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>> = Vec::new();
-
+    // ── Phase 3: --force=phase1,phase2 — drop those sentinels so the
+    // pipeline re-runs the named phases regardless of checkpoints.
+    if !forces.is_empty() {
         for cc in &to_build {
             let country_config = &config.country[cc];
-            let download_dir = PathBuf::from(&config.defaults.download_dir).join(cc);
-            std::fs::create_dir_all(&download_dir).ok();
+            let idx = PathBuf::from(&config.defaults.index_dir).join(&country_config.index_name);
+            for phase in &forces {
+                let _ = crate::checkpoint::clear_phase(&idx, *phase);
+            }
+            info!("[{}] Forced re-run of phases: {:?}", cc, forces);
+        }
+    }
 
-            // Collect all URLs for this country
-            if let Some(ref osm) = country_config.osm {
-                let url = osm.url.clone();
-                let dir = download_dir.clone();
-                let client = client.clone();
-                let cc2 = cc.clone();
-                let mut ss = state.countries.entry(cc.clone()).or_default()
-                    .osm.clone().unwrap_or_default();
-                download_futures.push(Box::pin(async move {
-                    match download_source(&client, &url, &dir, &mut ss, false).await {
-                        Ok(p) => info!("[{}] OSM: {}", cc2, p.file_name().unwrap().to_string_lossy()),
-                        Err(e) => tracing::warn!("[{}] OSM download failed: {}", cc2, e),
-                    }
-                }));
+    // ── Phase 3: --show-plan — print which steps will run vs skip per
+    // country and exit. No downloads, no builds. Useful when a prior
+    // killed run left checkpoints behind and the user wants to confirm
+    // resume-from-checkpoint will Do The Right Thing.
+    if show_plan {
+        info!("=== rebuild plan ============================================");
+        for cc in &to_build {
+            let country_config = &config.country[cc];
+            let idx = PathBuf::from(&config.defaults.index_dir).join(&country_config.index_name);
+            info!("[{}] {}", cc, idx.display());
+            for phase in [
+                crate::checkpoint::Phase::Extract,
+                crate::checkpoint::Phase::National,
+                crate::checkpoint::Phase::PlacesSource,
+                crate::checkpoint::Phase::Photon,
+                crate::checkpoint::Phase::Enrich,
+                crate::checkpoint::Phase::Pack,
+            ] {
+                let done = crate::checkpoint::is_done(&idx, phase);
+                info!("    {:14} {}", phase.as_str(), if done { "SKIP (checkpoint exists)" } else { "RUN" });
             }
-            if let Some(ref photon) = country_config.photon {
-                let url = photon.url.clone();
-                let dir = download_dir.clone();
-                let client = client.clone();
-                let cc2 = cc.clone();
-                let mut ss = state.countries.entry(cc.clone()).or_default()
-                    .photon.clone().unwrap_or_default();
-                download_futures.push(Box::pin(async move {
-                    match download_source(&client, &url, &dir, &mut ss, false).await {
-                        Ok(p) => info!("[{}] Photon: {}", cc2, p.file_name().unwrap().to_string_lossy()),
-                        Err(e) => tracing::warn!("[{}] Photon download failed: {}", cc2, e),
-                    }
-                }));
-            }
-            if let Some(ref national) = country_config.national {
-                if let Some(ref url) = national.url {
-                    let url = url.clone();
-                    let dir = download_dir.clone();
-                    let client = client.clone();
-                    let cc2 = cc.clone();
-                    let mut ss = state.countries.entry(cc.clone()).or_default()
-                        .national.clone().unwrap_or_default();
-                    download_futures.push(Box::pin(async move {
-                        match download_source(&client, &url, &dir, &mut ss, false).await {
-                            Ok(p) => info!("[{}] National: {}", cc2, p.file_name().unwrap().to_string_lossy()),
-                            Err(e) => tracing::warn!("[{}] National download failed: {}", cc2, e),
-                        }
-                    }));
-                }
+        }
+        info!("=============================================================");
+        return Ok(());
+    }
+
+    // ── Phase 3: pre-flight resource check.
+    //
+    // Compares the budget against the live system state. Bails out with
+    // a clear error if disk is short; warns (but proceeds) if RAM is
+    // tight or if the user picked a budget the box can't hit. We don't
+    // try to predict per-country sizes — that's a pre-flight that needs
+    // the full sources.toml model and lives in Phase 4. For now we use
+    // the budget cap as a proxy.
+    if resolved_budget.max_disk_bytes > 0 || resolved_budget.max_ram_bytes > 0 {
+        let dl_root = PathBuf::from(&config.defaults.download_dir);
+        std::fs::create_dir_all(&dl_root).ok();
+        let avail_disk = crate::resource_monitor::available_disk_bytes(&dl_root);
+        let avail_ram = crate::resource_monitor::available_system_ram_bytes();
+        let total_ram = crate::resource_monitor::total_system_ram_bytes();
+
+        info!("=== pre-flight ==============================================");
+        info!("  Available RAM:   {} (system total: {})",
+            avail_ram.map(crate::resource_monitor::fmt_bytes).unwrap_or_else(|| "?".into()),
+            total_ram.map(crate::resource_monitor::fmt_bytes).unwrap_or_else(|| "?".into()),
+        );
+        info!("  Available disk:  {} ({})",
+            avail_disk.map(crate::resource_monitor::fmt_bytes).unwrap_or_else(|| "?".into()),
+            dl_root.display(),
+        );
+        info!("  Budget RAM cap:  {}", crate::resource_monitor::fmt_bytes(resolved_budget.max_ram_bytes));
+        info!("  Budget disk cap: {}", crate::resource_monitor::fmt_bytes(resolved_budget.max_disk_bytes));
+        info!("  Threads:         {}", resolved_budget.max_threads);
+        info!("=============================================================");
+
+        // Disk: refuse to start if we don't have at least the cap free.
+        if let Some(d) = avail_disk {
+            if resolved_budget.max_disk_bytes > 0 && d < resolved_budget.max_disk_bytes {
+                bail!(
+                    "Insufficient disk: {} available, --max-disk={} required. \
+                     Free space, lower the cap, or use a smaller --budget preset.",
+                    crate::resource_monitor::fmt_bytes(d),
+                    crate::resource_monitor::fmt_bytes(resolved_budget.max_disk_bytes),
+                );
             }
         }
 
-        // Run all downloads concurrently (bounded by reqwest connection pool)
-        let total_downloads = download_futures.len();
-        rt.block_on(async {
-            let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(8)); // 8 concurrent
-            let mut handles = Vec::new();
-            for fut in download_futures {
-                let sem = semaphore.clone();
-                handles.push(tokio::spawn(async move {
-                    let _permit = sem.acquire().await.unwrap();
-                    fut.await;
+        // RAM: warn but don't refuse — the system may swap, and the
+        // observer will throttle parallelism if RSS approaches the cap.
+        if let Some(a) = avail_ram {
+            if resolved_budget.max_ram_bytes > 0 && a < resolved_budget.max_ram_bytes / 2 {
+                tracing::warn!(
+                    "Available RAM ({}) is less than half the --max-ram budget ({}). \
+                     Build will throttle aggressively; consider --budget potato.",
+                    crate::resource_monitor::fmt_bytes(a),
+                    crate::resource_monitor::fmt_bytes(resolved_budget.max_ram_bytes),
+                );
+            }
+        }
+    }
+
+    // ── Pre-download phase: download all sources in parallel ────────────
+    // Downloads are I/O bound, not RAM bound. Run them all concurrently
+    // so builds can start immediately from local files. `download_source`
+    // is itself a no-op when the local file is already present and valid,
+    // so this loop short-circuits cleanly in offline mode.
+    info!("Downloading sources for {} countries in parallel...", to_build.len());
+    let download_start = Instant::now();
+    let mut download_futures: Vec<std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>> = Vec::new();
+
+    for cc in &to_build {
+        let country_config = &config.country[cc];
+        let download_dir = PathBuf::from(&config.defaults.download_dir).join(cc);
+        std::fs::create_dir_all(&download_dir).ok();
+
+        // Collect all URLs for this country
+        if let Some(ref osm) = country_config.osm {
+            let url = osm.url.clone();
+            let dir = download_dir.clone();
+            let client = client.clone();
+            let cc2 = cc.clone();
+            let mut ss = state.countries.entry(cc.clone()).or_default()
+                .osm.clone().unwrap_or_default();
+            download_futures.push(Box::pin(async move {
+                match download_source(&client, &url, &dir, &mut ss).await {
+                    Ok(p) => info!("[{}] OSM: {}", cc2, p.file_name().unwrap().to_string_lossy()),
+                    Err(e) => tracing::warn!("[{}] OSM download failed: {}", cc2, e),
+                }
+            }));
+        }
+        if let Some(ref photon) = country_config.photon {
+            let url = photon.url.clone();
+            let dir = download_dir.clone();
+            let client = client.clone();
+            let cc2 = cc.clone();
+            let mut ss = state.countries.entry(cc.clone()).or_default()
+                .photon.clone().unwrap_or_default();
+            download_futures.push(Box::pin(async move {
+                match download_source(&client, &url, &dir, &mut ss).await {
+                    Ok(p) => info!("[{}] Photon: {}", cc2, p.file_name().unwrap().to_string_lossy()),
+                    Err(e) => tracing::warn!("[{}] Photon download failed: {}", cc2, e),
+                }
+            }));
+        }
+        if let Some(ref national) = country_config.national {
+            if let Some(ref url) = national.url {
+                let url = url.clone();
+                let dir = download_dir.clone();
+                let client = client.clone();
+                let cc2 = cc.clone();
+                let mut ss = state.countries.entry(cc.clone()).or_default()
+                    .national.clone().unwrap_or_default();
+                download_futures.push(Box::pin(async move {
+                    match download_source(&client, &url, &dir, &mut ss).await {
+                        Ok(p) => info!("[{}] National: {}", cc2, p.file_name().unwrap().to_string_lossy()),
+                        Err(e) => tracing::warn!("[{}] National download failed: {}", cc2, e),
+                    }
                 }));
             }
-            for h in handles {
-                let _ = h.await;
-            }
-        });
-
-        let dl_secs = download_start.elapsed().as_secs_f64();
-        info!("Downloads complete: {} sources in {:.0}s", total_downloads, dl_secs);
-        report.download_secs = dl_secs;
+        }
     }
+
+    // Run all downloads concurrently (bounded by reqwest connection pool)
+    let total_downloads = download_futures.len();
+    rt.block_on(async {
+        let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(8)); // 8 concurrent
+        let mut handles = Vec::new();
+        for fut in download_futures {
+            let sem = semaphore.clone();
+            handles.push(tokio::spawn(async move {
+                let _permit = sem.acquire().await.unwrap();
+                fut.await;
+            }));
+        }
+        for h in handles {
+            let _ = h.await;
+        }
+    });
+
+    let dl_secs = download_start.elapsed().as_secs_f64();
+    info!("Downloads complete: {} sources in {:.0}s", total_downloads, dl_secs);
+    report.download_secs = dl_secs;
 
     // ── Build each country (downloads already local) ─────────────────────
 
@@ -2817,7 +3129,7 @@ pub(crate) fn run_rebuild(
             let cs = state.countries.entry(cc.clone()).or_default();
             match build_country_pipeline(
                 cc, country_config, cs, &config.defaults,
-                min_population, skip_download, cleanup_opts, &pack_overrides, &rt, &client,
+                min_population, cleanup_opts, &pack_overrides, &rt, &client,
             ) {
                 Ok(mut step_entries) => {
                     let idx_dir = PathBuf::from(&config.defaults.index_dir).join(&country_config.index_name);
@@ -2887,7 +3199,7 @@ pub(crate) fn run_rebuild(
                         let mut cs = CountryState::default();
                         let result = build_country_pipeline(
                             &cc, country_config, &mut cs, &config.defaults,
-                            min_population, skip_download, cleanup_opts, &pack_overrides, &rt, &client,
+                            min_population, cleanup_opts, &pack_overrides, &rt, &client,
                         );
 
                         active_ram.fetch_sub(est_ram_mb, std::sync::atomic::Ordering::Relaxed);
@@ -2966,6 +3278,17 @@ pub(crate) fn run_rebuild(
         skipped.len(),
         errors.len(),
     );
+
+    // Phase 3: surface the peak RSS the observer recorded so it shows up
+    // in the build log next to the per-step peaks. Useful for tuning
+    // --budget on a new box.
+    if let Some(ref m) = monitor {
+        info!(
+            "Peak RSS over rebuild: {} (budget cap: {})",
+            crate::resource_monitor::fmt_bytes(m.peak_rss()),
+            crate::resource_monitor::fmt_bytes(m.budget().max_ram_bytes),
+        );
+    }
 
     if !errors.is_empty() {
         for (cc, msg) in &errors {
