@@ -25,6 +25,8 @@ use tracing::info;
 use heimdall_core::addr_store::AddrStoreBuilder;
 use heimdall_normalize::Normalizer;
 
+use crate::sort_buffer::{PackOptions, SortBuffer};
+
 pub struct AddrPackStats {
     pub address_count: usize,
     pub street_count: usize,
@@ -60,6 +62,7 @@ pub fn pack_addresses(
     output_dir: &Path,
     admin_map_path: &Path,
     normalizer: &Normalizer,
+    pack_opts: &PackOptions,
 ) -> Result<AddrPackStats> {
     let admin_map: HashMap<i64, (u16, u16)> = if admin_map_path.exists() {
         let bytes = std::fs::read(admin_map_path)?;
@@ -207,16 +210,34 @@ pub fn pack_addresses(
     // -----------------------------------------------------------------------
     // Step 2: Build the street-grouped store
     // -----------------------------------------------------------------------
-    // Sort groups by median latitude for better delta-of-delta compression
+    // Sort groups by median latitude for better delta-of-delta compression.
+    //
+    // The (norm_street, muni_id) tiebreaker is what makes the build
+    // reproducible: `groups` is a HashMap, whose iteration order is
+    // randomised per process by the default hasher. With only the
+    // latitude key, two streets sharing a median lat (common when
+    // microdegree precision collides for nearby segments) end up in
+    // arbitrary order, which assigns different street_ids run-to-run
+    // and produces different bytes in addr_streets.bin / fst_addr.fst.
+    // Falling back on the StreetKey makes the order a pure function
+    // of the input data → identical artefacts for identical inputs.
     let mut sorted_groups: Vec<(StreetKey, StreetGroup)> = groups.into_iter().collect();
     sorted_groups.sort_by(|a, b| {
         let lat_a = a.1.houses.get(a.1.houses.len() / 2).map(|h| h.lat).unwrap_or(0);
         let lat_b = b.1.houses.get(b.1.houses.len() / 2).map(|h| h.lat).unwrap_or(0);
         lat_a.cmp(&lat_b)
+            .then_with(|| a.0.norm_street.cmp(&b.0.norm_street))
+            .then_with(|| a.0.muni_id.cmp(&b.0.muni_id))
     });
 
     let mut store_builder = AddrStoreBuilder::new();
-    let mut fst_keys: Vec<(String, u32)> = Vec::new();
+    // SortBuffer instead of Vec+sort: keeps RAM bounded by `sort_mem` and
+    // spills to `scratch_dir` when the budget is exceeded. For US (~30M
+    // FST keys) this drops peak RAM from ~1.5 GB (just for the keys) to
+    // ~256 MB. For DK / FI / NZ the data fits in memory and the buffer
+    // takes its in-RAM fast path — same throughput as the old Vec sort.
+    let mut fst_keys: SortBuffer<u32> =
+        SortBuffer::new(pack_opts.sort_mem, &pack_opts.scratch_dir)?;
     let street_count = sorted_groups.len();
 
     for (key, mut group) in sorted_groups {
@@ -245,11 +266,11 @@ pub fn pack_addresses(
 
         // Municipality-specific key
         let fst_key = format!("{}:{}", key.norm_street, group.muni_id);
-        fst_keys.push((fst_key, street_id));
+        fst_keys.push(fst_key.into_bytes(), street_id)?;
 
         // Wildcard key (muni_id=0) — for no-city queries
         let wildcard_key = format!("{}:0", key.norm_street);
-        fst_keys.push((wildcard_key, street_id));
+        fst_keys.push(wildcard_key.into_bytes(), street_id)?;
     }
 
     // Write the street-grouped store
@@ -262,21 +283,42 @@ pub fn pack_addresses(
         total_addresses,
     );
 
-    // Build FST (sort + dedup)
-    fst_keys.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
-    fst_keys.dedup_by(|a, b| {
-        if a.0 == b.0 { true } else { false }
-    });
+    // Stream the merged-sorted iterator into MapBuilder, deduping inline
+    // against the previous key. SortBuffer guarantees globally sorted
+    // output; we only need a one-element lookback to drop duplicates.
+    let total_fst_pushes = fst_keys.len();
+    let merged = fst_keys.finish()?;
+    if merged.run_count() > 0 {
+        info!(
+            "Address FST sort: {} runs, {:.1} MB spilled to {}",
+            merged.run_count(),
+            merged.spilled_bytes() as f64 / 1e6,
+            pack_opts.scratch_dir.display(),
+        );
+    }
 
     let fst_path = output_dir.join("fst_addr.fst");
     let fst_file = std::io::BufWriter::new(std::fs::File::create(&fst_path)?);
     let mut fst_builder = MapBuilder::new(fst_file)?;
-    for (key, id) in &fst_keys {
-        fst_builder.insert(key.as_bytes(), *id as u64)?;
+    let mut prev_key: Option<Vec<u8>> = None;
+    let mut unique_keys = 0u64;
+    for entry in merged {
+        let (key, id) = entry?;
+        if prev_key.as_deref() == Some(key.as_slice()) {
+            continue; // duplicate (street appears in multiple input rows)
+        }
+        fst_builder.insert(&key, id as u64)?;
+        prev_key = Some(key);
+        unique_keys += 1;
     }
     fst_builder.finish()?;
     let fst_bytes = std::fs::metadata(&fst_path)?.len() as usize;
-    info!("Address FST: {:.1} MB ({} keys)", fst_bytes as f64 / 1e6, fst_keys.len());
+    info!(
+        "Address FST: {:.1} MB ({} unique keys, {} duplicates dropped)",
+        fst_bytes as f64 / 1e6,
+        unique_keys,
+        total_fst_pushes - unique_keys,
+    );
     heimdall_core::compressed_io::compress_file(&fst_path, 19)?;
 
     // -----------------------------------------------------------------------

@@ -61,6 +61,7 @@ mod geocache;
 mod osc;
 mod package;
 mod verify;
+mod sort_buffer;
 
 #[derive(Parser)]
 #[command(name = "heimdall-build", about = "Build a Heimdall geocoder index from OSM data")]
@@ -509,9 +510,48 @@ enum Commands {
         #[arg(long)]
         skip_download: bool,
 
-        /// Delete downloaded sources after building (saves disk, but forces re-download next time)
+        /// Convenience: shorthand for `--keep-downloads=0 --keep-intermediates=0`.
+        /// Deletes downloaded sources AND intermediate parquet after each
+        /// country, freeing the most disk at the cost of re-fetching everything
+        /// next rebuild. ETags / sequence numbers in rebuild-state.json are
+        /// preserved, so change detection still works.
         #[arg(long)]
         cleanup: bool,
+
+        /// How many recent download generations to keep per source.
+        /// 0 = delete after consumption (zero cache).
+        /// 1 = keep current download (default — what the weekly rebuild
+        /// expects so it can short-circuit when sources are unchanged).
+        /// Values >1 reserved for future rotation; treated as 1 today.
+        #[arg(long)]
+        keep_downloads: Option<u32>,
+
+        /// How many recent intermediate-parquet generations to keep per
+        /// country. 0 = delete places.parquet / addresses*.parquet after
+        /// pack. 1 = keep current build's parquet (default — needed by
+        /// `--skip-extract` rebuilds and the geocache pipeline).
+        #[arg(long)]
+        keep_intermediates: Option<u32>,
+
+        /// Show what cleanup would delete without actually deleting anything.
+        /// Useful before running `--cleanup` on a tight-disk machine.
+        #[arg(long)]
+        dry_run_cleanup: bool,
+
+        /// Bytes per in-memory batch in the address FST sort. When the
+        /// batch exceeds this, it spills to `--scratch-dir`. Lower =
+        /// less RAM, more disk I/O. Accepts plain bytes or suffixed
+        /// values: `64M`, `512M`, `2G`. Default 256M.
+        #[arg(long, default_value = "256M", value_parser = parse_byte_size)]
+        sort_mem: usize,
+
+        /// Where the address FST sort spills run files. Default
+        /// `<index_dir>/.scratch/`. Override to put scratch on a
+        /// faster disk (NVMe) when the index dir is on a slower one.
+        /// $TMPDIR is intentionally NOT the default — it's often
+        /// tmpfs (RAM-backed) on Linux and would defeat the spill.
+        #[arg(long)]
+        scratch_dir: Option<PathBuf>,
 
         /// Only index places with population >= N (0 = all)
         #[arg(long, default_value = "0")]
@@ -628,8 +668,12 @@ enum Commands {
         #[arg(long, value_delimiter = ',')]
         country: Vec<String>,
 
-        /// Keep backup files (.bak)
-        #[arg(long, default_value = "true")]
+        /// Keep backup files (.bak). Default: false — repacks
+        /// historically left ~400 MB of `*.bak` artefacts behind per
+        /// country, accumulating on disk. Pass `--keep-backup` (or
+        /// `--keep-backup=true`) to opt back into the old behaviour
+        /// when you actually need to roll back a repack.
+        #[arg(long, default_value = "false")]
         keep_backup: bool,
     },
 
@@ -643,6 +687,54 @@ enum Commands {
         #[arg(long)]
         output: Option<PathBuf>,
     },
+}
+
+/// Parse a byte-size string (e.g. "256M", "2G", "65536") into a usize.
+/// Used by `--sort-mem`. Suffixes K/M/G are powers of 1024; bare digits
+/// are bytes. Spaces tolerated. Anything else is a CLI error surfaced
+/// by clap as "invalid value for --sort-mem".
+fn parse_byte_size(s: &str) -> std::result::Result<usize, String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err("expected a size like 256M, got empty string".to_string());
+    }
+    let (num_part, mult) = match s.chars().last().unwrap().to_ascii_uppercase() {
+        'K' => (&s[..s.len() - 1], 1024usize),
+        'M' => (&s[..s.len() - 1], 1024 * 1024),
+        'G' => (&s[..s.len() - 1], 1024 * 1024 * 1024),
+        c if c.is_ascii_digit() => (s, 1),
+        c => return Err(format!("unknown size suffix '{}', expected K/M/G or plain bytes", c)),
+    };
+    let n: usize = num_part
+        .trim()
+        .parse()
+        .map_err(|_| format!("'{}' is not a valid number", num_part))?;
+    n.checked_mul(mult)
+        .ok_or_else(|| format!("size {}{} overflows usize", n, mult))
+}
+
+#[cfg(test)]
+mod parse_byte_size_tests {
+    use super::parse_byte_size;
+    #[test]
+    fn parses_plain_digits_as_bytes() {
+        assert_eq!(parse_byte_size("1024").unwrap(), 1024);
+        assert_eq!(parse_byte_size("0").unwrap(), 0);
+    }
+    #[test]
+    fn parses_kmg_suffixes_as_powers_of_1024() {
+        assert_eq!(parse_byte_size("1K").unwrap(), 1024);
+        assert_eq!(parse_byte_size("256M").unwrap(), 256 * 1024 * 1024);
+        assert_eq!(parse_byte_size("2G").unwrap(), 2 * 1024 * 1024 * 1024);
+        // lower-case allowed
+        assert_eq!(parse_byte_size("4k").unwrap(), 4096);
+    }
+    #[test]
+    fn rejects_unknown_suffix() {
+        assert!(parse_byte_size("10X").is_err());
+        assert!(parse_byte_size("M").is_err());
+        assert!(parse_byte_size("").is_err());
+    }
 }
 
 fn main() -> Result<()> {
@@ -1031,8 +1123,10 @@ fn main() -> Result<()> {
             };
             let addr_parquet = output.join("addresses.parquet");
             let admin_map_path = output.join("admin_map.bin");
+            // Standalone build path: use defaults (256 MB, .scratch/ next to the index).
+            let pack_opts = sort_buffer::PackOptions::default_for(&output);
             let addr_stats = pack_addr::pack_addresses(
-                &[addr_parquet.as_path()], &output, &admin_map_path, &normalizer,
+                &[addr_parquet.as_path()], &output, &admin_map_path, &normalizer, &pack_opts,
             )?;
 
             // Write meta.json
@@ -1441,10 +1535,28 @@ fn main() -> Result<()> {
             dry_run,
             skip_download,
             cleanup,
+            keep_downloads,
+            keep_intermediates,
+            dry_run_cleanup,
+            sort_mem,
+            scratch_dir,
             min_population,
             jobs,
             ram_budget,
         } => {
+            // Translate the three CLI knobs into a single CleanupOptions.
+            // --cleanup is a shorthand: any explicit --keep-* still wins so a
+            // user can write `--cleanup --keep-downloads=1` to mean
+            // "wipe parquet but keep PBFs around".
+            let cleanup_opts = rebuild::CleanupOptions {
+                keep_downloads: keep_downloads.unwrap_or(if cleanup { 0 } else { 1 }),
+                keep_intermediates: keep_intermediates.unwrap_or(if cleanup { 0 } else { 1 }),
+                dry_run: dry_run_cleanup,
+            };
+            // Pack-side knobs. scratch_dir defaults are resolved per-country
+            // (each index dir gets its own .scratch/) when None — see
+            // rebuild::resolve_pack_options.
+            let pack_overrides = rebuild::PackOverrides { sort_mem, scratch_dir };
             rebuild::run_rebuild(
                 &config,
                 &state_file,
@@ -1452,7 +1564,8 @@ fn main() -> Result<()> {
                 redownload,
                 dry_run,
                 skip_download,
-                cleanup,
+                cleanup_opts,
+                pack_overrides,
                 min_population,
                 jobs,
                 ram_budget,
@@ -1798,8 +1911,10 @@ fn build_country(input: &Path, output: &Path, skip_extract: bool, min_population
     };
     let addr_parquet = output.join("addresses.parquet");
     let admin_map_path = output.join("admin_map.bin");
+    // Standalone build path: defaults (256 MB sort_mem, .scratch/ next to index).
+    let pack_opts = sort_buffer::PackOptions::default_for(output);
     let addr_stats = pack_addr::pack_addresses(
-        &[addr_parquet.as_path()], output, &admin_map_path, &normalizer,
+        &[addr_parquet.as_path()], output, &admin_map_path, &normalizer, &pack_opts,
     )?;
 
     // Step 5: Write meta.json (with PBF metadata for caching)
