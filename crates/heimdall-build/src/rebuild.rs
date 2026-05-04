@@ -211,6 +211,142 @@ fn url_filename(url: &str) -> String {
     }
 }
 
+/// One source's expected on-disk path + (optional) URL for pre-flight
+/// validation. Used by `validate_source_inputs` to detect "rebuild will
+/// crash 2 hours in because GNIS isn't on disk" before we start.
+struct SourceCheck {
+    cc: String,
+    kind: &'static str,
+    local: PathBuf,
+    url: Option<String>,
+}
+
+/// Pre-flight: for every source belonging to a country we plan to build,
+/// confirm the file is on disk (Option A) or reachable via HEAD (Option B).
+/// Returns the list of sources that are *neither* — empty Vec means we're
+/// good to proceed. 4xx HEAD = bail; 5xx/timeout/network errors = log a
+/// warning and treat as transient (download_source retries with GET).
+async fn validate_source_inputs(
+    client: &reqwest::Client,
+    config: &SourcesConfig,
+    to_build: &[String],
+) -> Vec<(SourceCheck, String)> {
+    let dl_root = PathBuf::from(&config.defaults.download_dir);
+    let mut checks: Vec<SourceCheck> = Vec::new();
+    for cc in to_build {
+        let cfg = match config.country.get(cc) {
+            Some(c) => c,
+            None => continue,
+        };
+        let dir = dl_root.join(cc);
+        if let Some(ref osm) = cfg.osm {
+            checks.push(SourceCheck {
+                cc: cc.clone(),
+                kind: "osm",
+                local: dir.join(url_filename(&osm.url)),
+                url: Some(osm.url.clone()),
+            });
+        }
+        if let Some(ref photon) = cfg.photon {
+            checks.push(SourceCheck {
+                cc: cc.clone(),
+                kind: "photon",
+                local: dir.join(url_filename(&photon.url)),
+                url: Some(photon.url.clone()),
+            });
+        }
+        if let Some(ref nat) = cfg.national {
+            // national sources without a URL (e.g. tiger_oa) fetch
+            // state-by-state internally — skip from pre-flight.
+            if let Some(ref url) = nat.url {
+                checks.push(SourceCheck {
+                    cc: cc.clone(),
+                    kind: "national",
+                    local: dir.join(url_filename(url)),
+                    url: Some(url.clone()),
+                });
+            }
+        }
+        if let Some(ref ps) = cfg.places_source {
+            // places_source supports an explicit local_path override
+            // (manual data like ABR-SQLite); honour it before falling
+            // back to the URL-derived download path.
+            let (local, url) = match (ps.local_path.as_ref(), ps.url.as_ref()) {
+                (Some(lp), _) => (PathBuf::from(lp), ps.url.clone()),
+                (None, Some(u)) => (dir.join(url_filename(u)), Some(u.clone())),
+                (None, None) => continue,
+            };
+            checks.push(SourceCheck {
+                cc: cc.clone(),
+                kind: "places_source",
+                local,
+                url,
+            });
+        }
+    }
+
+    let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(8));
+    let mut handles = Vec::new();
+    for c in checks {
+        let sem = sem.clone();
+        let client = client.clone();
+        handles.push(tokio::spawn(async move {
+            let _permit = sem.acquire().await.ok()?;
+            // Option A: stat the local file.
+            if let Ok(meta) = std::fs::metadata(&c.local) {
+                if meta.is_file() && meta.len() > 0 {
+                    return None;
+                }
+            }
+            // Option B: HEAD the URL.
+            let url = match c.url.as_deref() {
+                Some(u) => u,
+                None => return Some((c, "no URL and not on disk".to_string())),
+            };
+            let head_result = client
+                .head(url)
+                .timeout(std::time::Duration::from_secs(10))
+                .send()
+                .await;
+            match head_result {
+                Ok(resp) => {
+                    let s = resp.status();
+                    if s.is_success() || s.is_redirection() {
+                        None
+                    } else if s.is_client_error() {
+                        // 404, 410, 403 — definitively not reachable.
+                        Some((c, format!("HEAD {}", s)))
+                    } else {
+                        // 5xx — treat as transient.
+                        tracing::warn!(
+                            "[{}] {}: HEAD {} (transient — letting download retry)",
+                            c.cc, c.kind, s,
+                        );
+                        None
+                    }
+                }
+                Err(e) => {
+                    // Network error / timeout — transient.
+                    tracing::warn!(
+                        "[{}] {}: HEAD failed ({}) — letting download retry",
+                        c.cc, c.kind,
+                        if e.is_timeout() { "timeout".to_string() } else { e.to_string() },
+                    );
+                    None
+                }
+            }
+        }));
+    }
+
+    let mut missing: Vec<(SourceCheck, String)> = Vec::new();
+    for h in handles {
+        if let Ok(Some(entry)) = h.await {
+            missing.push(entry);
+        }
+    }
+    missing
+}
+
 /// Get CPU user+sys time in seconds for the current process.
 #[cfg(unix)]
 fn get_cpu_times() -> Option<(f64, f64)> {
@@ -3275,6 +3411,32 @@ pub(crate) fn run_rebuild(
         }
     }
 
+    // ── Pre-flight: source-input validation (Options A + B) ──────────────
+    // A 2.5h-then-crash failure mode in early May happened when a US rebuild
+    // ran past OSM extract + national merge before bailing on a missing
+    // GNIS source. download_source() at that point couldn't reach upstream
+    // and there was no local copy. Fail-fast at start instead.
+    //
+    // Option A: stat() the expected local download path for every planned
+    // source. Option B: if missing, HEAD the URL — pass = downloadable, 4xx
+    // = definitively not. 5xx / timeouts / network errors are treated as
+    // transient and warned, not failed (download_source retries with GET
+    // which is more forgiving). Bail before any extraction starts if any
+    // source is both absent on disk AND returns a 4xx HEAD.
+    let missing = rt.block_on(validate_source_inputs(&client, &config, &to_build));
+    if !missing.is_empty() {
+        let mut msg = format!("\nPre-flight: {} source(s) missing and unreachable:\n\n", missing.len());
+        for (c, reason) in &missing {
+            let url_str = c.url.as_deref().unwrap_or("(no URL)");
+            msg.push_str(&format!(
+                "  [{}] {:14} {}\n                 {}  ({})\n",
+                c.cc, c.kind, c.local.display(), url_str, reason,
+            ));
+        }
+        msg.push_str("\nRun `heimdall-build download` first, fix sources.toml, or restore the files.\n");
+        bail!("{}", msg);
+    }
+
     // ── Pre-download phase: download all sources in parallel ────────────
     // Downloads are I/O bound, not RAM bound. Run them all concurrently
     // so builds can start immediately from local files. `download_source`
@@ -3952,5 +4114,166 @@ mod plan_tests {
         let extras = inp.get("osm.extra_urls").expect("extras present");
         // Sorted canonical encoding so ordering changes don't false-positive.
         assert_eq!(extras, "http://faroe.pbf,http://greenland.pbf");
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Tests for source-input pre-flight (Options A + B)
+// ───────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod preflight_tests {
+    use super::*;
+
+    fn config_with(country_cc: &str, country: CountryConfig, download_dir: &Path) -> SourcesConfig {
+        let mut map = HashMap::new();
+        map.insert(country_cc.to_string(), country);
+        SourcesConfig {
+            defaults: Defaults {
+                download_dir: download_dir.to_string_lossy().into_owned(),
+                index_dir: "data/index".into(),
+            },
+            country: map,
+        }
+    }
+
+    /// Happy path: every source's expected local file is on disk.
+    /// validate_source_inputs returns empty without ever touching the network.
+    #[tokio::test]
+    async fn all_files_present_returns_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let cc_dir = dir.path().join("tt");
+        std::fs::create_dir_all(&cc_dir).unwrap();
+        std::fs::write(cc_dir.join("test.pbf"), b"fake-pbf").unwrap();
+        std::fs::write(cc_dir.join("photon-tt.tar.bz2"), b"fake-photon").unwrap();
+        std::fs::write(cc_dir.join("dawa.json"), b"fake-dawa").unwrap();
+        let config = config_with("tt", CountryConfig {
+            name: "Test".into(),
+            index_name: "index-tt".into(),
+            normalizer: "data/normalizers/sv.toml".into(),
+            ram_gb: 1,
+            osm: Some(OsmSource {
+                url: "http://example/test.pbf".into(),
+                state_url: None,
+                extra_urls: vec![],
+            }),
+            photon: Some(PhotonSource {
+                url: "http://example/photon-tt.tar.bz2".into(),
+                md5_url: None,
+            }),
+            national: Some(NationalSource {
+                source_type: Some("dawa".into()),
+                url: Some("http://example/dawa.json".into()),
+                sequence_url: None,
+            }),
+            places_source: None,
+        }, dir.path());
+        let client = reqwest::Client::new();
+        let missing = validate_source_inputs(&client, &config, &["tt".into()]).await;
+        assert!(missing.is_empty(), "expected no missing, got: {:?}", missing.iter().map(|(c, r)| (c.kind, r)).collect::<Vec<_>>());
+    }
+
+    /// places_source with neither URL nor local_path is a misconfiguration —
+    /// pre-flight skips it (the build itself bails later with a clearer
+    /// "no url or local_path" error from merge_places_source).
+    #[tokio::test]
+    async fn places_source_without_url_or_local_path_is_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = config_with("tt", CountryConfig {
+            name: "Test".into(),
+            index_name: "index-tt".into(),
+            normalizer: "data/normalizers/sv.toml".into(),
+            ram_gb: 1,
+            osm: None,
+            photon: None,
+            national: None,
+            places_source: Some(PlacesSource {
+                source_type: "gnis".into(),
+                url: None,
+                local_path: None,
+            }),
+        }, dir.path());
+        let client = reqwest::Client::new();
+        let missing = validate_source_inputs(&client, &config, &["tt".into()]).await;
+        assert!(missing.is_empty(), "misconfigured source should be skipped, not reported");
+    }
+
+    /// places_source with only local_path (manual data like ABR-SQLite) is
+    /// reported as missing when the file is absent and there's no URL to fall
+    /// back to.
+    #[tokio::test]
+    async fn places_source_local_only_missing_is_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let local = dir.path().join("nonexistent-abr.sqlite");
+        let config = config_with("tt", CountryConfig {
+            name: "Test".into(),
+            index_name: "index-tt".into(),
+            normalizer: "data/normalizers/sv.toml".into(),
+            ram_gb: 1,
+            osm: None,
+            photon: None,
+            national: None,
+            places_source: Some(PlacesSource {
+                source_type: "abr".into(),
+                url: None,
+                local_path: Some(local.to_string_lossy().into_owned()),
+            }),
+        }, dir.path());
+        let client = reqwest::Client::new();
+        let missing = validate_source_inputs(&client, &config, &["tt".into()]).await;
+        assert_eq!(missing.len(), 1);
+        assert_eq!(missing[0].0.kind, "places_source");
+        assert!(missing[0].1.contains("no URL"), "reason: {}", missing[0].1);
+    }
+
+    /// national source without a URL (e.g. tiger_oa, which fetches per-state
+    /// internally) is intentionally skipped — the per-source importer manages
+    /// its own files outside the rebuild's download_dir model.
+    #[tokio::test]
+    async fn national_without_url_is_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = config_with("tt", CountryConfig {
+            name: "Test".into(),
+            index_name: "index-tt".into(),
+            normalizer: "data/normalizers/sv.toml".into(),
+            ram_gb: 1,
+            osm: None,
+            photon: None,
+            national: Some(NationalSource {
+                source_type: Some("tiger_oa".into()),
+                url: None,
+                sequence_url: None,
+            }),
+            places_source: None,
+        }, dir.path());
+        let client = reqwest::Client::new();
+        let missing = validate_source_inputs(&client, &config, &["tt".into()]).await;
+        assert!(missing.is_empty(), "url-less national should be skipped");
+    }
+
+    /// Empty file on disk doesn't count as "present" — Option B still fires.
+    /// Without a URL, a 0-byte local file is reported as missing.
+    #[tokio::test]
+    async fn zero_byte_local_file_does_not_count_as_present() {
+        let dir = tempfile::tempdir().unwrap();
+        let local = dir.path().join("empty.zip");
+        std::fs::write(&local, b"").unwrap();
+        let config = config_with("tt", CountryConfig {
+            name: "Test".into(),
+            index_name: "index-tt".into(),
+            normalizer: "data/normalizers/sv.toml".into(),
+            ram_gb: 1,
+            osm: None,
+            photon: None,
+            national: None,
+            places_source: Some(PlacesSource {
+                source_type: "abr".into(),
+                url: None,
+                local_path: Some(local.to_string_lossy().into_owned()),
+            }),
+        }, dir.path());
+        let client = reqwest::Client::new();
+        let missing = validate_source_inputs(&client, &config, &["tt".into()]).await;
+        assert_eq!(missing.len(), 1, "zero-byte file should not satisfy Option A");
     }
 }
