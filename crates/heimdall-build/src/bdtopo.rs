@@ -177,7 +177,6 @@ pub fn read_bdtopo_streaming(
     cc: &str,
     state_zones: &mut HashMap<String, String>,
     download_dir: &Path,
-    skip_download: bool,
 ) -> Result<Vec<heimdall_core::types::RawPlace>> {
     let target_date = BDTOPO_EDITION_DATE;
     let version = BDTOPO_VERSION;
@@ -208,14 +207,6 @@ pub fn read_bdtopo_streaming(
         }
 
         if !archive_path.exists() {
-            if skip_download {
-                info!(
-                    "[{}] BD TOPO {}: --skip-download set and archive absent — skipping",
-                    cc, dept
-                );
-                failed += 1;
-                continue;
-            }
             let url = bdtopo_archive_url(version, dept, target_date);
             info!("[{}] BD TOPO {}: downloading {}", cc, dept, target_date);
             if let Err(e) = download_to_path(&url, &archive_path) {

@@ -54,6 +54,8 @@ use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
+use crate::resource_monitor::PressureSignal;
+
 // ───────────────────────────────────────────────────────────────────────────
 // Pack-time options (shared by pack.rs and pack_addr.rs)
 // ───────────────────────────────────────────────────────────────────────────
@@ -75,16 +77,27 @@ pub struct PackOptions {
     /// with `--scratch-dir` if you want a faster disk (NVMe scratch
     /// for a network-mounted index dir).
     pub scratch_dir: PathBuf,
+    /// Optional global RSS pressure signal (Phase 3). Defaults to the
+    /// `disabled()` no-op: present so call sites can pass it
+    /// unconditionally without paying for the Arc when no monitor is
+    /// running.
+    pub pressure: PressureSignal,
 }
 
 impl PackOptions {
     /// Sensible default for an index dir: 256 MB sort budget, scratch
-    /// at `<index_dir>/.scratch/`.
+    /// at `<index_dir>/.scratch/`, no pressure monitoring.
     pub fn default_for(index_dir: &Path) -> Self {
         Self {
             sort_mem: 256 * 1024 * 1024,
             scratch_dir: index_dir.join(".scratch"),
+            pressure: PressureSignal::disabled(),
         }
+    }
+
+    pub fn with_pressure(mut self, signal: PressureSignal) -> Self {
+        self.pressure = signal;
+        self
     }
 }
 
@@ -106,6 +119,16 @@ pub struct SortBuffer<V> {
     total_pushed: u64,
     /// Tally of bytes spilled to disk so far (informational).
     total_spilled_bytes: u64,
+    /// Optional pressure-aware early-spill signal (Phase 3). When the
+    /// global RSS observer reports `Hard` pressure (>90% of budget), the
+    /// next push spills regardless of `mem_limit`. Defaults to disabled
+    /// (always-`None` pressure) so existing call sites and tests behave
+    /// identically.
+    pressure: PressureSignal,
+    /// Number of times we spilled early because of `Hard` pressure rather
+    /// than because the in-memory batch hit `mem_limit`. Exposed via
+    /// `pressure_spills()` for build-report logging.
+    pressure_spills: u64,
     _phantom: PhantomData<V>,
 }
 
@@ -142,12 +165,29 @@ where
             current_bytes: 0,
             total_pushed: 0,
             total_spilled_bytes: 0,
+            pressure: PressureSignal::disabled(),
+            pressure_spills: 0,
             _phantom: PhantomData,
         })
     }
 
+    /// Attach a global RSS pressure signal. When the monitor reports `Hard`
+    /// pressure, the next `push` will force-spill instead of letting the
+    /// in-memory batch grow further. Idempotent — call once per buffer.
+    pub fn with_pressure(mut self, signal: PressureSignal) -> Self {
+        self.pressure = signal;
+        self
+    }
+
+    /// How many times we spilled early because of `Hard` pressure rather
+    /// than the local `mem_limit`. Useful for build reports.
+    pub fn pressure_spills(&self) -> u64 {
+        self.pressure_spills
+    }
+
     /// Add one `(key, value)` to the buffer. Spills the in-memory batch to
-    /// a sorted run file when the byte ceiling is crossed.
+    /// a sorted run file when the byte ceiling is crossed *or* when the
+    /// resource monitor signals `Hard` pressure.
     pub fn push(&mut self, key: Vec<u8>, value: V) -> Result<()> {
         // Approximate per-pair byte cost: 4 (key_len) + key + 4 (val_len)
         // + sizeof(V) (the postcard encoding will be smaller for compound
@@ -156,7 +196,29 @@ where
         self.current_bytes += approx;
         self.current.push((key, value));
         self.total_pushed += 1;
+
+        // Local-budget spill: the existing Phase 2 trigger.
         if self.current_bytes >= self.mem_limit {
+            self.spill_current()?;
+            return Ok(());
+        }
+
+        // Global-pressure spill: Phase 3. Only check on a coarse cadence
+        // (every 4096 pushes) so the atomic load doesn't show up in the
+        // hot path. Even at 1 µs per check this would cost real time on a
+        // 30M-row US pack — the rebuild loop pushes ~3M keys/s.
+        //
+        // We also require the batch to have at least *some* content
+        // (`current_bytes > 1 MB`) before spilling, otherwise a sustained
+        // Hard signal could spawn thousands of tiny run files which then
+        // make the k-way merge heap thrash worse than the original RAM
+        // pressure. The 1 MB floor is empirical: matches the BufWriter's
+        // capacity so each spill produces a tidy run file.
+        if self.total_pushed % 4096 == 0
+            && self.current_bytes >= 1024 * 1024
+            && self.pressure.is_hard()
+        {
+            self.pressure_spills += 1;
             self.spill_current()?;
         }
         Ok(())
