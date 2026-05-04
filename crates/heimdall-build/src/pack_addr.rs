@@ -25,7 +25,7 @@ use tracing::info;
 use heimdall_core::addr_store::AddrStoreBuilder;
 use heimdall_normalize::Normalizer;
 
-use crate::sort_buffer::{PackOptions, SortBuffer};
+use crate::sort_buffer::PackOptions;
 
 pub struct AddrPackStats {
     pub address_count: usize,
@@ -231,14 +231,31 @@ pub fn pack_addresses(
     });
 
     let mut store_builder = AddrStoreBuilder::new();
-    // SortBuffer instead of Vec+sort: keeps RAM bounded by `sort_mem` and
-    // spills to `scratch_dir` when the budget is exceeded. For US (~30M
-    // FST keys) this drops peak RAM from ~1.5 GB (just for the keys) to
-    // ~256 MB. For DK / FI / NZ the data fits in memory and the buffer
-    // takes its in-RAM fast path — same throughput as the old Vec sort.
-    let mut fst_keys: SortBuffer<u32> =
-        SortBuffer::new(pack_opts.sort_mem, &pack_opts.scratch_dir)?
-            .with_pressure(pack_opts.pressure.clone());
+    // Phase 5 (TODO_REBUILD_MODES.md): in-memory Vec replaces SortBuffer.
+    //
+    // The address FST keys are emitted *after* the HashMap aggregation
+    // above collapses ~30M raw addresses into ~unique-street groups (≈
+    // 1.5M for US, 100K for DK, ≈ 750K for DE). Two keys per group
+    // → ≈ 3M peak entries, each ~40-60 bytes encoded ⇒ peak ≈ 150 MB
+    // for the largest country in the catalog. That fits comfortably
+    // under any --budget RAM cap.
+    //
+    // Phase 2 introduced SortBuffer here defensively — the projected
+    // 30M-key worst case (which would have exceeded RAM) never
+    // materialised because aggregation happens before the SortBuffer
+    // push site, not after. Production rebuild reports show every
+    // SortBuffer instance taking the in-memory fast path with zero
+    // spills. Dropping the spill machinery saves a layer of postcard
+    // encode/decode round-tripping with no functional change — the
+    // `fst_built_from_sort_buffer_matches_in_memory_sort_byte_for_byte`
+    // test in sort_buffer.rs proves byte-parity between the two paths,
+    // so fst_addr.fst output is identical. PackOptions stays in the
+    // signature for now: --sort-mem / --scratch-dir become no-ops for
+    // pack_addr but the plumbing is still wired through main.rs and
+    // rebuild.rs and may be reused if pack.rs's TSV-sort path ever
+    // moves into a SortBuffer-style helper.
+    let _ = pack_opts;
+    let mut fst_keys: Vec<(Vec<u8>, u32)> = Vec::with_capacity(sorted_groups.len() * 2);
     let street_count = sorted_groups.len();
 
     for (key, mut group) in sorted_groups {
@@ -267,11 +284,11 @@ pub fn pack_addresses(
 
         // Municipality-specific key
         let fst_key = format!("{}:{}", key.norm_street, group.muni_id);
-        fst_keys.push(fst_key.into_bytes(), street_id)?;
+        fst_keys.push((fst_key.into_bytes(), street_id));
 
         // Wildcard key (muni_id=0) — for no-city queries
         let wildcard_key = format!("{}:0", key.norm_street);
-        fst_keys.push(wildcard_key.into_bytes(), street_id)?;
+        fst_keys.push((wildcard_key.into_bytes(), street_id));
     }
 
     // Write the street-grouped store
@@ -284,27 +301,19 @@ pub fn pack_addresses(
         total_addresses,
     );
 
-    // Stream the merged-sorted iterator into MapBuilder, deduping inline
-    // against the previous key. SortBuffer guarantees globally sorted
-    // output; we only need a one-element lookback to drop duplicates.
-    let total_fst_pushes = fst_keys.len();
-    let merged = fst_keys.finish()?;
-    if merged.run_count() > 0 {
-        info!(
-            "Address FST sort: {} runs, {:.1} MB spilled to {}",
-            merged.run_count(),
-            merged.spilled_bytes() as f64 / 1e6,
-            pack_opts.scratch_dir.display(),
-        );
-    }
+    // Stable sort by raw key bytes — same order the FST builder expects
+    // and the same order SortBuffer's in-memory fast path produced.
+    // Stable so push order wins on equal keys, matching the previous
+    // first-pushed-wins dedup semantics below.
+    let total_fst_pushes = fst_keys.len() as u64;
+    fst_keys.sort_by(|a, b| a.0.cmp(&b.0));
 
     let fst_path = output_dir.join("fst_addr.fst");
     let fst_file = std::io::BufWriter::new(std::fs::File::create(&fst_path)?);
     let mut fst_builder = MapBuilder::new(fst_file)?;
     let mut prev_key: Option<Vec<u8>> = None;
     let mut unique_keys = 0u64;
-    for entry in merged {
-        let (key, id) = entry?;
+    for (key, id) in fst_keys {
         if prev_key.as_deref() == Some(key.as_slice()) {
             continue; // duplicate (street appears in multiple input rows)
         }
@@ -444,5 +453,100 @@ mod tests {
         assert_eq!(parse_housenumber("4-6"), (4, 0));
         assert_eq!(parse_housenumber("1A"), (1, 1));
         assert_eq!(parse_housenumber(""), (0, 0));
+    }
+
+    /// Phase-5 micro-bench: time the address-FST build path at US-scale
+    /// key counts (≈ 1.5M unique-street groups → ≈ 3M FST pushes after
+    /// the muni-specific + wildcard pair). Compares the in-memory
+    /// `Vec::sort_by` path (current) against the previous SortBuffer
+    /// fast-path to back the perf claim in TODO_REBUILD_MODES.md
+    /// Phase 5.
+    ///
+    /// Marked `#[ignore]` because it allocates ~150 MB and runs ~3-8 s
+    /// — too slow for the regular `cargo test`. Run with
+    /// `cargo test --release -p heimdall-build pack_addr_fst_bench
+    ///  -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn pack_addr_fst_bench() {
+        use crate::sort_buffer::SortBuffer;
+        use std::time::Instant;
+        use fst::MapBuilder;
+
+        // 1.5M synthetic street groups × 2 keys (muni + wildcard).
+        // Realistic key shape: "<street>:<muni_id>" / "<street>:0".
+        // Streets are pseudo-randomised so the lex order of pushes
+        // does not match the sort order — exercises the actual sort.
+        let n_groups: u32 = 1_500_000;
+        let mut keys: Vec<(Vec<u8>, u32)> = Vec::with_capacity(n_groups as usize * 2);
+        for i in 0..n_groups {
+            // Reverse the digits so successive i's land far apart in lex order.
+            let street = format!("street{:08}", i.reverse_bits());
+            let muni = (i % 5000) as u16;
+            keys.push((format!("{}:{}", street, muni).into_bytes(), i));
+            keys.push((format!("{}:0", street).into_bytes(), i));
+        }
+        eprintln!("pack_addr bench: {} pushes total", keys.len());
+
+        // ── In-memory path (current Phase-5 code) ─────────────────────
+        let inmem_keys = keys.clone();
+        let t0 = Instant::now();
+        let mut sorted = inmem_keys;
+        sorted.sort_by(|a, b| a.0.cmp(&b.0));
+        let inmem_sort_ms = t0.elapsed().as_millis();
+
+        let dir = tempfile::tempdir().unwrap();
+        let inmem_fst = dir.path().join("inmem.fst");
+        let t1 = Instant::now();
+        let f = std::fs::File::create(&inmem_fst).unwrap();
+        let mut b = MapBuilder::new(std::io::BufWriter::new(f)).unwrap();
+        let mut prev: Option<Vec<u8>> = None;
+        for (k, v) in &sorted {
+            if prev.as_deref() == Some(k.as_slice()) { continue; }
+            b.insert(k, *v as u64).unwrap();
+            prev = Some(k.clone());
+        }
+        b.finish().unwrap();
+        let inmem_build_ms = t1.elapsed().as_millis();
+        let inmem_size = std::fs::metadata(&inmem_fst).unwrap().len();
+
+        // ── SortBuffer path (Phase-2 baseline) ────────────────────────
+        let t2 = Instant::now();
+        let mut buf = SortBuffer::<u32>::new(256 * 1024 * 1024, dir.path()).unwrap();
+        for (k, v) in &keys {
+            buf.push(k.clone(), *v).unwrap();
+        }
+        let sb_path = dir.path().join("sb.fst");
+        let f = std::fs::File::create(&sb_path).unwrap();
+        let mut b = MapBuilder::new(std::io::BufWriter::new(f)).unwrap();
+        let mut prev: Option<Vec<u8>> = None;
+        for entry in buf.finish().unwrap() {
+            let (k, v) = entry.unwrap();
+            if prev.as_deref() == Some(k.as_slice()) { continue; }
+            b.insert(&k, v as u64).unwrap();
+            prev = Some(k);
+        }
+        b.finish().unwrap();
+        let sb_total_ms = t2.elapsed().as_millis();
+        let sb_size = std::fs::metadata(&sb_path).unwrap().len();
+
+        eprintln!(
+            "  in-memory: sort {} ms + build {} ms = {} ms total, fst {} bytes",
+            inmem_sort_ms, inmem_build_ms, inmem_sort_ms + inmem_build_ms, inmem_size,
+        );
+        eprintln!(
+            "  SortBuffer: {} ms total, fst {} bytes",
+            sb_total_ms, sb_size,
+        );
+
+        // Byte-parity check across the two paths — the same invariant
+        // as `fst_built_from_sort_buffer_matches_in_memory_sort_byte_for_byte`
+        // in sort_buffer.rs but at realistic Phase-5 scale.
+        let inmem_bytes = std::fs::read(&inmem_fst).unwrap();
+        let sb_bytes = std::fs::read(&sb_path).unwrap();
+        assert_eq!(
+            inmem_bytes, sb_bytes,
+            "Phase-5 byte-parity failed: in-memory vs SortBuffer FSTs diverge",
+        );
     }
 }
