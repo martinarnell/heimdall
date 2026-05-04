@@ -1614,6 +1614,7 @@ dependencies = [
  "sha2",
  "shapefile",
  "tar",
+ "tempfile",
  "tikv-jemallocator",
  "tokio",
  "toml",

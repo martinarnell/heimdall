@@ -967,39 +967,12 @@ fn compute_importance_inline(
     score.min(65535) as u16
 }
 
-/// Build an FST from (key, (record_id, importance, is_populated)) tuples.
-/// Sorts input, deduplicates, writes to path.
-fn build_fst(pairs: &mut Vec<(String, (u32, u16, bool))>, path: &Path) -> Result<usize> {
-    // FST requires lexicographically sorted, unique keys
-    pairs.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
-    pairs.dedup_by(|a, b| {
-        if a.0 == b.0 {
-            // Keep the higher-importance record. Importance already
-            // factors in population, place type, and wikidata, so we
-            // don't need an additional populated-place tiebreak (which
-            // used to demote famous landmarks under no-population
-            // suburbs of the same name).
-            if a.1 .1 > b.1 .1 {
-                b.1 = a.1;
-            }
-            true
-        } else {
-            false
-        }
-    });
-
-    let file = std::io::BufWriter::new(std::fs::File::create(path)?);
-    let mut builder = MapBuilder::new(file)?;
-
-    for (key, (record_id, _importance, _is_pop)) in pairs.iter() {
-        builder.insert(key.as_bytes(), *record_id as u64)?;
-    }
-
-    builder.finish()?;
-
-    let bytes = std::fs::metadata(path)?.len() as usize;
-    Ok(bytes)
-}
+// NOTE (Phase 2 — TODO_REBUILD_MODES.md): the in-memory `build_fst`
+// helper that used to live here is removed. The hot path is
+// `build_fst_from_disk` (above), which already does external sort by
+// shelling out to GNU `sort` with a 128 MB buffer — bounded RAM, no
+// `Vec<(String, ...)>` blow-up. The address FST in pack_addr.rs gets
+// the same treatment via `crate::sort_buffer::SortBuffer`.
 
 /// Read places from the Parquet file written by extract.rs
 fn read_parquet(path: &Path) -> Result<Vec<RawPlace>> {

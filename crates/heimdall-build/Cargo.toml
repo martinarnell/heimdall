@@ -43,3 +43,6 @@ geojson = "0.24"                                           # Parse OpenAddresses
 tikv-jemallocator.workspace = true                        # Returns freed memory to OS between pipeline steps
 libc = "0.2"                                              # CPU time via getrusage, madvise
 memmap2 = "0.9"                                           # Disk-backed geocode index
+
+[dev-dependencies]
+tempfile = "3"                                             # Temp dirs for cleanup tracker tests

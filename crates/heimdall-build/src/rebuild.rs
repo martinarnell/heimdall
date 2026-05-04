@@ -852,18 +852,225 @@ async fn resolve_photon_url(client: &reqwest::Client, url: &str) -> Option<Strin
     }
 }
 
-/// Delete a file if it exists, log the freed space.
-fn delete_file_if_exists(path: &Path, label: &str, keep: bool) {
-    if !path.exists() { return; }
-    if keep || path.is_symlink() {
-        info!("  Keeping {} (no --cleanup)", label);
-        return;
+// ───────────────────────────────────────────────────────────────────────────
+// Pack overrides — CLI flags forwarded into the pack step
+// ───────────────────────────────────────────────────────────────────────────
+
+/// CLI overrides for `crate::sort_buffer::PackOptions`. `None` fields fall
+/// back to the per-index defaults (256 MB sort_mem, `<index_dir>/.scratch/`).
+/// Carried through `run_rebuild` → `build_country_pipeline` → `pack_indices`.
+#[derive(Clone, Debug, Default)]
+pub struct PackOverrides {
+    pub sort_mem: usize,
+    pub scratch_dir: Option<std::path::PathBuf>,
+}
+
+impl PackOverrides {
+    /// Build a per-country PackOptions from the overrides + the country's
+    /// index dir (used as the default scratch dir parent).
+    fn resolve_for(&self, index_dir: &Path) -> crate::sort_buffer::PackOptions {
+        let mut opts = crate::sort_buffer::PackOptions::default_for(index_dir);
+        if self.sort_mem > 0 {
+            opts.sort_mem = self.sort_mem;
+        }
+        if let Some(ref dir) = self.scratch_dir {
+            opts.scratch_dir = dir.clone();
+        }
+        opts
     }
-    let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-    match std::fs::remove_file(path) {
-        Ok(()) => info!("  Deleted {} ({:.1} MB freed)", label, size as f64 / 1e6),
-        Err(e) => tracing::warn!("  Failed to delete {}: {}", label, e),
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Cleanup options + tracker
+// ───────────────────────────────────────────────────────────────────────────
+
+/// User-facing cleanup knobs derived from CLI flags.
+///
+/// Today only `0` (delete) and `≥1` (keep current) are honoured. Higher
+/// values are accepted in anticipation of multi-version rotation but
+/// behave like `1` for now — we explicitly warn the user once if they
+/// pass `>1` so the contract stays honest.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct CleanupOptions {
+    pub keep_downloads: u32,
+    pub keep_intermediates: u32,
+    pub dry_run: bool,
+}
+
+impl Default for CleanupOptions {
+    fn default() -> Self {
+        // Default behaviour matches the historical "no --cleanup" path:
+        // keep downloads and intermediates so weekly rebuilds can reuse them.
+        Self { keep_downloads: 1, keep_intermediates: 1, dry_run: false }
     }
+}
+
+impl CleanupOptions {
+    /// Should per-source download files be deleted after consumption?
+    pub fn delete_downloads(&self) -> bool { self.keep_downloads == 0 }
+    /// Should intermediate parquet/admin_map artefacts be deleted after pack?
+    pub fn delete_intermediates(&self) -> bool { self.keep_intermediates == 0 }
+    /// Anything to clean at all?
+    pub fn anything_to_do(&self) -> bool {
+        self.delete_downloads() || self.delete_intermediates()
+    }
+}
+
+/// Per-country accumulator for cleanup actions. Tracks bytes freed (real or
+/// hypothetical when `dry_run`), prints a single summary line at the end of
+/// the country's pipeline, and routes individual deletes through
+/// `maybe_delete_file` / `maybe_delete_dir`.
+pub(crate) struct CleanupTracker {
+    cc: String,
+    opts: CleanupOptions,
+    pub freed_downloads: u64,
+    pub freed_intermediates: u64,
+    pub deleted_files: usize,
+}
+
+impl CleanupTracker {
+    pub fn new(cc: &str, opts: CleanupOptions) -> Self {
+        Self {
+            cc: cc.to_string(),
+            opts,
+            freed_downloads: 0,
+            freed_intermediates: 0,
+            deleted_files: 0,
+        }
+    }
+
+    /// Delete a single file if `should_delete` is set and the file exists.
+    /// Symlinks are skipped (the prod data symlink is read-only, never touch).
+    pub fn maybe_delete_file(
+        &mut self,
+        path: &Path,
+        label: &str,
+        should_delete: bool,
+        is_intermediate: bool,
+    ) {
+        if !path.exists() {
+            return;
+        }
+        if path.is_symlink() {
+            tracing::debug!("[{}]   Skipping {} (symlink)", self.cc, label);
+            return;
+        }
+        if !should_delete {
+            tracing::debug!("[{}]   Keeping {}", self.cc, label);
+            return;
+        }
+        let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        if self.opts.dry_run {
+            info!(
+                "[{}]   [dry-run-cleanup] Would delete {} ({:.1} MB)",
+                self.cc, label, size as f64 / 1e6,
+            );
+        } else {
+            match std::fs::remove_file(path) {
+                Ok(()) => tracing::debug!(
+                    "[{}]   Deleted {} ({:.1} MB freed)",
+                    self.cc, label, size as f64 / 1e6,
+                ),
+                Err(e) => {
+                    tracing::warn!("[{}]   Failed to delete {}: {}", self.cc, label, e);
+                    return;
+                }
+            }
+        }
+        self.deleted_files += 1;
+        if is_intermediate {
+            self.freed_intermediates += size;
+        } else {
+            self.freed_downloads += size;
+        }
+    }
+
+    /// Recursively delete a directory tree if it exists. Used for the
+    /// download dir wipe and any leftover work dirs.
+    pub fn maybe_delete_dir(
+        &mut self,
+        path: &Path,
+        label: &str,
+        should_delete: bool,
+        is_intermediate: bool,
+    ) {
+        if !path.exists() {
+            return;
+        }
+        if !should_delete {
+            tracing::debug!("[{}]   Keeping dir {}", self.cc, label);
+            return;
+        }
+        let size = dir_size_bytes(path);
+        if self.opts.dry_run {
+            info!(
+                "[{}]   [dry-run-cleanup] Would delete dir {} ({:.1} MB)",
+                self.cc, label, size as f64 / 1e6,
+            );
+        } else {
+            match std::fs::remove_dir_all(path) {
+                Ok(()) => tracing::debug!(
+                    "[{}]   Deleted dir {} ({:.1} MB freed)",
+                    self.cc, label, size as f64 / 1e6,
+                ),
+                Err(e) => {
+                    tracing::warn!(
+                        "[{}]   Failed to delete dir {}: {}",
+                        self.cc, label, e,
+                    );
+                    return;
+                }
+            }
+        }
+        self.deleted_files += 1;
+        if is_intermediate {
+            self.freed_intermediates += size;
+        } else {
+            self.freed_downloads += size;
+        }
+    }
+
+    /// Print a single summary line for the country. Always called at the
+    /// end of `build_country_pipeline`, even when nothing was cleaned —
+    /// the line gives the operator a stable place to read disk usage from.
+    pub fn finish(&self, index_dir: &Path) {
+        let dn = self.freed_downloads as f64 / 1e9;
+        let im = self.freed_intermediates as f64 / 1e9;
+        let dn_str = if self.opts.dry_run { "would free" } else { "freed" };
+        let on_disk = get_dir_size_mb(index_dir).unwrap_or(0);
+        if self.opts.anything_to_do() || self.deleted_files > 0 {
+            info!(
+                "[{}] cleanup: {} {:.2} GB downloads + {:.2} GB intermediates ({} files); index now {:.2} GB on disk",
+                self.cc, dn_str, dn, im, self.deleted_files,
+                on_disk as f64 / 1024.0,
+            );
+        } else {
+            info!(
+                "[{}] cleanup: skipped (--keep-downloads={} --keep-intermediates={}); index {:.2} GB on disk",
+                self.cc, self.opts.keep_downloads, self.opts.keep_intermediates,
+                on_disk as f64 / 1024.0,
+            );
+        }
+    }
+}
+
+/// Best-effort recursive byte count of a directory. Returns 0 on any I/O
+/// failure (cleanup logging is informational, not load-bearing).
+fn dir_size_bytes(path: &Path) -> u64 {
+    let mut total: u64 = 0;
+    let walker = match std::fs::read_dir(path) {
+        Ok(w) => w,
+        Err(_) => return 0,
+    };
+    for entry in walker.flatten() {
+        let p = entry.path();
+        match std::fs::metadata(&p) {
+            Ok(meta) if meta.is_file() => total += meta.len(),
+            Ok(meta) if meta.is_dir() => total += dir_size_bytes(&p),
+            _ => {}
+        }
+    }
+    total
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -1610,10 +1817,17 @@ fn build_country_pipeline(
     defaults: &Defaults,
     min_population: u32,
     skip_download: bool,
-    cleanup: bool,
+    cleanup_opts: CleanupOptions,
+    pack_overrides: &PackOverrides,
     rt: &tokio::runtime::Runtime,
     client: &reqwest::Client,
 ) -> Result<Vec<StepEntry>> {
+    let mut tracker = CleanupTracker::new(cc, cleanup_opts);
+    let delete_dl = cleanup_opts.delete_downloads();
+    let delete_im = cleanup_opts.delete_intermediates();
+    let pack_opts = pack_overrides.resolve_for(
+        &PathBuf::from(&defaults.index_dir).join(&config.index_name),
+    );
     let index_dir = PathBuf::from(&defaults.index_dir).join(&config.index_name);
     let download_dir = PathBuf::from(&defaults.download_dir).join(cc);
     std::fs::create_dir_all(&index_dir)?;
@@ -1654,7 +1868,7 @@ fn build_country_pipeline(
         steps.push(step);
 
         // Delete Photon download — no longer needed
-        delete_file_if_exists(&photon_path, "photon download", !cleanup);
+        tracker.maybe_delete_file(&photon_path, "photon download", delete_dl, false);
 
         let (step, enriched) = time_step_with(cc, "enrich", || {
             let r = crate::enrich::enrich(&places_parquet, &index_dir)?;
@@ -1663,7 +1877,7 @@ fn build_country_pipeline(
         })?;
         steps.push(step);
 
-        pack_indices(cc, &index_dir, &places_parquet, &addr_parquet, &enriched, &mut steps)?;
+        pack_indices(cc, &index_dir, &places_parquet, &addr_parquet, &enriched, &pack_opts, &mut steps)?;
         write_build_meta(&index_dir, &photon_path, &steps)?;
     } else {
         // ── Full OSM pipeline (staggered downloads) ──────────────────────
@@ -1710,10 +1924,12 @@ fn build_country_pipeline(
             steps.push(step);
 
             // Cleanup PBF + extras + merged file (all served their purpose)
-            delete_file_if_exists(&pbf_path, "PBF download", !cleanup);
-            for ep in &extra_paths { delete_file_if_exists(ep, "extra PBF", !cleanup); }
+            tracker.maybe_delete_file(&pbf_path, "PBF download", delete_dl, false);
+            for ep in &extra_paths {
+                tracker.maybe_delete_file(ep, "extra PBF", delete_dl, false);
+            }
             if merged_pbf_path != pbf_path {
-                delete_file_if_exists(&merged_pbf_path, "merged PBF", !cleanup);
+                tracker.maybe_delete_file(&merged_pbf_path, "merged PBF", delete_dl, false);
             }
         }
 
@@ -1795,7 +2011,7 @@ fn build_country_pipeline(
                 })?;
                 steps.push(step);
 
-                delete_file_if_exists(&nat_path, "national download", !cleanup);
+                tracker.maybe_delete_file(&nat_path, "national download", delete_dl, false);
             }
         }
 
@@ -1862,7 +2078,9 @@ fn build_country_pipeline(
 
                 // Only delete if it was a download (not a local path)
                 if ps.local_path.is_none() {
-                    delete_file_if_exists(&gml_path, "places source download", !cleanup);
+                    tracker.maybe_delete_file(
+                        &gml_path, "places source download", delete_dl, false,
+                    );
                 }
             }
         }
@@ -1880,7 +2098,7 @@ fn build_country_pipeline(
             })?;
             steps.push(step);
 
-            delete_file_if_exists(&photon_path, "photon download", !cleanup);
+            tracker.maybe_delete_file(&photon_path, "photon download", delete_dl, false);
         }
 
         // Step 4: Enrich
@@ -1892,7 +2110,7 @@ fn build_country_pipeline(
         steps.push(step);
 
         // Step 5+6: Pack
-        pack_indices(cc, &index_dir, &places_parquet, &addr_parquet, &enriched, &mut steps)?;
+        pack_indices(cc, &index_dir, &places_parquet, &addr_parquet, &enriched, &pack_opts, &mut steps)?;
 
         let source_label = cs.osm.as_ref()
             .and_then(|s| s.local_path.as_ref())
@@ -1901,29 +2119,64 @@ fn build_country_pipeline(
         write_build_meta(&index_dir, &source_label, &steps)?;
     }
 
-    // Clean up build-only files not needed for serving.
-    // admin_polygons.bin is used by enrich (point-in-polygon), admin_map.bin by pack_addr —
-    // both are consumed during the build and not referenced by the API at runtime.
+    // Build-only files (always removed — never used at serving time and not
+    // useful for incremental rebuilds either: they're cheaply regenerated
+    // from the parquet, which is the actual cache).
+    // admin_polygons.bin is used by enrich (point-in-polygon), admin_map.bin
+    // by pack_addr.
     for build_only in &["admin_polygons.bin", "admin_map.bin"] {
-        let path = index_dir.join(build_only);
-        if path.exists() {
-            let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-            match std::fs::remove_file(&path) {
-                Ok(()) => info!("[{}] Deleted {} ({:.1} MB freed)", cc, build_only, size as f64 / 1e6),
-                Err(e) => tracing::warn!("[{}] Failed to delete {}: {}", cc, build_only, e),
+        let p = index_dir.join(build_only);
+        // Always-on cleanup: pass should_delete=true regardless of opts.
+        tracker.maybe_delete_file(&p, build_only, true, true);
+    }
+
+    // Intermediate parquet — kept by default (geocache + --skip-extract reuse)
+    // but removed when the user opts into --keep-intermediates=0 / --cleanup.
+    let intermediates = [
+        "places.parquet",
+        "addresses.parquet",
+        "addresses_national.parquet",
+        "addresses_photon.parquet",
+    ];
+    for name in &intermediates {
+        let p = index_dir.join(name);
+        tracker.maybe_delete_file(&p, name, delete_im, true);
+    }
+
+    // Stale `.bak` files from prior repacks. Phase-1.5 flips the repack
+    // default to no-backup, but pre-existing .bak files won't disappear by
+    // themselves — sweep them whenever the operator asks for an
+    // intermediates cleanup. We deliberately scope the sweep to direct
+    // children of the index dir: a `.bak` deeper than that would be
+    // someone's manual debugging artefact and not ours to remove.
+    if delete_im {
+        if let Ok(rd) = std::fs::read_dir(&index_dir) {
+            for entry in rd.flatten() {
+                let p = entry.path();
+                let name = match p.file_name().and_then(|s| s.to_str()) {
+                    Some(n) => n.to_string(),
+                    None => continue,
+                };
+                if name.ends_with(".bak") {
+                    tracker.maybe_delete_file(&p, &name, true, true);
+                }
             }
         }
     }
 
-    // Keep intermediate parquet files for incremental rebuilds (geocaching).
-    // The rebuild pipeline can reuse these via --skip-extract, and the future
-    // geocache diff pipeline needs them to apply OSM .osc.gz diffs.
-    // To reclaim disk space, use `rebuild --cleanup`.
-
-    // Only clean up downloads if user explicitly asked for it
-    if cleanup {
-        cleanup_downloads(defaults, cc);
+    // Per-source download files were removed inline already (see
+    // maybe_delete_file calls above). What's left in `data/downloads/<cc>/`
+    // is whatever individual importers spun up (TIGER work dirs, OA
+    // partials) — most clean themselves up but a fatal mid-build error
+    // can leave debris. When `--keep-downloads=0` we wipe the dir as a
+    // belt-and-braces final pass; ETags live in rebuild-state.json so
+    // change detection survives the wipe.
+    if delete_dl {
+        let dl = PathBuf::from(&defaults.download_dir).join(cc);
+        tracker.maybe_delete_dir(&dl, "downloads dir", true, false);
     }
+
+    tracker.finish(&index_dir);
 
     Ok(steps)
 }
@@ -1935,6 +2188,7 @@ fn pack_indices(
     places_parquet: &Path,
     addr_parquet: &Path,
     enriched: &crate::enrich::EnrichResult,
+    pack_opts: &crate::sort_buffer::PackOptions,
     steps: &mut Vec<StepEntry>,
 ) -> Result<()> {
     let normalizer = load_normalizer(index_dir);
@@ -1965,7 +2219,7 @@ fn pack_indices(
             let addr_handle = s.spawn(|| {
                 time_step(cc, "pack-addr", || {
                     let r = crate::pack_addr::pack_addresses(
-                        &addr_paths, index_dir, &admin_map, &normalizer,
+                        &addr_paths, index_dir, &admin_map, &normalizer, pack_opts,
                     )?;
                     Ok(format!("{} streets  fst={:.1} MB", r.street_count, r.fst_bytes as f64 / 1e6))
                 })
@@ -1988,7 +2242,7 @@ fn pack_indices(
 
         let addr_step = time_step(cc, "pack-addr", || {
             let r = crate::pack_addr::pack_addresses(
-                &addr_paths, index_dir, &admin_map, &normalizer,
+                &addr_paths, index_dir, &admin_map, &normalizer, pack_opts,
             )?;
             Ok(format!("{} streets  fst={:.1} MB", r.street_count, r.fst_bytes as f64 / 1e6))
         })?;
@@ -2132,20 +2386,6 @@ fn write_report(report: &BuildReport, output_dir: &str) -> Result<PathBuf> {
     std::fs::write(&path, &out)?;
     info!("Report written to {}", path.display());
     Ok(path)
-}
-
-// ───────────────────────────────────────────────────────────────────────────
-// Cleanup
-// ───────────────────────────────────────────────────────────────────────────
-
-fn cleanup_downloads(defaults: &Defaults, cc: &str) {
-    let download_dir = PathBuf::from(&defaults.download_dir).join(cc);
-    if download_dir.exists() {
-        match std::fs::remove_dir_all(&download_dir) {
-            Ok(()) => info!("[{}] Cleaned up downloads: {}", cc, download_dir.display()),
-            Err(e) => tracing::warn!("[{}] Failed to clean up {}: {}", cc, download_dir.display(), e),
-        }
-    }
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -2367,11 +2607,27 @@ pub(crate) fn run_rebuild(
     redownload: bool,
     dry_run: bool,
     skip_download: bool,
-    cleanup: bool,
+    cleanup_opts: CleanupOptions,
+    pack_overrides: PackOverrides,
     min_population: u32,
     jobs: usize,
     ram_budget: u64,
 ) -> Result<()> {
+    // Soft-warn about rotation-style values: they're accepted today
+    // (treated as "keep current") but the multi-version rotation isn't
+    // implemented yet. Don't fail — the default flag value passes through here.
+    if cleanup_opts.keep_downloads > 1 {
+        tracing::warn!(
+            "--keep-downloads={} > 1 not yet implemented; treating as 1 (no rotation)",
+            cleanup_opts.keep_downloads,
+        );
+    }
+    if cleanup_opts.keep_intermediates > 1 {
+        tracing::warn!(
+            "--keep-intermediates={} > 1 not yet implemented; treating as 1 (no rotation)",
+            cleanup_opts.keep_intermediates,
+        );
+    }
     let config = load_config(config_path)?;
     let mut state = load_state(state_file)?;
 
@@ -2561,7 +2817,7 @@ pub(crate) fn run_rebuild(
             let cs = state.countries.entry(cc.clone()).or_default();
             match build_country_pipeline(
                 cc, country_config, cs, &config.defaults,
-                min_population, skip_download, cleanup, &rt, &client,
+                min_population, skip_download, cleanup_opts, &pack_overrides, &rt, &client,
             ) {
                 Ok(mut step_entries) => {
                     let idx_dir = PathBuf::from(&config.defaults.index_dir).join(&country_config.index_name);
@@ -2631,7 +2887,7 @@ pub(crate) fn run_rebuild(
                         let mut cs = CountryState::default();
                         let result = build_country_pipeline(
                             &cc, country_config, &mut cs, &config.defaults,
-                            min_population, skip_download, cleanup, &rt, &client,
+                            min_population, skip_download, cleanup_opts, &pack_overrides, &rt, &client,
                         );
 
                         active_ram.fetch_sub(est_ram_mb, std::sync::atomic::Ordering::Relaxed);
@@ -2719,4 +2975,151 @@ pub(crate) fn run_rebuild(
     }
 
     Ok(())
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Tests for cleanup helpers (Phase 1)
+// ───────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod cleanup_tests {
+    use super::*;
+
+    /// Helper: build a temp dir with a known set of files, return the path.
+    fn make_temp_with_files(files: &[(&str, &[u8])]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        for (name, content) in files {
+            let p = dir.path().join(name);
+            if let Some(parent) = p.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::write(&p, content).unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn defaults_match_legacy_no_cleanup_behavior() {
+        let opts = CleanupOptions::default();
+        assert!(!opts.delete_downloads(),
+            "default must keep downloads (current weekly rebuild relies on cache hits)");
+        assert!(!opts.delete_intermediates(),
+            "default must keep intermediates (--skip-extract / geocache need parquet)");
+        assert!(!opts.dry_run);
+    }
+
+    #[test]
+    fn cleanup_shorthand_zeros_both_knobs() {
+        // Mirrors the CLI translation in main.rs: --cleanup with no other flags.
+        let opts = CleanupOptions {
+            keep_downloads: 0,
+            keep_intermediates: 0,
+            dry_run: false,
+        };
+        assert!(opts.delete_downloads());
+        assert!(opts.delete_intermediates());
+        assert!(opts.anything_to_do());
+    }
+
+    #[test]
+    fn maybe_delete_file_respects_should_delete_flag() {
+        let dir = make_temp_with_files(&[("victim.bin", b"some bytes")]);
+        let target = dir.path().join("victim.bin");
+
+        let mut t = CleanupTracker::new("xx", CleanupOptions::default());
+        // should_delete=false: file must survive, no bytes counted.
+        t.maybe_delete_file(&target, "victim.bin", false, false);
+        assert!(target.exists(), "file should be preserved when should_delete=false");
+        assert_eq!(t.deleted_files, 0);
+        assert_eq!(t.freed_downloads, 0);
+
+        // should_delete=true: file gone, bytes recorded.
+        t.maybe_delete_file(&target, "victim.bin", true, false);
+        assert!(!target.exists(), "file should be deleted when should_delete=true");
+        assert_eq!(t.deleted_files, 1);
+        assert_eq!(t.freed_downloads, 10);
+        assert_eq!(t.freed_intermediates, 0);
+    }
+
+    #[test]
+    fn maybe_delete_file_dry_run_records_without_deleting() {
+        let dir = make_temp_with_files(&[("ghost.bin", b"hello")]);
+        let target = dir.path().join("ghost.bin");
+
+        let mut t = CleanupTracker::new("xx", CleanupOptions {
+            keep_downloads: 0,
+            keep_intermediates: 0,
+            dry_run: true,
+        });
+        t.maybe_delete_file(&target, "ghost.bin", true, true);
+
+        assert!(target.exists(), "dry run must NOT touch the file");
+        assert_eq!(t.deleted_files, 1, "dry-run still counts the file");
+        assert_eq!(t.freed_intermediates, 5);
+    }
+
+    #[test]
+    fn maybe_delete_file_skips_symlinks() {
+        // Symlinks are how the dev workflow surfaces prod data into
+        // crates/heimdall-build/data/data — touching them would clobber prod.
+        let real = make_temp_with_files(&[("payload.bin", b"keep")]);
+        let link_dir = tempfile::tempdir().unwrap();
+        let link_path = link_dir.path().join("link.bin");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(real.path().join("payload.bin"), &link_path).unwrap();
+        #[cfg(not(unix))]
+        return;
+
+        let mut t = CleanupTracker::new("xx", CleanupOptions {
+            keep_downloads: 0,
+            keep_intermediates: 1,
+            dry_run: false,
+        });
+        t.maybe_delete_file(&link_path, "link.bin", true, false);
+        assert!(link_path.exists(), "symlink must be preserved");
+        assert_eq!(t.deleted_files, 0);
+    }
+
+    #[test]
+    fn maybe_delete_dir_walks_recursively() {
+        let dir = make_temp_with_files(&[
+            ("a.bin", &[0u8; 100]),
+            ("sub/b.bin", &[0u8; 200]),
+            ("sub/deep/c.bin", &[0u8; 50]),
+        ]);
+        let dl_root = dir.path().join("downloads");
+        std::fs::rename(dir.path().join("a.bin"), dl_root.parent().unwrap().join("a-keep.bin")).unwrap();
+        std::fs::create_dir_all(&dl_root).unwrap();
+        std::fs::write(dl_root.join("x.bin"), [1u8; 333]).unwrap();
+        std::fs::create_dir_all(dl_root.join("inner")).unwrap();
+        std::fs::write(dl_root.join("inner/y.bin"), [1u8; 111]).unwrap();
+
+        let mut t = CleanupTracker::new("xx", CleanupOptions {
+            keep_downloads: 0,
+            keep_intermediates: 1,
+            dry_run: false,
+        });
+        t.maybe_delete_dir(&dl_root, "downloads dir", true, false);
+        assert!(!dl_root.exists());
+        assert_eq!(t.freed_downloads, 333 + 111);
+    }
+
+    #[test]
+    fn anything_to_do_is_true_only_when_some_knob_is_zero() {
+        assert!(!CleanupOptions::default().anything_to_do());
+        assert!(CleanupOptions { keep_downloads: 0, keep_intermediates: 1, dry_run: false }.anything_to_do());
+        assert!(CleanupOptions { keep_downloads: 1, keep_intermediates: 0, dry_run: false }.anything_to_do());
+        assert!(CleanupOptions { keep_downloads: 0, keep_intermediates: 0, dry_run: false }.anything_to_do());
+    }
+
+    #[test]
+    fn dir_size_bytes_sums_recursively_and_handles_missing() {
+        let dir = make_temp_with_files(&[
+            ("a", &[0u8; 10]),
+            ("b/c", &[0u8; 100]),
+            ("b/d/e", &[0u8; 1000]),
+        ]);
+        assert_eq!(dir_size_bytes(dir.path()), 1110);
+        assert_eq!(dir_size_bytes(std::path::Path::new("/nonexistent/path/xyz123")), 0);
+    }
 }
