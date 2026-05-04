@@ -14,6 +14,139 @@ Effort estimates are rough; verify scope before scheduling.
 
 ---
 
+## Strategic framing — "Nominatim-class API on potato infrastructure"
+
+**Heimdall's value proposition is not "lean but feature-poor." It is
+"Nominatim-class features without Nominatim-class infrastructure."**
+
+The reason Nominatim is heavy isn't intrinsic to geocoding — polygons
+aren't heavy, POI tags aren't heavy, address interpolation isn't
+heavy. Nominatim is heavy because Postgres+PostGIS is heavy and the
+import pipeline assumes a relational model. Our architecture
+(mmap'd FSTs + record store + sidecar files) can deliver the same
+capabilities at a fraction of the storage and runtime cost.
+
+Cost re-check on the items that look "expensive" but aren't:
+
+| Feature | Naïve Nominatim cost | Heimdall cost (mmap) |
+|---|---|---|
+| Admin polygons (192 countries) | ~50–100 GB in PostGIS | ~1 GB total, sub-ms PiP |
+| Polygon outputs | full polygon table query | direct mmap read |
+| POI granularity (full class:type) | text columns, indexed | 2 bytes/record (~100 MB global) |
+| Building extraction | full row per building | ~10–20% index growth (~100–200 MB/country) |
+| Address interpolation | synthetic table rows | synthetic FST entries, same store |
+| `extratags`, `namedetails` | jsonb columns | sidecar files, opt-in load |
+
+The earlier framing in this doc ("push all of these and you've
+reinvented Nominatim") is wrong — or rather, it's literally true but
+misses the point. Reinventing Nominatim *on potato infrastructure* is
+the moat. That's the product.
+
+The earlier "skip items 9–10" advice (polygon outputs, `/details`,
+category search) is **revoked**. We should pursue them — see the
+revised attack order at the bottom.
+
+---
+
+## The genuine 20% — caveats we own
+
+These are explicit non-goals: things that conflict with the
+architecture, the audience, or both. Documenting them here so we don't
+silently drift into trying to be everything.
+
+### C1. Live OSM minutely diff streams
+Nominatim consumes OSM's minutely replication feed; every edit on the
+planet propagates within minutes. Our model is "rebuild a country
+periodically with change detection." Implementing diff-application
+would require transactional mutability of the FSTs, which fights
+mmap-immutability.
+- **Caveat**: if you need <1-hour freshness on user edits anywhere on
+  the planet, Heimdall isn't for you. (~95% of geocoding use cases
+  don't need this.)
+- **Workaround for users**: trigger a per-country rebuild on demand;
+  takes minutes-to-hours per country.
+
+### C2. Mutation / admin endpoints
+Nominatim has SQL-level access for marking duplicates, setting
+Wikidata links, deleting bad records, ingesting custom data. Our
+index is built ahead of time and immutable at runtime.
+- **Caveat**: data corrections happen at rebuild time via source data
+  or normalizer config, not via API.
+
+### C3. OSM-editor backend integration (iD, JOSM)
+Editors expect a very specific Nominatim contract — full original tag
+preservation, polygon download for boundary editing, exact `place_id`
+lifecycle across rebuilds. Editor users are a different audience from
+app developers; bridging the gap costs more than it returns.
+- **Caveat**: don't use Heimdall as the geocoding backend for an OSM
+  editor. Audience mismatch.
+
+### C4. Full original OSM tag preservation
+Nominatim keeps every tag on every object. Our extraction is curated
+— we keep the tags that matter for geocoding (name, place, amenity,
+class, type, addr:*, population, wikidata, etc.) and drop the rest
+(heritage codes, surface materials, lit=yes, ref:*).
+- **Caveat**: not a tag-store. Use Overpass or osmium-tool for that.
+
+### C5. Quality-tracking endpoints (`/deletable`, `/polygons`)
+Used by OSM data-quality teams to find self-reported deletions and
+broken polygons. Pure niche, audience mismatch.
+- **Caveat**: not a data-quality tool.
+
+### C6. RDF / linked-data outputs
+Nominatim has an RDF form for linked-data consumers. Genuinely niche.
+- **Caveat**: JSON / JSONv2 / GeoJSON only. (We *will* add GeoJSON; see
+  #13.)
+
+### C7. `format=xml`
+Older clients still ask for it. Audience mismatch with our target
+users (app developers).
+- **Caveat**: optional; not in our roadmap.
+
+---
+
+## The pitch (positioning statement)
+
+> *Heimdall implements the Nominatim API surface for forward search,
+> reverse geocoding, autocomplete, and structured query — with full
+> address-level reverse, polygon containment, polygon output, and
+> category search. It runs as a single binary on potato hardware (1–2
+> GB RAM, hundreds of MB to low GB of disk per country). It is **not**
+> a live OSM mirror, **not** an editor backend, and **not** a
+> data-quality tool. Updates land at country-rebuild cadence (hours),
+> not minutely. If you're geocoding for an app, this is what you want;
+> if you're operating an OSM editor or a Wikidata bot, run Nominatim.*
+
+That's the elevator pitch. The seven caveats above fit on a sticker.
+
+---
+
+## Tier 0 — Stability concerns to address early
+
+### S1. `place_id` stability across rebuilds
+- **Symptom**: `encode_place_id(country_index, record_id)`
+  (main.rs:2574) packs the record's array position into the ID.
+  Whenever upstream data reorders records (a country rebuild, a
+  Photon refresh, an OSM PBF update with new node IDs) the same
+  physical place gets a different `place_id`.
+- **Why it matters**: many clients persist `place_id` to mark
+  favorites, build address books, deduplicate user history, etc.
+  Nominatim place_ids are mostly stable across imports; ours aren't.
+  This is a *silent data corruption* class of bug from a user's
+  perspective.
+- **Fix**: stable-ID layer. Options:
+  - Hash `(osm_type, osm_id, class, type)` to a u64 — stable as long
+    as the OSM object exists, breaks if the object is deleted.
+  - Sidecar `stable_id ↔ record_id` map persisted across rebuilds —
+    new records get new IDs, deleted IDs are tombstoned.
+- **Effort**: 2–3 days for the hash approach (recommended);
+  1 week for the durable-map approach.
+- **Priority**: ship before any large user adopts us, even if the
+  feature audit is incomplete. Once users persist place_ids, breaking
+  them is a hostile event.
+
+---
+
 ## Tier 1 — Wrong/missing in every response
 
 These are response-shape gaps that affect every result the API returns.
@@ -394,38 +527,118 @@ pub struct PlaceRecord {
 
 ---
 
-## Suggested attack order (by ROI)
+## Suggested attack order (by ROI) — revised under the lean-reinvention thesis
 
-If the goal is "be the best geocoder" while staying compatible:
+The goal is full Nominatim API parity (excepting the seven caveats
+above), delivered on potato infrastructure. Earlier guidance to "skip
+items 9–10" is **revoked** — those features fit the architecture and
+are part of the moat. Only `format=xml` (#15) and `debug=1` HTML (#24)
+stay genuinely punted.
+
+Phased, by impact and dependency:
+
+### Phase 0 — Don't ship more users until this lands (1 week)
+
+| # | Item | Effort | Why first |
+|---|------|--------|-----------|
+| 0.1 | Stable `place_id` (S1) | 2–3 days | Silent corruption class. Once users persist IDs, breaking them is hostile. |
+
+### Phase 1 — Drop-in compatibility for app developers (~3 weeks)
+
+Closes the user-reported bug and gets the API shape clients expect.
 
 | # | Item | Effort | Unlocks |
 |---|------|--------|---------|
-| 1 | Reverse with addresses (#7–11) | 1 wk | The user's reported bug; closes the biggest visible gap |
-| 2 | Tier 1 response shape (#1–6) | 1 wk | All Nominatim clients start working |
-| 3 | `Accept-Language` (#16) | 1 day | Free i18n win — data already exists |
-| 4 | Polygon containment for admin (#10) | 1 wk | Removes two CLAUDE.md known issues |
-| 5 | `jsonv2` + `geojson` (#12, #13) | 1 day | Most-used output formats |
-| 6 | Schema-bump batch (#28, #5, #2 together) | 3 days | One reindex, three big features |
-| 7 | `extratags`, `namedetails`, `dedupe`, `exclude_place_ids` (#18–21) | 2 days | Cheap, additive |
-| 8 | Postcodes as places + interpolation (#30, #31) | 1 wk | US/UK/AU quality |
-| 9 | Polygon outputs + `/details` (#17, #25) | 2 wks | Editor compatibility (iD, JOSM) |
-| 10 | Category search (#28+#34) | 1 wk after #28 | Whole new query class |
+| 1.1 | Reverse with addresses (#7–11) | 1 wk | The original bug. Largest visible gap. |
+| 1.2 | Tier 1 response shape (#1–6: `boundingbox`, `class`, `place_rank`, full `display_name`, `osm_id` u64, `licence`) | 1 wk | Every Nominatim client starts working. |
+| 1.3 | `Accept-Language` (#16) | 1 day | Free i18n — data already in `name_intl`. |
+| 1.4 | `jsonv2` + `geojson` outputs (#12, #13) | 1 day | Most-requested formats. |
+| 1.5 | `dedupe`, `exclude_place_ids`, `featuretype`, `email` (#20–23) | 2 days | Cheap additive params. |
 
-**Total to "Nominatim parity for the 80% case"**: ~3 weeks of focused
-work (items 1–5).
+**End of Phase 1**: Heimdall is a credible Nominatim drop-in for app
+use cases. Map taps return addresses. Search results have correct
+shape. Localised names work.
 
-**Total to "best-in-class geocoder"**: ~2–3 months for everything.
+### Phase 2 — The lean-reinvention (under-promised, doable) (~3 weeks)
+
+Items I previously hedged on. They fit the architecture; the cost
+re-check above shows they're affordable.
+
+| # | Item | Effort | Unlocks |
+|---|------|--------|---------|
+| 2.1 | Polygon containment for admin (#10) | 1 wk | Two CLAUDE.md known issues; correct city/county on every reverse. |
+| 2.2 | Schema-bump batch (#28 POI granularity, #5 osm_id u64 if not yet, #2 class field) | 3 days | One reindex pays for three big features. |
+| 2.3 | `extratags` + `namedetails` (#18, #19) | 2 days | Sidecar-loaded; zero hot-path cost. |
+| 2.4 | Buildings as places (#29) | 2–3 days | "Empire State Building" works as a forward query, building polygons as reverse hits. |
+| 2.5 | Address interpolation (#30) | 3 days | US/UK/AU rural coverage. |
+| 2.6 | Postcodes as places (#31) | 2 days | `q="111 51"` returns the postcode area. |
+| 2.7 | Relation-typed results (#32) | 2 days | Stockholm returns as `osm_type=R, type=administrative`. |
+| 2.8 | Wikidata QID lookup (#33) | 1 day | `q=Q1428` resolves. |
+
+**End of Phase 2**: Heimdall has feature-superset overlap with
+Nominatim's app-tier API. Polygon containment, full POI tagging,
+buildings, interpolation — all on potato infra.
+
+### Phase 3 — Editor-adjacent without becoming an editor (~2 weeks)
+
+Polygon outputs and `/details` look like "editor features" but they're
+also useful for app developers (admin boundary highlighting, place
+introspection). Worth doing; *but* they don't make us an editor
+backend (see caveat C3).
+
+| # | Item | Effort | Unlocks |
+|---|------|--------|---------|
+| 3.1 | Polygon outputs (#17: `polygon_geojson`, `polygon_kml`, `polygon_svg`, `polygon_text`, `polygon_threshold`) | 1 wk | Admin highlighting, geofencing UI. |
+| 3.2 | `/details` endpoint (#25) | 2 days | Place introspection. Trivial after #2, #17, #18 land. |
+| 3.3 | Category search (#34) | 1 wk after #28 | "cafes near me", "atm in Berlin". New query class. |
+| 3.4 | `/status` Nominatim-shaped output (#27) | <1 hr | Health-check parity. |
+
+### Phase 4 — Long-tail polish
+
+| # | Item | Effort | Notes |
+|---|------|--------|-------|
+| 4.1 | Free-form parser improvements (#35) | ongoing | Benchmark-driven via `heimdall-compare`. |
+| 4.2 | `format=geocodejson` (#14) | ½ day | Pelias-targeted clients. |
+| 4.3 | `format=xml` (#15) | ½ day | Optional — caveat C7. |
+| 4.4 | `debug=1` HTML page (#24) | 2 days | Diagnostic UX. Optional. |
+
+### Totals
+
+- **Phase 0 + 1** (drop-in for apps): ~4 weeks. Single engineer.
+- **Phase 0 + 1 + 2** (lean-reinvention complete): ~7 weeks.
+- **Through Phase 3**: ~9–10 weeks. Full app+adjacent feature set.
+- **Phase 4**: ongoing.
+
+This is the honest "weeks-to-Nominatim-parity-on-potato" budget.
 
 ---
 
-## Honest framing
+## Honest framing — revised
 
 Today Heimdall is a fast forward-geocoder for places + addresses, with
-a reverse endpoint that's really "nearest place name." Closing items
-1–5 alone would put us at Nominatim parity for the 80% case; items
-6–10 are what separates parity from best-in-class.
+a reverse endpoint that's really "nearest place name." That's the
+80%-case product, and Phase 1 above closes the visible gap to
+Nominatim for that case.
 
-The reverse-geocoding bug isn't a one-off — it's the visible tip of
-"we built a forward index and bolted on a minimal reverse endpoint."
-Done right, reverse uses the same address index forward search uses,
-plus polygon containment for admin attribution.
+The strategic insight from this audit: the items I previously called
+"reinventing Nominatim" (polygon containment, polygon outputs, full
+POI tagging, buildings, /details, category search) all fit our
+architecture at a small fraction of Nominatim's storage and ops cost.
+Pursuing them isn't mission creep — *it's the moat*. Heimdall delivers
+Nominatim-class features without the Postgres+PostGIS tax. That's the
+product.
+
+The seven caveats (C1–C7) define what we explicitly don't try to be:
+not a live OSM mirror, not an editor backend, not a data-quality tool,
+not a tag store, not an RDF/XML server. Audience mismatch on all of
+them; bridging the gap costs more than it returns.
+
+Phase 0's stable-`place_id` work is the one thing we should ship
+**before** any meaningful user adoption. Persisted IDs are a contract
+we can't silently break.
+
+The reverse-geocoding bug that triggered this audit isn't a one-off —
+it's the visible tip of "we built a forward index and bolted on a
+minimal reverse endpoint." Done right, reverse uses the same address
+index forward search uses, plus polygon containment for admin
+attribution. Phase 1 lands that.
