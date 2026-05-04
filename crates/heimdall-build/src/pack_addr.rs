@@ -210,12 +210,24 @@ pub fn pack_addresses(
     // -----------------------------------------------------------------------
     // Step 2: Build the street-grouped store
     // -----------------------------------------------------------------------
-    // Sort groups by median latitude for better delta-of-delta compression
+    // Sort groups by median latitude for better delta-of-delta compression.
+    //
+    // The (norm_street, muni_id) tiebreaker is what makes the build
+    // reproducible: `groups` is a HashMap, whose iteration order is
+    // randomised per process by the default hasher. With only the
+    // latitude key, two streets sharing a median lat (common when
+    // microdegree precision collides for nearby segments) end up in
+    // arbitrary order, which assigns different street_ids run-to-run
+    // and produces different bytes in addr_streets.bin / fst_addr.fst.
+    // Falling back on the StreetKey makes the order a pure function
+    // of the input data → identical artefacts for identical inputs.
     let mut sorted_groups: Vec<(StreetKey, StreetGroup)> = groups.into_iter().collect();
     sorted_groups.sort_by(|a, b| {
         let lat_a = a.1.houses.get(a.1.houses.len() / 2).map(|h| h.lat).unwrap_or(0);
         let lat_b = b.1.houses.get(b.1.houses.len() / 2).map(|h| h.lat).unwrap_or(0);
         lat_a.cmp(&lat_b)
+            .then_with(|| a.0.norm_street.cmp(&b.0.norm_street))
+            .then_with(|| a.0.muni_id.cmp(&b.0.muni_id))
     });
 
     let mut store_builder = AddrStoreBuilder::new();
