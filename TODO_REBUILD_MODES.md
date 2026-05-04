@@ -29,9 +29,10 @@ Phases 1+2 alone unlock "rebuild on a laptop". Phase 3 hits the potato goal.
 Phase 4 is the perf killer for ongoing rebuilds. Phase 5 is the common-path
 perf win — every rebuild benefits, not just the rare incremental ones.
 
-**Status (May 2026):** Phases 1, 2, 3, 4 implemented (Phases 1-3 merged on
-main; Phase 4 on this branch — see "Phase 4 — shipped" section). Phase 5
-not started.
+**Status (May 2026):** Phases 1-4 merged on main. Phase 5 partially
+shipped — see "Phase 5 — shipped (scoped)" section below for what
+landed and what was deferred after the original sketch turned out to
+have several invalid premises.
 
 ---
 
@@ -801,6 +802,113 @@ not measurably faster; flag for later if benchmarks show otherwise.
 
 ---
 
+## Phase 5 — shipped (scoped)
+
+Phase 5 was implemented as a focused scope reduction after the
+original sketch was audited against the actual code paths. Three
+premises in the sketch turned out to be wrong; documenting them here
+so future work can pick up from a corrected base.
+
+### What actually shipped
+
+`pack_addr.rs` no longer instantiates a `SortBuffer<u32>` for the
+address-FST keys. The two-keys-per-street-group push site (muni-
+specific + wildcard, ≈ 3M pushes for US, ≈ 200K for DK) writes into a
+plain `Vec<(Vec<u8>, u32)>`, then a single stable `sort_by` orders
+the keys before the FST `MapBuilder` consumes them with the same
+inline-dedup loop as before. `PackOptions` stays in the signature so
+`--sort-mem` / `--scratch-dir` plumbing through `main.rs` and
+`rebuild.rs` is undisturbed; pack_addr just ignores the values now.
+
+* **FST output is byte-identical** to the SortBuffer path. The
+  `fst_built_from_sort_buffer_matches_in_memory_sort_byte_for_byte`
+  test in `sort_buffer.rs` already pinned this contract; the new
+  `pack_addr_fst_bench` test (`#[ignore]`d, opt-in via `cargo test
+  -- --ignored`) re-asserts it at realistic 3M-key scale.
+* **Code drops a layer of postcard encode/decode round-tripping**
+  that ran on every pack regardless of country size, since real
+  inputs always took the in-memory fast path anyway (zero spills
+  observed in production rebuild logs since Phase 2 landed).
+* **Bench numbers** at US-scale (1.5M synthetic street groups, 3M
+  pushes, 21.3 MB FST output): in-memory `Vec::sort_by` + build =
+  2.3 s; SortBuffer path = 2.5 s. ~8 % saved on the pack-addr step.
+  Modest because at this scale SortBuffer was already taking its
+  in-RAM fast path; the savings are postcard overhead and a cache-
+  friendlier sort.
+
+### Three premises in the original sketch that were wrong
+
+1. **"Drop SortBuffer in pack.rs"** — `pack.rs` (places FST) never
+   used `SortBuffer`. It writes TSV files (`exact.tsv`, `phonetic.tsv`,
+   `ngram.tsv`) and shells out to GNU `sort` with `--buffer-size=128M
+   /256M` for external sort. There's no SortBuffer to drop. To make
+   pack.rs streaming you'd have to eliminate the TSV intermediate by
+   generating keys upstream — but each input row produces many keys
+   (per-word, normalized variants, alt-names, ~50 trigrams), so
+   "sort the parquet rows" doesn't put the *keys* in order.
+
+2. **"Sort during enrich gives FST keys in order without a sort in
+   pack"** — works only for 1-to-1 row→key encodings. pack_addr is
+   1-to-2 (the wildcard interleaves), pack.rs is 1-to-many. Either
+   path still needs a sort step downstream of key expansion.
+
+3. **"Byte-identical FST after pre-sort"** — record_id and street_id
+   assignment in pack/pack_addr depends on iteration order. Sorting
+   the parquet upstream changes those IDs, which changes FST values
+   even when the same keys are present. The §5.3 byte-parity check
+   as stated would only pass for the no-sort baseline.
+
+### What was deferred (and why)
+
+* **Sort places.parquet upstream** — possible but breaks
+  `fst_exact.fst` / `records.bin` byte content (one-time format
+  change). Marginal cache-locality win for pack.rs's GNU-sort step;
+  not worth the operational disruption right now. Note the same is
+  true for `addresses.parquet` — pre-sorting would change street_id
+  assignment unless we also break the median-lat compression sort
+  in `pack_addr`, which would inflate `addr_streets.bin` by an
+  estimated 10-30%.
+
+* **`--phase5-parity-check` flag** — the byte-parity claim is now
+  enforced at the `SortBuffer` ↔ `Vec::sort_by` boundary by an
+  existing unit test (and the new `pack_addr_fst_bench`). No second
+  pipeline is needed.
+
+* **`crates/heimdall-build/benches/`** directory — the crate has no
+  library target, so a `[[bench]]` entry would require adding one
+  (or a custom-harness binary). Skipped in favour of the
+  `#[ignore]`d unit test, which is reachable via `cargo test
+  --release -p heimdall-build pack_addr_fst_bench -- --ignored`.
+
+### Files touched
+
+* `crates/heimdall-build/src/pack_addr.rs` — replace SortBuffer push
+  with `Vec::push`; replace `finish()` iterator with `sort_by` +
+  drained loop. Add `pack_addr_fst_bench` (`#[ignore]`).
+
+`SortBuffer` itself stays in `crates/heimdall-build/src/sort_buffer.rs`
+unchanged — its `PackOptions` is still the canonical place for
+`--sort-mem` / `--scratch-dir`, and the type may yet be reused if
+pack.rs's TSV path is ever consolidated into a typed buffer.
+
+### Open Phase-5 follow-ups
+
+* **Idempotent merges in the address pipeline** would unlock a real
+  pre-sort win: if `pack_addr` could compute street_ids as a function
+  of `(norm_street, muni_id)` instead of via median-lat ordering, the
+  parquet could be sorted once upstream and pack_addr could stream-
+  group without the in-memory HashMap. That's a multi-day refactor of
+  `addr_store` plus an FST-byte-content break; deferred until there's
+  a concrete bottleneck to justify it.
+* **Pre-sort places.parquet for cache locality** in pack.rs's TSV
+  write step. ~marginal win; revisit if rebuild reports show pack
+  taking a disproportionate share of wall time.
+* **Move pack.rs into a typed key-buffer** like SortBuffer (instead of
+  shelling out to GNU sort). Would unify the pack and pack_addr paths
+  but doesn't change the asymptotic cost. Cosmetic.
+
+---
+
 ## Open questions / decisions needed
 
 These are flagged for whoever picks this up, NOT decided yet:
@@ -887,33 +995,47 @@ TODO_REBUILD_MODES.md      — this file
 
 ## Recommended starting point for the next chat
 
+Phase 5's first slice landed (see "Phase 5 — shipped (scoped)" above).
+The deeper remaining items are upgrades, not blockers; pick the one
+that matches the next real bottleneck:
+
 ```
-Context: Read CLAUDE.md, then TODO_REBUILD_MODES.md.
-Goal:    Ship Phase 5 (pre-sort upstream of pack) as a single PR.
+Goal:    Make pack.rs's TSV-sort path streamable.
 Steps:
-  1. Read enrich.rs end-to-end to understand the in-memory data flow
-     and where places/addresses live by the time admin is assigned.
-  2. Read pack.rs and pack_addr.rs around the SortBuffer integration
-     to see exactly what key encoding pack uses today (must match).
-  3. Sketch the FST key encoding once and reuse the same function in
-     both enrich (sort) and pack (assertion).
-  4. Implement §5.1: sort + rewrite places.parquet and addresses.parquet
-     at the end of enrich(). Use SortBuffer iff pressure is Hard.
-  5. Implement §5.2: drop SortBuffer from pack; add the ordering
-     assertion.
-  6. Implement §5.3: byte-for-byte parity check against the pre-Phase-5
-     path on DK. Land that test FIRST so the rest is just "make it pass".
-  7. Bench on DE and US; record before/after numbers in the PR.
-  8. Open PR, request review.
+  1. Read pack.rs's `build_fst_from_disk` and `build_fst_from_disk_ngram`.
+     Measure their wall time on a real US rebuild (rebuild-report logs).
+  2. Decide whether the ~5-15 min spent in GNU sort is worth replacing
+     with a typed buffer. If yes, refactor to use SortBuffer (or a
+     specialised helper) and drop the TSV intermediate.
+  3. record_id assignment depends on parquet read order — keep the
+     same iteration so fst_exact.fst values stay byte-identical.
+```
+
+```
+Goal:    Pre-sort addresses.parquet upstream (deeper Phase-5).
+Steps:
+  1. Refactor addr_store/pack_addr so street_ids are a pure function
+     of (norm_street, muni_id) (no median-lat dependency). This is
+     a one-time format break for addr_streets.bin and fst_addr.fst.
+  2. Sort addresses.parquet at end of enrich by (norm_street, muni_id,
+     housenumber). The muni_id resolution must match pack_addr's
+     city_name_to_muni_id fallback exactly.
+  3. pack_addr becomes streaming: read sorted rows, accumulate one
+     group at a time, flush on key change.
+  4. Measure addr_streets.bin size delta — accept the inflation or
+     re-introduce a per-stream sort tier.
+```
 
 Earlier-phase pickup notes:
-  * Phase 1, 2, 3 are merged on main (PRs #9 + #10).
-  * Phase 4 is on the current branch — see "Phase 4 — shipped" section
-    above. Don't re-implement; build on top.
-```
+  * Phases 1-4 are all merged on main.
+  * Phase 5 first slice (drop SortBuffer in pack_addr) shipped on
+    branch `feat/phase5-pre-sort-upstream-of-pack`. See "Phase 5 —
+    shipped (scoped)" for what landed and which premises in the
+    original sketch turned out to be wrong.
 
 ---
 
-*Last updated: May 2026 (Phase 4 implementation session). Status:
-Phases 1-3 merged, Phase 4 implemented this branch, Phase 5 designed
-but not started. Phase 5 estimated at 3-5 days.*
+*Last updated: May 2026 (Phase 5 first-slice session). Status:
+Phases 1-4 merged on main, Phase 5 first slice shipped on branch.
+Deferred Phase-5 items are now scoped as separate follow-ups, not
+single-PR work — see the Open Phase-5 follow-ups section.*
