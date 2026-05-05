@@ -861,6 +861,44 @@ Phase 2.3 namedetails sidecar; this PR just consumes it.
 
 ---
 
+## Phase 2.6 — shipped (postcodes as searchable places)
+
+Audit item #31. Adds a new `PlaceType::Postcode` enum variant (slot 9,
+the unused gap between `Locality` and `Suburb` — non-breaking on the
+PlaceRecord wire format).
+
+### What's on disk
+
+* `pack.rs` reads `addresses.parquet` after the place loop, groups by
+  postcode, computes per-postcode centroids in microdegree integer
+  arithmetic (avoids f64 cancellation at country scale), and emits
+  one `PlaceRecord` per unique postcode with `place_type=Postcode`,
+  `class=place`, `type=postcode`. Importance is set just below
+  `Locality` so a real city named "12345" still outranks its
+  synthetic postcode of the same string; member count is folded in
+  as a soft notability proxy.
+* Postcode records share `records.bin`, `fst_exact.fst`, and the
+  geohash spatial index with regular places — no new sidecar.
+  Single FST key per postcode (verbatim, lowercased); no phonetic /
+  per-word expansion since postcode tokens don't have those.
+* `addresses.parquet` missing → the synthesis is skipped (Photon-only
+  countries with no address store).
+
+### What's on the wire
+
+* `q="111 51"` and similar postcode-shaped queries return the
+  postcode area as its own object (`type=postcode`, full Phase 2.2
+  bbox + class/type, stable place_id derived from the postcode
+  string + country).
+* `place_rank_from_str("postcode") => 21` was already in place; the
+  new records inherit it automatically.
+* `/reverse` near a rural address now has a chance to return the
+  postcode centroid as the nearest "place" hit when nothing
+  importance-heavy is closer — acceptable degradation, matches
+  Nominatim's behaviour.
+
+---
+
 ## Phase 3.4 + 4.2 — shipped (format polish)
 
 Two cheap wins bundled together. No schema break, no reindex.

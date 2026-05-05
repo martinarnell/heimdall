@@ -72,6 +72,7 @@ fn default_type_for_place_type(pt: PlaceType) -> String {
         PlaceType::Hamlet => "hamlet".to_owned(),
         PlaceType::Farm => "farm".to_owned(),
         PlaceType::Locality => "locality".to_owned(),
+        PlaceType::Postcode => "postcode".to_owned(),
         PlaceType::Suburb => "suburb".to_owned(),
         PlaceType::Quarter => "quarter".to_owned(),
         PlaceType::Neighbourhood => "neighbourhood".to_owned(),
@@ -668,6 +669,30 @@ pub fn pack(
             }
         }
     } // parquet reader dropped, Arrow batch buffers freed
+
+    // Phase 2.6 — synthesise one PlaceRecord per unique postcode at the
+    // centroid of its member addresses. Audit #31. Searchable via the
+    // same FST pipeline as places — `q="111 51"` returns the postcode
+    // area as its own object. Skipped when addresses.parquet doesn't
+    // exist (some country indices are place-only; e.g. Photon-only
+    // countries with no address store).
+    let addresses_parquet = output_dir.join("addresses.parquet");
+    let postcode_count = if addresses_parquet.exists() {
+        synthesise_postcodes(
+            &addresses_parquet,
+            &mut record_builder,
+            &mut geohash_builder,
+            &mut exact_buf,
+            &mut exact_count,
+            &mut class_type_builder,
+        )?
+    } else {
+        0
+    };
+    if postcode_count > 0 {
+        info!("Phase 2.6: synthesised {} postcode records", postcode_count);
+        records_added += postcode_count;
+    }
 
     // Write class_types interning table sidecar (Phase 2.2). Loaded by the
     // API at startup to resolve `PlaceRecord::class_type` u16 → (class, type)
@@ -1383,6 +1408,118 @@ fn read_parquet(path: &Path) -> Result<Vec<RawPlace>> {
     Ok(places)
 }
 
+/// Phase 2.6 — read `addresses.parquet`, group by postcode, synthesise
+/// one `PlaceRecord` per unique postcode at the centroid of its member
+/// addresses. Returns the number of postcode records emitted.
+///
+/// The synthetic record uses `PlaceType::Postcode` (variant 9, added in
+/// Phase 2.6), `class=place`, `type=postcode`, and a small ~50 m bbox
+/// around the centroid. Importance is set just below `Locality` so a
+/// real city named "12345" still outranks the synthetic postcode of
+/// the same string.
+fn synthesise_postcodes(
+    addresses_parquet: &Path,
+    record_builder: &mut RecordStoreBuilder,
+    geohash_builder: &mut GeohashIndexBuilder,
+    exact_buf: &mut SortBuffer<(u32, u16)>,
+    exact_count: &mut usize,
+    class_type_builder: &mut ClassTypeBuilder,
+) -> Result<usize> {
+    use arrow::array::*;
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+
+    // Per-postcode running totals: (sum_lat_µdeg, sum_lon_µdeg, count).
+    // Microdegree i64 sums avoid the f64 cancellation that bites at
+    // country-scale aggregations.
+    let mut by_postcode: HashMap<String, (i64, i64, u32)> = HashMap::new();
+
+    let file = std::fs::File::open(addresses_parquet)?;
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
+    let reader = builder.build()?;
+    for batch_result in reader {
+        let batch = batch_result?;
+        let n = batch.num_rows();
+        let postcodes = batch.column_by_name("postcode").unwrap()
+            .as_any().downcast_ref::<StringArray>().unwrap();
+        let lats = batch.column_by_name("lat").unwrap()
+            .as_any().downcast_ref::<Float64Array>().unwrap();
+        let lons = batch.column_by_name("lon").unwrap()
+            .as_any().downcast_ref::<Float64Array>().unwrap();
+        for i in 0..n {
+            if postcodes.is_null(i) { continue; }
+            let pc = postcodes.value(i).trim();
+            if pc.is_empty() || pc.len() > 32 { continue; }
+            let lat = lats.value(i);
+            let lon = lons.value(i);
+            if lat.abs() > 90.0 || lon.abs() > 180.0 { continue; }
+            let entry = by_postcode.entry(pc.to_owned()).or_insert((0, 0, 0));
+            entry.0 += (lat * 1_000_000.0) as i64;
+            entry.1 += (lon * 1_000_000.0) as i64;
+            entry.2 = entry.2.saturating_add(1);
+        }
+    }
+
+    if by_postcode.is_empty() {
+        return Ok(0);
+    }
+
+    // Stable iteration order so two builds with the same input produce
+    // the same record_id assignment for postcodes (Phase 0 stable
+    // place_id depends on osm_id, which is 0 for synthetic records, so
+    // determinism here is what keeps stable_place_id stable across
+    // rebuilds for postcode rows).
+    let mut postcodes: Vec<(String, (i64, i64, u32))> = by_postcode.into_iter().collect();
+    postcodes.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let class_type = class_type_builder.intern("place", "postcode");
+    let mut emitted = 0usize;
+    for (pc, (sum_lat, sum_lon, count)) in postcodes {
+        if count == 0 { continue; }
+        let lat_udeg = sum_lat / count as i64;
+        let lon_udeg = sum_lon / count as i64;
+        let lat = lat_udeg as f64 / 1_000_000.0;
+        let lon = lon_udeg as f64 / 1_000_000.0;
+        let coord = Coord::new(lat, lon);
+        // ~50 m bbox around the centroid so jsonv2/geojson clients
+        // fit-zoom on it sensibly.
+        const HALF_EXTENT_UDEG: i32 = 450;
+        let bbox = BBoxDelta::encode(
+            coord,
+            coord.lat - HALF_EXTENT_UDEG,
+            coord.lat + HALF_EXTENT_UDEG,
+            coord.lon - HALF_EXTENT_UDEG,
+            coord.lon + HALF_EXTENT_UDEG,
+        );
+        // Importance: just below Locality so a city named "12345" still
+        // outranks its synthetic postcode of the same string. Member
+        // count is a soft notability proxy — a postcode with 50K
+        // addresses is more searchable than one with 3.
+        let mass = (count as f64).log10().max(0.0);
+        let importance = (3500.0 + mass * 250.0).min(65535.0) as u16;
+        let record = PlaceRecord {
+            coord,
+            bbox,
+            osm_id: 0,
+            admin1_id: 0,
+            admin2_id: 0,
+            importance,
+            class_type,
+            place_type: PlaceType::Postcode,
+            flags: FLAG_HAS_BBOX,
+            name_offset: 0,
+        };
+        let id = record_builder.add(record, &pc, &[]);
+        emitted += 1;
+        geohash_builder.add(lat, lon, id);
+        // Single FST key — postcodes don't get phonetic / per-word
+        // expansion. The user types the postcode verbatim.
+        let key = pc.to_lowercase();
+        exact_buf.push(key.as_bytes().to_vec(), (id, importance))?;
+        *exact_count += 1;
+    }
+    Ok(emitted)
+}
+
 /// Convert u8 back to PlaceType
 fn place_type_from_u8(v: u8) -> PlaceType {
     match v {
@@ -1395,6 +1532,7 @@ fn place_type_from_u8(v: u8) -> PlaceType {
         6 => PlaceType::Hamlet,
         7 => PlaceType::Farm,
         8 => PlaceType::Locality,
+        9 => PlaceType::Postcode,
         10 => PlaceType::Suburb,
         11 => PlaceType::Quarter,
         12 => PlaceType::Neighbourhood,
