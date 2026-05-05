@@ -313,6 +313,44 @@ pub fn enrich(parquet_path: &Path, output_dir: &Path) -> Result<EnrichResult> {
             "Built {} county polygons + {} municipality polygons for containment testing",
             county_polygons.len(), muni_polygons.len()
         );
+
+        // -----------------------------------------------------------------------
+        // Step 2c: Persist polygons in runtime-friendly format
+        // -----------------------------------------------------------------------
+        // The build-time `admin_polygons.bin` is osm_id-keyed and gets cleaned
+        // up post-build. `runtime_polygons.bin` is a self-contained sidecar
+        // (admin_id baked in, bbox precomputed, single ring per entry) that
+        // the API loads for query-time PiP. Survives the cleanup pass —
+        // see TODO_NOMINATIM_PARITY.md §10 (Phase 2.1).
+        let to_runtime = |awps: &[AdminWithPolygon]| -> Vec<heimdall_core::admin_polygons::RuntimePolygon> {
+            awps.iter().map(|awp| {
+                let ring: Vec<(f64, f64)> = awp.polygon.exterior().0.iter()
+                    .map(|c| (c.y, c.x))  // geo::Coord (x=lon, y=lat) → (lat, lon)
+                    .collect();
+                heimdall_core::admin_polygons::RuntimePolygon {
+                    admin_id: awp.admin_id,
+                    min_lat: awp.min_lat,
+                    max_lat: awp.max_lat,
+                    min_lon: awp.min_lon,
+                    max_lon: awp.max_lon,
+                    ring,
+                }
+            }).collect()
+        };
+        let runtime_file = heimdall_core::admin_polygons::AdminPolygonFile {
+            version: 1,
+            admin1: to_runtime(&county_polygons),
+            admin2: to_runtime(&muni_polygons),
+        };
+        let runtime_path = output_dir.join("runtime_polygons.bin");
+        let runtime_bytes = bincode::serialize(&runtime_file)?;
+        std::fs::write(&runtime_path, &runtime_bytes)?;
+        info!(
+            "runtime_polygons.bin: {:.1} MB ({} admin1 + {} admin2 entries)",
+            runtime_bytes.len() as f64 / 1e6,
+            runtime_file.admin1.len(),
+            runtime_file.admin2.len(),
+        );
     }
 
     // -----------------------------------------------------------------------

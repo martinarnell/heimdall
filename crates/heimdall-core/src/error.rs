@@ -19,4 +19,7 @@ pub enum HeimdallError {
 
     #[error("Index not found at path: {0}")]
     IndexNotFound(String),
+
+    #[error("Index load error: {0}")]
+    IndexLoad(String),
 }
