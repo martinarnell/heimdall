@@ -164,11 +164,36 @@ struct SearchParams {
     limit: usize,
     #[serde(default)]
     addressdetails: u8,
+
+    /// Nominatim's default-on dedupe (`dedupe=1`). Drop later results
+    /// whose `(place_id)` or `(lat, lon, type, display_name)` was
+    /// already returned. Set `dedupe=0` to keep duplicates — useful
+    /// for clients that want every admin/place pair separately.
+    #[serde(default = "default_dedupe")]
+    dedupe: u8,
+
+    /// Comma-separated `place_id` drop-list. Nominatim's pagination
+    /// idiom — "I've shown these, give me the next batch."
+    exclude_place_ids: Option<String>,
+
+    /// Restrict results to one feature class. Accepted values:
+    /// `country`, `state`, `city`, `settlement` (the last matches
+    /// city/town/village/hamlet). Rough Nominatim parity — we don't
+    /// support the full feature taxonomy yet.
+    featuretype: Option<String>,
+
+    /// Polite-rate-limit hint Nominatim asks heavy users to set.
+    /// Accepted and ignored — we don't bill / rate-limit by it, but
+    /// rejecting it would break clients that always include it.
+    #[serde(default)]
+    #[allow(dead_code)]
+    email: Option<String>,
 }
 
 fn default_format() -> String { "json".to_owned() }
 fn default_limit() -> usize { 5 }
 fn default_autocomplete_limit() -> usize { 5 }
+fn default_dedupe() -> u8 { 1 }
 
 /// Returns true if any structured query parameter (amenity, street, city,
 /// county, state, postalcode, country) is present.
@@ -866,7 +891,7 @@ async fn search(
                             } else { None },
                         internal: None,
                         });
-                        return Ok(Json(response));
+                        return Ok(Json(apply_search_filters(&params, response)));
                     }
                 }
             }
@@ -903,7 +928,7 @@ async fn search(
                         } else { None },
                     internal: None,
                     });
-                    return Ok(Json(response));
+                    return Ok(Json(apply_search_filters(&params, response)));
                 }
             }
         }
@@ -958,7 +983,7 @@ async fn search(
                         } else { None },
                     internal: None,
                     });
-                    return Ok(Json(response));
+                    return Ok(Json(apply_search_filters(&params, response)));
                 }
             }
         }
@@ -1021,7 +1046,7 @@ async fn search(
                     } else { None },
                 internal: None,
                 });
-                return Ok(Json(response));
+                return Ok(Json(apply_search_filters(&params, response)));
             }
         }
     }
@@ -1160,7 +1185,7 @@ async fn search(
             postcode_match_found = true;
         }
         if postcode_match_found {
-            return Ok(Json(response));
+            return Ok(Json(apply_search_filters(&params, response)));
         }
         // Postcode portion missed — could be a real-but-unindexed code
         // (we miss entire prefixes when the national address feed is broken,
@@ -1268,7 +1293,7 @@ async fn search(
         // place-name lookups for the same digit string will be useless —
         // short-circuit to keep the postcode result clean.
         if postcode_match_found {
-            return Ok(Json(response));
+            return Ok(Json(apply_search_filters(&params, response)));
         }
     }
 
@@ -1646,7 +1671,7 @@ async fn search(
                         } else { None },
                     internal: None,
                     });
-                    return Ok(Json(response));
+                    return Ok(Json(apply_search_filters(&params, response)));
                 }
             }
         }
@@ -2238,7 +2263,8 @@ async fn search(
             .then(b_hi.cmp(&a_hi))
             .then(rb.importance.partial_cmp(&ra.importance).unwrap_or(std::cmp::Ordering::Equal))
     });
-    let mut response: Vec<NominatimResult> = paired.into_iter().map(|(r, _)| r).collect();
+    let response: Vec<NominatimResult> = paired.into_iter().map(|(r, _)| r).collect();
+    let mut response = apply_search_filters(&params, response);
     response.truncate(limit);
 
     metrics::record_result_count("search", response.len());
@@ -3061,6 +3087,85 @@ fn to_nominatim_enriched(
         }
     }
     result
+}
+
+/// Parse a comma-separated `place_id` list (from `exclude_place_ids=`)
+/// into a HashSet for O(1) membership checks. Skips entries that don't
+/// parse — Nominatim is lenient here and so are we.
+fn parse_exclude_place_ids(s: &str) -> std::collections::HashSet<u64> {
+    s.split(',')
+        .filter_map(|p| p.trim().parse::<u64>().ok())
+        .collect()
+}
+
+/// True when `place_type` (the lowercased enum string) matches the
+/// `featuretype=` filter. Accepts `country`, `state`, `city` for direct
+/// matches, and `settlement` as an alias for `city|town|village|hamlet`.
+/// Unknown values pass everything through (Nominatim quietly ignores
+/// unrecognised featuretypes; we mirror).
+fn matches_featuretype(featuretype: &str, place_type: &str) -> bool {
+    match featuretype {
+        "country" => place_type == "country",
+        "state" => place_type == "state",
+        "city" => place_type == "city",
+        "settlement" => matches!(place_type, "city" | "town" | "village" | "hamlet"),
+        _ => true,
+    }
+}
+
+/// Apply Nominatim-compatible post-filters to a search response:
+/// `exclude_place_ids` drop-list → `featuretype` allowlist →
+/// `dedupe` (default-on; key on `place_id` when non-zero else
+/// `(lat, lon, type, display_name)`).
+///
+/// Order matters — exclude before dedupe so a dupe can't slip past
+/// the exclude list, and dedupe last because dedupe key includes
+/// `display_name` which isn't stable until after filtering.
+fn apply_search_filters(params: &SearchParams, results: Vec<NominatimResult>) -> Vec<NominatimResult> {
+    let exclude: Option<std::collections::HashSet<u64>> = params
+        .exclude_place_ids
+        .as_deref()
+        .map(parse_exclude_place_ids);
+    let featuretype = params.featuretype.as_deref();
+    let dedupe = params.dedupe != 0;
+
+    let mut seen_place_ids: std::collections::HashSet<u64> = std::collections::HashSet::new();
+    let mut seen_synth: std::collections::HashSet<(String, String, String, String)> =
+        std::collections::HashSet::new();
+
+    results
+        .into_iter()
+        .filter(|r| {
+            if let Some(ref ex) = exclude {
+                if r.place_id != 0 && ex.contains(&r.place_id) {
+                    return false;
+                }
+            }
+            if let Some(ft) = featuretype {
+                if !matches_featuretype(ft, &r.place_type) {
+                    return false;
+                }
+            }
+            if dedupe {
+                if r.place_id != 0 {
+                    if !seen_place_ids.insert(r.place_id) {
+                        return false;
+                    }
+                } else {
+                    let key = (
+                        r.lat.clone(),
+                        r.lon.clone(),
+                        r.place_type.clone(),
+                        r.display_name.clone(),
+                    );
+                    if !seen_synth.insert(key) {
+                        return false;
+                    }
+                }
+            }
+            true
+        })
+        .collect()
 }
 
 /// Compose a Nominatim-style `display_name` from address pyramid parts.
@@ -4167,6 +4272,10 @@ mod tests {
             format: "json".to_owned(),
             limit: 5,
             addressdetails: 0,
+            dedupe: 1,
+            exclude_place_ids: None,
+            featuretype: None,
+            email: None,
         }
     }
 
@@ -4713,6 +4822,165 @@ mod tests {
         );
         // Postcode "Sweden" (theoretical) is preserved, country dedups.
         assert_eq!(s, "Some Place, Sweden");
+    }
+
+    // -----------------------------------------------------------------------
+    // Search post-filters (TODO_NOMINATIM_PARITY Phase 1.5: #20-23)
+    // -----------------------------------------------------------------------
+
+    fn mk_result(place_id: u64, lat: &str, lon: &str, place_type: &str, display: &str) -> NominatimResult {
+        NominatimResult {
+            place_id,
+            osm_type: None,
+            osm_id: None,
+            display_name: display.to_owned(),
+            lat: lat.to_owned(),
+            lon: lon.to_owned(),
+            place_type: place_type.to_owned(),
+            importance: 0.5,
+            match_type: None,
+            address: None,
+            internal: None,
+        }
+    }
+
+    #[test]
+    fn test_parse_exclude_place_ids() {
+        let s = parse_exclude_place_ids("1, 2,3,abc,5");
+        assert!(s.contains(&1));
+        assert!(s.contains(&2));
+        assert!(s.contains(&3));
+        assert!(s.contains(&5));
+        assert!(!s.contains(&4));
+        assert_eq!(s.len(), 4);
+    }
+
+    #[test]
+    fn test_matches_featuretype_country() {
+        assert!(matches_featuretype("country", "country"));
+        assert!(!matches_featuretype("country", "state"));
+        assert!(!matches_featuretype("country", "city"));
+    }
+
+    #[test]
+    fn test_matches_featuretype_settlement() {
+        assert!(matches_featuretype("settlement", "city"));
+        assert!(matches_featuretype("settlement", "town"));
+        assert!(matches_featuretype("settlement", "village"));
+        assert!(matches_featuretype("settlement", "hamlet"));
+        assert!(!matches_featuretype("settlement", "state"));
+        assert!(!matches_featuretype("settlement", "country"));
+    }
+
+    #[test]
+    fn test_matches_featuretype_unknown_passes_all() {
+        // Nominatim is silently lenient on unknown values; we mirror.
+        assert!(matches_featuretype("unicorn", "city"));
+    }
+
+    #[test]
+    fn test_apply_search_filters_dedupe_default_on() {
+        let mut p = default_search_params();
+        // Default dedupe=1
+        let results = vec![
+            mk_result(100, "59.0", "18.0", "city", "Stockholm"),
+            mk_result(100, "59.0", "18.0", "city", "Stockholm"),  // dupe by place_id
+            mk_result(0, "60.0", "18.0", "city", "Uppsala"),
+            mk_result(0, "60.0", "18.0", "city", "Uppsala"),       // dupe by synth key
+            mk_result(200, "61.0", "18.0", "city", "Gävle"),
+        ];
+        p.dedupe = 1;
+        let out = apply_search_filters(&p, results);
+        assert_eq!(out.len(), 3, "dedupe should drop both pairs");
+    }
+
+    #[test]
+    fn test_apply_search_filters_dedupe_off() {
+        let mut p = default_search_params();
+        p.dedupe = 0;
+        let results = vec![
+            mk_result(100, "59.0", "18.0", "city", "Stockholm"),
+            mk_result(100, "59.0", "18.0", "city", "Stockholm"),
+        ];
+        let out = apply_search_filters(&p, results);
+        assert_eq!(out.len(), 2, "dedupe=0 keeps duplicates");
+    }
+
+    #[test]
+    fn test_apply_search_filters_exclude_place_ids() {
+        let mut p = default_search_params();
+        p.exclude_place_ids = Some("100, 300".into());
+        p.dedupe = 0; // isolate the exclude filter
+        let results = vec![
+            mk_result(100, "59.0", "18.0", "city", "Stockholm"),
+            mk_result(200, "60.0", "18.0", "city", "Uppsala"),
+            mk_result(300, "61.0", "18.0", "city", "Gävle"),
+        ];
+        let out = apply_search_filters(&p, results);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].place_id, 200);
+    }
+
+    #[test]
+    fn test_apply_search_filters_exclude_does_not_drop_synthetic() {
+        // place_id == 0 is the "synthetic / no-osm-binding" sentinel —
+        // exclude_place_ids should never match it even when 0 is in the list.
+        let mut p = default_search_params();
+        p.exclude_place_ids = Some("0".into());
+        p.dedupe = 0;
+        let results = vec![
+            mk_result(0, "59.0", "18.0", "postcode", "11122"),
+        ];
+        let out = apply_search_filters(&p, results);
+        assert_eq!(out.len(), 1);
+    }
+
+    #[test]
+    fn test_apply_search_filters_featuretype_settlement() {
+        let mut p = default_search_params();
+        p.featuretype = Some("settlement".into());
+        p.dedupe = 0;
+        let results = vec![
+            mk_result(1, "0", "0", "country", "Sweden"),
+            mk_result(2, "0", "0", "city", "Stockholm"),
+            mk_result(3, "0", "0", "town", "Sigtuna"),
+            mk_result(4, "0", "0", "state", "Stockholms län"),
+            mk_result(5, "0", "0", "village", "Vaxholm"),
+        ];
+        let out = apply_search_filters(&p, results);
+        let kept: Vec<u64> = out.iter().map(|r| r.place_id).collect();
+        assert_eq!(kept, vec![2, 3, 5]);
+    }
+
+    #[test]
+    fn test_apply_search_filters_compose_order() {
+        // exclude → featuretype → dedupe. A duplicate that's also
+        // excluded is dropped by exclude (cheaper); featuretype filters
+        // a different match; dedupe handles the rest.
+        let mut p = default_search_params();
+        p.exclude_place_ids = Some("5".into());
+        p.featuretype = Some("city".into());
+        p.dedupe = 1;
+        let results = vec![
+            mk_result(1, "0", "0", "city", "A"),
+            mk_result(1, "0", "0", "city", "A"),     // dupe of #1
+            mk_result(2, "0", "0", "town", "B"),     // wrong featuretype
+            mk_result(5, "0", "0", "city", "C"),     // excluded
+            mk_result(6, "0", "0", "city", "D"),     // kept
+        ];
+        let out = apply_search_filters(&p, results);
+        let kept: Vec<u64> = out.iter().map(|r| r.place_id).collect();
+        assert_eq!(kept, vec![1, 6]);
+    }
+
+    #[test]
+    fn test_apply_search_filters_email_accepted() {
+        // email= is accepted and ignored — round-trip into SearchParams
+        // doesn't error.
+        let mut p = default_search_params();
+        p.email = Some("client@example.com".into());
+        let out = apply_search_filters(&p, vec![mk_result(1, "0", "0", "city", "A")]);
+        assert_eq!(out.len(), 1);
     }
 
     // -----------------------------------------------------------------------
