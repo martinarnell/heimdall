@@ -247,6 +247,9 @@ pub fn read_dagi_places(json_path: &Path) -> Result<Vec<RawPlace>> {
             // DAGI doesn't expose Wikidata IDs directly. Importance comes
             // entirely from PlaceType + admin centrality at pack time.
             wikidata: None,
+            class: Some("place".to_owned()),
+            class_value: None, // pack synthesises from place_type
+            bbox: None,
         });
     }
 

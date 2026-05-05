@@ -11,6 +11,7 @@ pub mod compressed_io;
 pub mod global_index;
 pub mod ngram;
 pub mod admin_polygons;
+pub mod class_type;
 
 pub use types::*;
 pub use error::HeimdallError;

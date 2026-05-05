@@ -721,3 +721,71 @@ Costs ~1 week of calendar time; saves ~2 full US reindex cycles
 Phase 0 stable `place_id` via the hash approach
 (`hash(osm_type, osm_id, class, type) → u64`). Narrow scope, no
 schema impact, 2–3 days. Ship before any meaningful user adoption.
+
+---
+
+## Phase 2.2 — shipped (schema-bump batch)
+
+Landed 2026-05-05 on branch `feat/parity-phase-2-2-schema-bump`. Single
+PR, single 192-country reindex tax. Items #1, #2, #5, #28, #32 (osm_type
+distinguishing way vs relation) all paid for in one go.
+
+### What's on disk
+
+* `PlaceRecord` is now 40 bytes (was 24): adds packed `bbox` delta
+  (4 × i16, 10-µdeg quanta — ±0.327° range, ~36 km), widens `osm_id`
+  u32 → u64, adds `class_type` u16 interning index. Two new flag bits
+  distinguish way vs relation (`FLAG_IS_WAY = 0x10`) and signal the
+  presence of a real bbox (`FLAG_HAS_BBOX = 0x20`).
+* `records.bin` bumps to format v4: same block-compressed layout as v3
+  but record_block_size aligns to a multiple of 40 (default 65520 B)
+  so records never straddle a block boundary on read.
+* New per-index sidecar `class_types.bin` — postcard-encoded
+  `Vec<(class, value)>` indexed by `class_type`. Loaded once at API
+  startup; missing-file fallback yields an empty table and the runtime
+  synthesises class/type from `place_type` (compatible with pre-2.2
+  indices via the v3 → v4 read fallback in `record_store.rs`).
+* Parquet `places.parquet` schema gains six nullable columns:
+  `osm_class`, `osm_class_value`, and `bbox_{south,north,west,east}`
+  (Int32 microdegrees). Older parquet files load fine — pack falls
+  through to default class/type and synthesises a small node-bbox
+  from the centroid.
+
+### What's on the wire
+
+Every record-backed result (search hits, /reverse place branch,
+/lookup) now carries:
+
+* `boundingbox`: `[south, north, west, east]` strings, formatted to
+  seven decimals (Nominatim shape).
+* `class`: the OSM tag key (`place`, `amenity`, `tourism`, …).
+* `type`: the OSM tag value (`city`, `restaurant`, `museum`, …) —
+  upgraded from the previous `format!("{:?}", PlaceType)` collapse so
+  `tourism=museum` no longer flattens to `"landmark"`.
+* `osm_id` widened to u64 in the JSON payload.
+* `osm_type` distinguishes `node` / `way` / `relation` (was always
+  `node` or `relation`).
+
+The /reverse address branch and synthetic /search results (postcode /
+zip lookups) still emit `class: "place"` plus a synthetic ~50 m bbox
+when not backed by a real record.
+
+### What's still open from the audit
+
+* **Items #18 / #19** (extratags + namedetails sidecars) — Phase 2.3.
+  Don't need a schema break; build a sidecar map keyed by `record_id`.
+* **Item #29** (buildings as places), **#30** (address interpolation),
+  **#31** (postcode synthetic places), **#33** (Wikidata QID lookup) —
+  Phases 2.4–2.8.
+* The plan-review's "consolidate the schema migration" recommendation
+  is now closed: #1, #2, #5, #28 all rode a single reindex.
+
+### Migration consequences
+
+* `stable_place_id` mixes the full u64 osm_id, so persisted
+  pre-Phase-2.2 IDs are invalidated — flagged by the unit test
+  `stable_place_id_known_vector`. The audit always called this out
+  as a one-shot migration paid by the schema bump (line ~509).
+* The pinned 190-query US baseline (`benchmarks/baseline-pre-parity.sqlite`)
+  pre-dates this PR's response shape; expect drift on the `class` /
+  `type` axes when the next compare run lands.

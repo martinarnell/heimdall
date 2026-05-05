@@ -69,6 +69,20 @@ pub(crate) const MEANINGFUL_WAY_TAGS: &[&str] = &[
     "man_made",
 ];
 
+/// Return the OSM `(class, value)` tag pair this object qualified on, in
+/// preference order: explicit `place=*` first, then any other qualifying
+/// tag (`amenity=*`, `tourism=*`, `historic=*`, `natural=*`, …). Mirrors
+/// Nominatim's class/type pair.
+pub(crate) fn class_value_from_tags(
+    place_tag: Option<&String>,
+    qualifying_tag: Option<&(String, String)>,
+) -> Option<(String, String)> {
+    if let Some(p) = place_tag {
+        return Some(("place".to_owned(), p.clone()));
+    }
+    qualifying_tag.cloned()
+}
+
 /// Filter: is this (key, value) a POI worth extracting?
 ///
 /// Additive whitelist: any key in MEANINGFUL_*_TAGS qualifies UNLESS the
@@ -160,6 +174,10 @@ struct PendingWay {
     admin_level: Option<u8>,
     wikidata: Option<String>,
     place_type: PlaceType,
+    /// Original OSM (class, value) tag pair the way qualified on (e.g.
+    /// `("place","city")`, `("tourism","museum")`). Phase 2.2 — surfaces
+    /// in the API as Nominatim-style `class` / `type`.
+    osm_class_value: Option<(String, String)>,
     node_refs: Vec<i64>,
 }
 
@@ -174,6 +192,7 @@ struct PendingRelation {
     admin_level: Option<u8>,
     wikidata: Option<String>,
     place_type: PlaceType,
+    osm_class_value: Option<(String, String)>,
     node_member_ids: Vec<i64>,
     way_members: Vec<(i64, String)>, // (way_id, role)
 }
@@ -523,6 +542,12 @@ pub fn extract_places(
                             BufferedWayKind::Named(pending) => {
                                 if !pending.name.is_empty() {
                                     if let Some((lat, lon)) = centroid {
+                                        let bbox = RawBBox::from_coords(
+                                            coords.iter().filter_map(|c| *c)
+                                        );
+                                        let (cls, cls_val) = pending.osm_class_value.clone()
+                                            .map(|(c, v)| (Some(c), Some(v)))
+                                            .unwrap_or((None, None));
                                         places.push(RawPlace {
                                             osm_id: pending.id,
                                             osm_type: OsmType::Way,
@@ -538,6 +563,9 @@ pub fn extract_places(
                                             admin2: None,
                                             population: pending.population,
                                             wikidata: pending.wikidata.clone(),
+                                            class: cls,
+                                            class_value: cls_val,
+                                            bbox,
                                         });
                                     }
                                 }
@@ -555,6 +583,7 @@ pub fn extract_places(
                                     id: bw.id, name: String::new(), name_intl: vec![],
                                     alt_names: vec![], old_names: vec![], population: None,
                                     admin_level: None, wikidata: None, place_type: PlaceType::Unknown,
+                                    osm_class_value: None,
                                     node_refs,
                                 });
                             }
@@ -606,6 +635,10 @@ pub fn extract_places(
                 BufferedWayKind::Named(pending) => {
                     if !pending.name.is_empty() {
                         if let Some((lat, lon)) = centroid {
+                            let bbox = RawBBox::from_coords(coords.iter().filter_map(|c| *c));
+                            let (cls, cls_val) = pending.osm_class_value.clone()
+                                .map(|(c, v)| (Some(c), Some(v)))
+                                .unwrap_or((None, None));
                             places.push(RawPlace {
                                 osm_id: pending.id, osm_type: OsmType::Way,
                                 name: pending.name.clone(), name_intl: pending.name_intl.clone(),
@@ -614,6 +647,7 @@ pub fn extract_places(
                                 admin_level: pending.admin_level, country_code: detect_country(lat, lon),
                                 admin1: None, admin2: None,
                                 population: pending.population, wikidata: pending.wikidata.clone(),
+                                class: cls, class_value: cls_val, bbox,
                             });
                         }
                     }
@@ -631,6 +665,7 @@ pub fn extract_places(
                         id: bw.id, name: String::new(), name_intl: vec![],
                         alt_names: vec![], old_names: vec![], population: None,
                         admin_level: None, wikidata: None, place_type: PlaceType::Unknown,
+                        osm_class_value: None,
                         node_refs,
                     });
                 }
@@ -672,6 +707,15 @@ pub fn extract_places(
         if let Some(coord) = compute_relation_centroid_from_pending(
             pr, &*node_cache, &pending_ways, &way_index,
         ) {
+            // Walk member-way coords to derive a bbox. May be None for
+            // node-only relations or unresolved members; pack synthesises
+            // a small fallback in that case.
+            let bbox = compute_relation_bbox_from_pending(
+                pr, &*node_cache, &pending_ways, &way_index,
+            );
+            let (cls, cls_val) = pr.osm_class_value.clone()
+                .map(|(c, v)| (Some(c), Some(v)))
+                .unwrap_or((None, None));
             places.push(RawPlace {
                 osm_id: pr.id,
                 osm_type: OsmType::Relation,
@@ -687,6 +731,9 @@ pub fn extract_places(
                 admin2: None,
                 population: pr.population,
                 wikidata: pr.wikidata.clone(),
+                class: cls,
+                class_value: cls_val,
+                bbox,
             });
             relations_resolved += 1;
         } else {
@@ -873,6 +920,20 @@ fn scan_way(way: &osmpbf::Way) -> Option<PendingWay> {
 
     let node_refs: Vec<i64> = way.refs().collect();
 
+    let osm_class_value = class_value_from_tags(place_tag.as_ref(), qualifying_tag.as_ref())
+        .or_else(|| {
+            // Pedestrianised plaza without an explicit place=* tag —
+            // synthesise place=square so the API still emits a sensible class/type.
+            if matches!(place_type, PlaceType::Square) {
+                Some(("place".to_owned(), "square".to_owned()))
+            } else if matches!(place_type, PlaceType::Street) {
+                // Notable named highway picked up via the highway-qualifies path.
+                highway_value.clone().map(|v| ("highway".to_owned(), v))
+            } else {
+                None
+            }
+        });
+
     Some(PendingWay {
         id: way.id(),
         name,
@@ -883,6 +944,7 @@ fn scan_way(way: &osmpbf::Way) -> Option<PendingWay> {
         admin_level,
         wikidata,
         place_type,
+        osm_class_value,
         node_refs,
     })
 }
@@ -994,6 +1056,17 @@ fn scan_relation(relation: &osmpbf::Relation) -> Option<PendingRelation> {
         }
     }
 
+    let osm_class_value = class_value_from_tags(place_tag.as_ref(), qualifying_tag.as_ref())
+        .or_else(|| {
+            // Boundary relations qualify on `boundary=administrative` even
+            // when `place=*` is missing — record that as the class/type pair.
+            if is_admin {
+                Some(("boundary".to_owned(), "administrative".to_owned()))
+            } else {
+                None
+            }
+        });
+
     Some(PendingRelation {
         id: relation.id(),
         name,
@@ -1004,6 +1077,7 @@ fn scan_relation(relation: &osmpbf::Relation) -> Option<PendingRelation> {
         admin_level,
         wikidata,
         place_type,
+        osm_class_value,
         node_member_ids,
         way_members,
     })
@@ -1054,6 +1128,10 @@ fn extract_named_node<'a>(
         return None;
     }
 
+    let (cls, cls_val) = class_value_from_tags(parsed.place_tag.as_ref(), parsed.qualifying_tag.as_ref())
+        .map(|(c, v)| (Some(c), Some(v)))
+        .unwrap_or((None, None));
+
     Some(RawPlace {
         osm_id: id,
         osm_type: OsmType::Node,
@@ -1069,6 +1147,9 @@ fn extract_named_node<'a>(
         admin2: None,
         population: parsed.population,
         wikidata: parsed.wikidata,
+        class: cls,
+        class_value: cls_val,
+        bbox: None,
     })
 }
 
@@ -1316,6 +1397,30 @@ fn compute_relation_centroid_from_pending(
     Some(Coord::new(sum_lat / count as f64, sum_lon / count as f64))
 }
 
+/// Compute a relation's bbox from its way members (full set, not sampled).
+/// Mirrors `compute_relation_centroid_from_pending` but returns the
+/// extent of every resolved member coordinate. None when no member coords
+/// could be resolved.
+fn compute_relation_bbox_from_pending(
+    pr: &PendingRelation,
+    cache: &dyn NodeCache,
+    pending_ways: &[PendingWay],
+    way_index: &HashMap<i64, usize>,
+) -> Option<RawBBox> {
+    let mut all_ids: Vec<i64> = Vec::new();
+    all_ids.extend_from_slice(&pr.node_member_ids);
+    for &(wid, _) in &pr.way_members {
+        if let Some(&idx) = way_index.get(&wid) {
+            let way = &pending_ways[idx];
+            all_ids.extend_from_slice(&way.node_refs);
+        }
+    }
+    if all_ids.is_empty() { return None; }
+
+    let coords = cache.batch_get(&all_ids);
+    RawBBox::from_coords(coords.into_iter().flatten())
+}
+
 // ---------------------------------------------------------------------------
 // Place type from non-place tags
 // ---------------------------------------------------------------------------
@@ -1526,6 +1631,9 @@ fn extract_addr_node<'a>(
                 admin2: None,
                 population: None,
                 wikidata: None,
+                class: Some("building".to_owned()),
+                class_value: Some("yes".to_owned()),
+                bbox: None,
             }
         });
 
@@ -2500,6 +2608,15 @@ fn make_place_schema() -> std::sync::Arc<arrow::datatypes::Schema> {
         Field::new("alt_names", DataType::Utf8, true),
         Field::new("old_names", DataType::Utf8, true),
         Field::new("name_intl", DataType::Utf8, true),
+        // Phase 2.2 — original (class, value) tag pair + per-record bbox.
+        // All nullable: synthetic / non-OSM sources (BAG, ABR, SSR, …)
+        // and node POIs leave them blank.
+        Field::new("osm_class", DataType::Utf8, true),
+        Field::new("osm_class_value", DataType::Utf8, true),
+        Field::new("bbox_south", DataType::Int32, true),
+        Field::new("bbox_north", DataType::Int32, true),
+        Field::new("bbox_west",  DataType::Int32, true),
+        Field::new("bbox_east",  DataType::Int32, true),
     ]))
 }
 
@@ -2542,6 +2659,12 @@ fn flush_place_batch(
     let mut alt_names_col: Vec<Option<String>> = Vec::with_capacity(count);
     let mut old_names_col: Vec<Option<String>> = Vec::with_capacity(count);
     let mut name_intl_col: Vec<Option<String>> = Vec::with_capacity(count);
+    let mut osm_class_col: Vec<Option<String>> = Vec::with_capacity(count);
+    let mut osm_class_value_col: Vec<Option<String>> = Vec::with_capacity(count);
+    let mut bbox_south_col: Vec<Option<i32>> = Vec::with_capacity(count);
+    let mut bbox_north_col: Vec<Option<i32>> = Vec::with_capacity(count);
+    let mut bbox_west_col:  Vec<Option<i32>> = Vec::with_capacity(count);
+    let mut bbox_east_col:  Vec<Option<i32>> = Vec::with_capacity(count);
 
     for p in places.iter() {
         osm_ids.push(p.osm_id);
@@ -2573,6 +2696,16 @@ fn flush_place_batch(
                     .join(";"),
             )
         });
+        osm_class_col.push(p.class.clone());
+        osm_class_value_col.push(p.class_value.clone());
+        let (bs, bn, bw, be) = match p.bbox {
+            Some(b) => (Some(b.south), Some(b.north), Some(b.west), Some(b.east)),
+            None => (None, None, None, None),
+        };
+        bbox_south_col.push(bs);
+        bbox_north_col.push(bn);
+        bbox_west_col.push(bw);
+        bbox_east_col.push(be);
     }
 
     let batch = arrow::record_batch::RecordBatch::try_new(
@@ -2589,6 +2722,12 @@ fn flush_place_batch(
             Arc::new(StringArray::from(alt_names_col)),
             Arc::new(StringArray::from(old_names_col)),
             Arc::new(StringArray::from(name_intl_col)),
+            Arc::new(StringArray::from(osm_class_col)),
+            Arc::new(StringArray::from(osm_class_value_col)),
+            Arc::new(Int32Array::from(bbox_south_col)),
+            Arc::new(Int32Array::from(bbox_north_col)),
+            Arc::new(Int32Array::from(bbox_west_col)),
+            Arc::new(Int32Array::from(bbox_east_col)),
         ],
     )?;
 

@@ -111,6 +111,11 @@ struct CountryIndex {
     /// indices, in which case /reverse falls back to the stored
     /// nearest-centroid admin chain on the place record.
     admin_polygons: Option<heimdall_core::admin_polygons::AdminPolygonIndex>,
+    /// Phase 2.2 — interning sidecar resolving `PlaceRecord::class_type`
+    /// u16 to its original OSM `(class, value)` tag pair. Always present;
+    /// older indices that lack `class_types.bin` get an empty table and
+    /// fall back to `place_type`-derived defaults.
+    class_types: heimdall_core::class_type::ClassTypeTable,
     normalizer: Normalizer,
     #[allow(dead_code)]
     bbox: BoundingBox,
@@ -126,7 +131,7 @@ struct CountryMeta {
 
 /// Mapping from (osm_type_char, osm_id) -> (country_index, record_id)
 /// Used by /lookup?osm_ids= to resolve OSM references.
-type OsmIdMap = HashMap<(char, u32), (usize, u32)>;
+type OsmIdMap = HashMap<(char, u64), (usize, u32)>;
 
 /// Mapping from stable place_id -> (country_index, record_id).
 /// Used by /lookup?place_ids= to resolve persisted place identifiers.
@@ -294,15 +299,29 @@ struct LookupParams {
     addressdetails: u8,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct NominatimResult {
     place_id: u64,
     osm_type: Option<String>,
-    osm_id: Option<u32>,
+    osm_id: Option<u64>,
     display_name: String,
     lat: String,
     lon: String,
+    /// Nominatim `type` field — the OSM tag value (e.g. "city",
+    /// "restaurant", "museum"). Falls back to the Heimdall `PlaceType`
+    /// stringification when the underlying record carried no
+    /// (class, value) pair (legacy index, synthetic source).
     place_type: String,
+    /// Nominatim `class` field — the OSM tag key (e.g. "place",
+    /// "amenity", "tourism"). `None` for synthetic results without a
+    /// natural class (postcode rows, raw address hits).
+    #[allow(dead_code)] // serialised via custom `Serialize`
+    class: Option<String>,
+    /// Nominatim `boundingbox` — `[south, north, west, east]` strings.
+    /// Always populated for a record-backed result (pack synthesises a
+    /// small bbox even for nodes); `None` for synthetic results.
+    #[allow(dead_code)] // serialised via custom `Serialize`
+    boundingbox: Option<[String; 4]>,
     importance: f64,
     match_type: Option<String>,
     address: Option<AddressDetails>,
@@ -319,6 +338,76 @@ struct NominatimResult {
 /// clients lint for the exact value.
 pub const NOMINATIM_LICENCE: &str =
     "Data © OpenStreetMap contributors, ODbL 1.0. https://osm.org/copyright";
+
+/// Resolve `record.class_type` to its OSM `(class, value)` pair via the
+/// per-country interning sidecar. Falls back to `place_type`-derived
+/// defaults when the index predates Phase 2.2 (`class_type == 0` /
+/// `class_types.bin` missing). Mirrors `pack.rs`'s synthesis exactly so
+/// every record has a sensible class/type pair regardless of source.
+fn resolve_class_value(
+    country: &CountryIndex,
+    record: &heimdall_core::types::PlaceRecord,
+) -> (String, String) {
+    if let Some((c, v)) = country.class_types.get(record.class_type) {
+        return (c.to_owned(), v.to_owned());
+    }
+    let pt = record.place_type;
+    (
+        default_class_for_place_type_api(pt),
+        default_type_for_place_type_api(pt),
+    )
+}
+
+/// API-side mirror of `pack::default_class_for_place_type` so legacy
+/// indices (no `class_types.bin`) still emit a Nominatim-compatible
+/// `class` field.
+fn default_class_for_place_type_api(pt: heimdall_core::types::PlaceType) -> String {
+    use heimdall_core::types::PlaceType;
+    match pt {
+        PlaceType::Country | PlaceType::State | PlaceType::County => "boundary".to_owned(),
+        PlaceType::Lake | PlaceType::Mountain | PlaceType::Forest
+            | PlaceType::Bay | PlaceType::Cape | PlaceType::Island | PlaceType::Islet => "natural".to_owned(),
+        PlaceType::River => "waterway".to_owned(),
+        PlaceType::Airport => "aeroway".to_owned(),
+        PlaceType::Station => "railway".to_owned(),
+        PlaceType::Square => "place".to_owned(),
+        PlaceType::Street => "highway".to_owned(),
+        PlaceType::Landmark => "tourism".to_owned(),
+        PlaceType::University | PlaceType::Hospital | PlaceType::PublicBuilding => "amenity".to_owned(),
+        PlaceType::Park => "leisure".to_owned(),
+        _ => "place".to_owned(),
+    }
+}
+
+fn default_type_for_place_type_api(pt: heimdall_core::types::PlaceType) -> String {
+    format!("{:?}", pt).to_lowercase()
+}
+
+/// Decode `record.bbox` into Nominatim's `[south, north, west, east]`
+/// string array. Coordinate strings are formatted to seven decimals to
+/// match upstream Nominatim.
+fn boundingbox_strings(record: &heimdall_core::types::PlaceRecord) -> [String; 4] {
+    let (s, n, w, e) = record.bbox.decode_f64(record.coord);
+    [
+        format!("{:.7}", s),
+        format!("{:.7}", n),
+        format!("{:.7}", w),
+        format!("{:.7}", e),
+    ]
+}
+
+/// Small `~50m` bbox around an arbitrary `(lat, lon)`. Used for synthetic
+/// results (address rows, postcode rows, ZIP hits) that aren't backed by
+/// a `PlaceRecord` and therefore have no stored bbox.
+fn synthetic_boundingbox(lat: f64, lon: f64) -> [String; 4] {
+    const HALF_DEG: f64 = 0.000_45; // ≈ 50 m of latitude
+    [
+        format!("{:.7}", lat - HALF_DEG),
+        format!("{:.7}", lat + HALF_DEG),
+        format!("{:.7}", lon - HALF_DEG),
+        format!("{:.7}", lon + HALF_DEG),
+    ]
+}
 
 /// Map a `format!("{:?}", PlaceType).to_lowercase()` string back to a
 /// Nominatim-style `place_rank` (4 = country, 8 = state, 12 = county,
@@ -364,10 +453,16 @@ impl Serialize for NominatimResult {
         if let Some(v) = self.osm_id {
             m.serialize_entry("osm_id", &v)?;
         }
+        if let Some(ref v) = self.boundingbox {
+            m.serialize_entry("boundingbox", v)?;
+        }
         m.serialize_entry("place_rank", &place_rank_from_str(&self.place_type))?;
         m.serialize_entry("display_name", &self.display_name)?;
         m.serialize_entry("lat", &self.lat)?;
         m.serialize_entry("lon", &self.lon)?;
+        if let Some(ref v) = self.class {
+            m.serialize_entry("class", v)?;
+        }
         m.serialize_entry("type", &self.place_type)?;
         m.serialize_entry("importance", &self.importance)?;
         if let Some(ref v) = self.match_type {
@@ -892,7 +987,7 @@ async fn search(
                                     country_code: Some("us".to_owned()),
                                 })
                             } else { None },
-                        internal: None,
+                        class: None, boundingbox: None, internal: None,
                         });
                         return Ok(Json(search_finalize(&params, response)));
                     }
@@ -929,7 +1024,7 @@ async fn search(
                                 country_code: Some(cc),
                             })
                         } else { None },
-                    internal: None,
+                    class: None, boundingbox: None, internal: None,
                     });
                     return Ok(Json(search_finalize(&params, response)));
                 }
@@ -984,7 +1079,7 @@ async fn search(
                                 country_code: Some("us".to_owned()),
                             })
                         } else { None },
-                    internal: None,
+                    class: None, boundingbox: None, internal: None,
                     });
                     return Ok(Json(search_finalize(&params, response)));
                 }
@@ -1047,7 +1142,7 @@ async fn search(
                             country_code: Some("us".to_owned()),
                         })
                     } else { None },
-                internal: None,
+                class: None, boundingbox: None, internal: None,
                 });
                 return Ok(Json(search_finalize(&params, response)));
             }
@@ -1183,7 +1278,7 @@ async fn search(
                         country_code: Some(cc),
                     })
                 } else { None },
-            internal: None,
+            class: None, boundingbox: None, internal: None,
             });
             postcode_match_found = true;
         }
@@ -1285,7 +1380,7 @@ async fn search(
                                 country_code: Some(cc),
                             })
                         } else { None },
-                    internal: None,
+                    class: None, boundingbox: None, internal: None,
                     });
                     postcode_match_found = true;
                     break;
@@ -1672,7 +1767,7 @@ async fn search(
                                 country_code: Some(cc),
                             })
                         } else { None },
-                    internal: None,
+                    class: None, boundingbox: None, internal: None,
                     });
                     return Ok(Json(search_finalize(&params, response)));
                 }
@@ -1768,7 +1863,7 @@ async fn search(
                                 &r, &addr_query, country, &cc,
                             ))
                         } else { None },
-                    internal: None,
+                    class: None, boundingbox: None, internal: None,
                     });
                 }
                 if response.iter().any(|r| r.match_type.as_deref() == Some("address")) {
@@ -1824,7 +1919,7 @@ async fn search(
                                     country_code: Some(cc.clone()),
                                 })
                             } else { None },
-                        internal: None,
+                        class: None, boundingbox: None, internal: None,
                         });
                         break;
                     }
@@ -1904,7 +1999,7 @@ async fn search(
                                         country_code: Some(cc.clone()),
                                     })
                                 } else { None },
-                            internal: None,
+                            class: None, boundingbox: None, internal: None,
                             });
                             break;
                         }
@@ -2552,10 +2647,12 @@ async fn reverse(
                     "licence": NOMINATIM_LICENCE,
                     "osm_type": "way",
                     "osm_id": serde_json::Value::Null,
+                    "boundingbox": synthetic_boundingbox(addr_result.coord.lat_f64(), addr_result.coord.lon_f64()),
                     "place_rank": place_rank_from_str("house"),
                     "display_name": display_name,
                     "lat": format!("{:.7}", addr_result.coord.lat_f64()),
                     "lon": format!("{:.7}", addr_result.coord.lon_f64()),
+                    "class": "place",
                     "type": "house",
                     "importance": 0.0_f64,
                     "distance_m": format!("{:.0}", addr_d),
@@ -2620,17 +2717,19 @@ async fn reverse(
 
     let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
 
-    let place_type_str = format!("{:?}", record.place_type).to_lowercase();
+    let (cls_str, type_str) = resolve_class_value(country, &record);
     let mut result = serde_json::json!({
         "place_id": stable_place_id(&record),
         "licence": NOMINATIM_LICENCE,
         "osm_type": osm_type_from_flags(record.flags),
-        "osm_id": if record.osm_id != 0 { Some(record.osm_id) } else { None::<u32> },
-        "place_rank": place_rank_from_str(&place_type_str),
+        "osm_id": if record.osm_id != 0 { Some(record.osm_id) } else { None::<u64> },
+        "boundingbox": boundingbox_strings(&record),
+        "place_rank": place_rank_from_str(&type_str),
         "display_name": display_name,
         "lat": format!("{:.7}", record.coord.lat_f64()),
         "lon": format!("{:.7}", record.coord.lon_f64()),
-        "type": place_type_str,
+        "class": cls_str,
+        "type": type_str,
         "importance": record.importance as f64 / 65535.0,
         "distance_m": format!("{:.0}", distance_m),
     });
@@ -2740,6 +2839,7 @@ async fn lookup(
                 None
             };
 
+            let (cls, val) = resolve_class_value(country, &record);
             results.push(NominatimResult {
                 place_id,
                 osm_type: Some(osm_type_from_flags(record.flags).to_owned()),
@@ -2747,7 +2847,9 @@ async fn lookup(
                 display_name,
                 lat: format!("{:.7}", record.coord.lat_f64()),
                 lon: format!("{:.7}", record.coord.lon_f64()),
-                place_type: format!("{:?}", record.place_type).to_lowercase(),
+                place_type: val,
+                class: Some(cls),
+                boundingbox: Some(boundingbox_strings(&record)),
                 importance: record.importance as f64 / 65535.0,
                 match_type: None,
                 address,
@@ -2769,7 +2871,7 @@ async fn lookup(
                 continue;
             }
 
-            let osm_id: u32 = match id_str[1..].parse() {
+            let osm_id: u64 = match id_str[1..].parse() {
                 Ok(v) => v,
                 Err(_) => continue,
             };
@@ -2818,6 +2920,7 @@ async fn lookup(
                     None
                 };
 
+                let (cls, val) = resolve_class_value(country, &record);
                 results.push(NominatimResult {
                     place_id: stable_place_id(&record),
                     osm_type: Some(osm_type_from_flags(record.flags).to_owned()),
@@ -2825,7 +2928,9 @@ async fn lookup(
                     display_name,
                     lat: format!("{:.7}", record.coord.lat_f64()),
                     lon: format!("{:.7}", record.coord.lon_f64()),
-                    place_type: format!("{:?}", record.place_type).to_lowercase(),
+                    place_type: val,
+                    class: Some(cls),
+                    boundingbox: Some(boundingbox_strings(&record)),
                     importance: record.importance as f64 / 65535.0,
                     match_type: None,
                     address,
@@ -2860,15 +2965,25 @@ async fn lookup(
 /// not survive that schema bump; the audit calls this out as a one-shot
 /// migration paid by Phase 2.2.
 fn stable_place_id(record: &heimdall_core::types::PlaceRecord) -> u64 {
+    use heimdall_core::types::{FLAG_IS_RELATION, FLAG_IS_WAY};
     if record.osm_id == 0 {
         return 0;
     }
     const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
     const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
     let mut h: u64 = FNV_OFFSET;
-    let osm_type_tag: u8 = if record.flags & 0x08 != 0 { b'R' } else { b'N' };
+    let osm_type_tag: u8 = if record.flags & FLAG_IS_RELATION != 0 {
+        b'R'
+    } else if record.flags & FLAG_IS_WAY != 0 {
+        b'W'
+    } else {
+        b'N'
+    };
     h ^= osm_type_tag as u64;
     h = h.wrapping_mul(FNV_PRIME);
+    // Phase 2.2: hash the full u64 OSM id (post u32 → u64 widening). Pre-2.2
+    // place_ids are not preserved across the schema bump — flagged in
+    // TODO_NOMINATIM_PARITY.md as a one-shot migration.
     for b in record.osm_id.to_le_bytes() {
         h ^= b as u64;
         h = h.wrapping_mul(FNV_PRIME);
@@ -2907,15 +3022,21 @@ fn build_stable_place_id_map(countries: &[CountryIndex]) -> StablePlaceIdMap {
     map
 }
 
-/// Infer the OSM type string from PlaceRecord flags.
-/// flags bit 3 (0x08) = is_relation.
+/// Infer the OSM type string from PlaceRecord flags. Phase 2.2 distinguishes
+/// node / way / relation via flag bits 3 + 4 (`FLAG_IS_RELATION` / `FLAG_IS_WAY`).
 fn osm_type_from_flags(flags: u8) -> &'static str {
-    if flags & 0x08 != 0 { "relation" } else { "node" }
+    use heimdall_core::types::{FLAG_IS_RELATION, FLAG_IS_WAY};
+    if flags & FLAG_IS_RELATION != 0 { "relation" }
+    else if flags & FLAG_IS_WAY != 0 { "way" }
+    else { "node" }
 }
 
 /// Infer the OSM type char from PlaceRecord flags for OsmIdMap keys.
 fn osm_type_char_from_flags(flags: u8) -> char {
-    if flags & 0x08 != 0 { 'R' } else { 'N' }
+    use heimdall_core::types::{FLAG_IS_RELATION, FLAG_IS_WAY};
+    if flags & FLAG_IS_RELATION != 0 { 'R' }
+    else if flags & FLAG_IS_WAY != 0 { 'W' }
+    else { 'N' }
 }
 
 /// Build a mapping from (osm_type_char, osm_id) -> (country_index, record_id)
@@ -3007,6 +3128,7 @@ fn posting_to_nominatim(
         None
     };
 
+    let (cls, val) = resolve_class_value(country, &record);
     Some(NominatimResult {
         place_id: stable_place_id(&record),
         osm_type: Some(osm_type_from_flags(record.flags).to_owned()),
@@ -3014,7 +3136,9 @@ fn posting_to_nominatim(
         display_name: display,
         lat: format!("{:.7}", record.coord.lat_f64()),
         lon: format!("{:.7}", record.coord.lon_f64()),
-        place_type: format!("{:?}", record.place_type).to_lowercase(),
+        place_type: val,
+        class: Some(cls),
+        boundingbox: Some(boundingbox_strings(&record)),
         importance: record.importance as f64 / 65535.0,
         match_type: Some(match_type_str.to_owned()),
         address,
@@ -3083,7 +3207,7 @@ fn to_nominatim(
         importance: r.importance as f64 / 65535.0,
         match_type: Some(match_type_str.to_owned()),
         address,
-        internal: None,
+        class: None, boundingbox: None, internal: None,
     }
 }
 
@@ -4090,6 +4214,18 @@ fn load_country_index_inner(path: &std::path::Path, lightweight: bool) -> anyhow
         );
     }
 
+    // Phase 2.2 interning sidecar. Missing file = empty table = pre-2.2
+    // index — `class` falls back to `place_type`-derived defaults.
+    let class_types = heimdall_core::class_type::ClassTypeTable
+        ::load(&path.join("class_types.bin"))
+        .unwrap_or_else(|e| {
+            tracing::warn!("class_types.bin failed to load ({e}); falling back to place_type defaults");
+            heimdall_core::class_type::ClassTypeTable::new()
+        });
+    if !class_types.is_empty() {
+        tracing::info!("  class_types.bin loaded: {} interned (class, type) pairs", class_types.len() - 1);
+    }
+
     let places = index.record_count();
     let addresses = addr_index.as_ref().map(|a| a.record_count()).unwrap_or(0);
 
@@ -4105,6 +4241,7 @@ fn load_country_index_inner(path: &std::path::Path, lightweight: bool) -> anyhow
         zip_index,
         geohash_index,
         admin_polygons,
+        class_types,
         normalizer,
         bbox,
         meta: CountryMeta {
@@ -4604,7 +4741,7 @@ mod tests {
             importance: 0.5,
             match_type: None,
             address: None,
-        internal: None,
+        class: None, boundingbox: None, internal: None,
         };
         assert!(result_in_bbox(&r, &bb));
     }
@@ -4626,7 +4763,7 @@ mod tests {
             importance: 0.5,
             match_type: None,
             address: None,
-        internal: None,
+        class: None, boundingbox: None, internal: None,
         };
         assert!(!result_in_bbox(&r, &bb));
     }
@@ -4648,7 +4785,7 @@ mod tests {
             importance: 0.5,
             match_type: None,
             address: None,
-        internal: None,
+        class: None, boundingbox: None, internal: None,
         };
         assert!(result_in_bbox(&r, &bb));
     }
@@ -4670,7 +4807,7 @@ mod tests {
             importance: 0.5,
             match_type: None,
             address: None,
-        internal: None,
+        class: None, boundingbox: None, internal: None,
         };
         assert!(!result_in_bbox(&r, &bb));
     }
@@ -4680,12 +4817,14 @@ mod tests {
     // -----------------------------------------------------------------------
 
     /// Build a minimal `PlaceRecord` for hashing tests.
-    fn rec(osm_id: u32, flags: u8, place_type: PlaceType) -> heimdall_core::types::PlaceRecord {
+    fn rec(osm_id: u64, flags: u8, place_type: PlaceType) -> heimdall_core::types::PlaceRecord {
         heimdall_core::types::PlaceRecord {
             coord: heimdall_core::types::Coord::new(0.0, 0.0),
+            bbox: heimdall_core::types::BBoxDelta::default(),
             admin1_id: 0,
             admin2_id: 0,
             importance: 0,
+            class_type: 0,
             place_type,
             flags,
             name_offset: 0,
@@ -4744,21 +4883,22 @@ mod tests {
     fn stable_place_id_known_vector() {
         // Pin one concrete (input, output) pair so any accidental change
         // to the FNV constants or mixing order is loud rather than silent.
-        // Input: osm_type='N', osm_id=42, place_type=City (value=2).
+        // Input: osm_type='N', osm_id=42, place_type=City (value=3).
+        // Vector pinned post-Phase-2.2 (osm_id widened u32 → u64; eight
+        // bytes get mixed in instead of four). Pre-2.2 vectors no longer
+        // hold — TODO_NOMINATIM_PARITY.md flags this as a one-shot
+        // migration paid by the schema bump.
         let id = stable_place_id(&rec(42, 0x00, PlaceType::City));
-        // Computed once, asserted forever. If you change FNV constants
-        // or mixing order, this assertion will catch it — that means
-        // every persisted place_id from prior versions just got
-        // invalidated, which is a hostile event for users.
-        assert_eq!(id, 0x0015_a4df_c8c1_13f8);
+        assert_eq!(id, 3_392_115_414_182_280u64);
     }
 
     #[test]
     fn test_osm_type_from_flags() {
         assert_eq!(osm_type_from_flags(0x00), "node");
         assert_eq!(osm_type_from_flags(0x08), "relation");
-        assert_eq!(osm_type_from_flags(0x0F), "relation");
-        assert_eq!(osm_type_from_flags(0x07), "node");
+        assert_eq!(osm_type_from_flags(0x10), "way");
+        assert_eq!(osm_type_from_flags(0x0F), "relation"); // relation+way → relation wins
+        assert_eq!(osm_type_from_flags(0x07), "node");     // bits 0..2 only → still node
     }
 
     #[test]
@@ -4867,7 +5007,7 @@ mod tests {
             importance: 0.5,
             match_type: None,
             address: None,
-        internal: None,
+        class: None, boundingbox: None, internal: None,
         };
         let json = serde_json::to_string(&r).unwrap();
         assert!(!json.contains("address"));
@@ -4901,7 +5041,7 @@ mod tests {
                 country: Some("Sweden".into()),
                 country_code: Some("se".into()),
             }),
-        internal: None,
+        class: None, boundingbox: None, internal: None,
         };
         let json = serde_json::to_string(&r).unwrap();
         assert!(json.contains("\"address\""));
@@ -4919,7 +5059,7 @@ mod tests {
             display_name: "Test".into(),
             lat: "0".into(), lon: "0".into(),
             place_type: "city".into(),
-            importance: 0.5, match_type: None, address: None, internal: None,
+            importance: 0.5, match_type: None, address: None, class: None, boundingbox: None, internal: None,
         };
         let v: serde_json::Value = serde_json::to_value(&r).unwrap();
         assert_eq!(v["licence"], NOMINATIM_LICENCE);
@@ -4952,7 +5092,7 @@ mod tests {
             display_name: "Test".into(),
             lat: "0".into(), lon: "0".into(),
             place_type: "city".into(),
-            importance: 0.5, match_type: None, address: None, internal: None,
+            importance: 0.5, match_type: None, address: None, class: None, boundingbox: None, internal: None,
         };
         let v: serde_json::Value = serde_json::to_value(&r).unwrap();
         assert_eq!(v["place_rank"], 16);
@@ -5031,7 +5171,7 @@ mod tests {
             importance: 0.7,
             match_type: None,
             address: None,
-            internal: None,
+            class: None, boundingbox: None, internal: None,
         }
     }
 
@@ -5146,7 +5286,7 @@ mod tests {
             importance: 0.5,
             match_type: None,
             address: None,
-            internal: None,
+            class: None, boundingbox: None, internal: None,
         }
     }
 

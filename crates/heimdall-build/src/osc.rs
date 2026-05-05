@@ -331,21 +331,30 @@ fn process_element(
         changes.push(OscChange::Place {
             action,
             osm_id,
-            place: Some(RawPlace {
-                osm_id,
-                osm_type: heimdall_core::types::OsmType::Node,
-                name,
-                name_intl: parsed.name_intl,
-                alt_names: parsed.alt_names,
-                old_names: parsed.old_names,
-                coord: Coord::new(lat, lon),
-                place_type,
-                admin_level: parsed.admin_level,
-                country_code: None,
-                admin1: None,
-                admin2: None,
-                population: parsed.population,
-                wikidata: parsed.wikidata,
+            place: Some({
+                let (cls, cls_val) = crate::extract::class_value_from_tags(
+                    parsed.place_tag.as_ref(),
+                    parsed.qualifying_tag.as_ref(),
+                ).map(|(c, v)| (Some(c), Some(v))).unwrap_or((None, None));
+                RawPlace {
+                    osm_id,
+                    osm_type: heimdall_core::types::OsmType::Node,
+                    name,
+                    name_intl: parsed.name_intl,
+                    alt_names: parsed.alt_names,
+                    old_names: parsed.old_names,
+                    coord: Coord::new(lat, lon),
+                    place_type,
+                    admin_level: parsed.admin_level,
+                    country_code: None,
+                    admin1: None,
+                    admin2: None,
+                    population: parsed.population,
+                    wikidata: parsed.wikidata,
+                    class: cls,
+                    class_value: cls_val,
+                    bbox: None,
+                }
             }),
         });
         stats.geocoding_relevant += 1;

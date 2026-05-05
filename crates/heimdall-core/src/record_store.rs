@@ -1,17 +1,28 @@
 /// Record store — columnar binary file of PlaceRecord fields + a string pool.
 ///
-/// **Version 3** (block-compressed mmap, decompress on demand, zero heap):
+/// **Version 4** (post-Phase-2.2 schema bump, block-compressed mmap):
+///
+/// Identical on-disk layout to V3 except:
+///   - records are 40 bytes (was 24): widens `osm_id` to u64, adds packed
+///     `bbox` delta and a `class_type` interning index
+///   - default record block size is 65520 bytes — chosen as the largest
+///     multiple of 40 ≤ 64 KiB so records never straddle block boundaries
 ///
 /// Header (48 bytes):
 ///   [u32 magic: 0x484D444C]   "HMDL"
-///   [u32 version: 3]
+///   [u32 version: 4]
 ///   [u64 record_count]
-///   [u32 record_block_size]    decompressed block size in bytes (default 65536)
+///   [u32 record_block_size]    decompressed block size in bytes (must be a multiple of 40)
 ///   [u32 record_block_count]
-///   [u32 sp_block_size]        decompressed string pool block size (default 65536)
+///   [u32 sp_block_size]        decompressed string pool block size
 ///   [u32 sp_block_count]
 ///   [u64 record_blocks_offset] byte offset to first compressed record block
 ///   [u64 sp_blocks_offset]     byte offset to first compressed SP block
+///
+/// **Version 3** (legacy 24-byte PlaceRecord — same block infrastructure):
+///   Lifted on read to V4 records via `PlaceRecordV3 → PlaceRecord`
+///   (bbox = 0, class_type = 0, osm_id widened from u32). Built indices
+///   pre-Phase-2.2 keep working unchanged.
 ///
 /// Record Block Directory (record_block_count * 8 bytes):
 ///   Each entry: [u32 offset (relative to record_blocks_offset)][u32 compressed_size]
@@ -21,14 +32,14 @@
 ///
 /// Compressed Record Blocks:
 ///   Each block is LZ4-compressed (with prepended size). Decompressed, it contains
-///   sequential PlaceRecord structs (24 bytes each). Last block may be partial.
+///   sequential PlaceRecord structs (40 bytes each in V4, 24 bytes in V3).
 ///
 /// Compressed String Pool Blocks:
 ///   Each block is LZ4-compressed (with prepended size). Decompressed, it contains
 ///   sequential string pool bytes.
 ///
 /// On open: just mmap the file, read the 48-byte header. No decompression.
-/// On get(): decompress the one record block needed (64KB → ~1-3KB compressed).
+/// On get(): decompress the one record block needed.
 /// On primary_name(): decompress the one SP block needed.
 ///
 /// **Version 2** (columnar + zstd, decompresses all on open — legacy):
@@ -60,7 +71,7 @@ use std::path::Path;
 use std::sync::Mutex;
 use memmap2::Mmap;
 use std::fs::File;
-use crate::types::{PlaceRecord, PlaceType, Coord};
+use crate::types::{PlaceRecord, PlaceRecordV3, PlaceType, Coord, BBoxDelta};
 use crate::error::HeimdallError;
 
 // ---------------------------------------------------------------------------
@@ -106,6 +117,7 @@ const MAGIC: u32 = 0x484D444C; // "HMDL"
 const VERSION_V1: u32 = 1;
 const VERSION_V2: u32 = 2;
 const VERSION_V3: u32 = 3;
+const VERSION_V4: u32 = 4;
 const V1_HEADER_SIZE: usize = 4 + 4 + 8 + 8; // magic + version + count + pool_offset
 const NUM_COLUMNS: u32 = 9;
 // V2 header: magic(4) + version(4) + record_count(8) + num_columns(4)
@@ -114,13 +126,18 @@ const V2_HEADER_FIXED: usize = 4 + 4 + 8 + 4;
 const V2_COL_DIR_ENTRY: usize = 8 + 4 + 4; // offset(u64) + compressed(u32) + raw(u32)
 const V2_STRING_POOL_INFO: usize = 8 + 4 + 4; // offset(u64) + compressed(u32) + raw(u32)
 
-// V3 header: 48 bytes total
+// V3 / V4 share the same 48-byte header layout.
 // magic(4) + version(4) + record_count(8)
 // + record_block_size(4) + record_block_count(4)
 // + sp_block_size(4) + sp_block_count(4)
 // + record_blocks_offset(8) + sp_blocks_offset(8)
 const V3_HEADER_SIZE: usize = 48;
-const V3_DEFAULT_BLOCK_SIZE: u32 = 65536;
+/// V4 record block size: 65520 = 1638 × 40, the largest multiple of
+/// `size_of::<PlaceRecord>()` (40) that is ≤ 64 KiB. Aligning the block
+/// size to the record size means records never straddle a block boundary,
+/// so the `get()` path never has to assemble across blocks.
+const V4_DEFAULT_BLOCK_SIZE: u32 = 65520;
+const V4_DEFAULT_SP_BLOCK_SIZE: u32 = 65536;
 
 pub struct RecordStore {
     /// Decompressed records (V2), mmap'd records (V1), or block metadata (V3)
@@ -135,13 +152,17 @@ pub struct RecordStore {
 }
 
 enum RecordData {
-    /// Version 1: mmap'd, records accessed via pointer cast
+    /// Version 1: mmap'd, records accessed via pointer cast (legacy 24-byte layout, lifted on read)
     Mmap { mmap: Mmap },
     /// Version 2: decompressed in memory
     Owned { records: Vec<PlaceRecord> },
-    /// Version 3: block-compressed, decompress on demand
+    /// Version 3 / 4: block-compressed, decompress on demand
+    /// `record_size_bytes` selects between the v3 24-byte legacy struct
+    /// (lifted on read) and the v4 40-byte current struct (read directly).
     BlockCompressed {
         record_block_size: u32,
+        record_size_bytes: u32, // 24 (V3) or 40 (V4)
+        is_v3_legacy: bool,
         #[allow(dead_code)]
         record_block_count: u32,
         record_block_dir_offset: usize,
@@ -182,7 +203,8 @@ impl RecordStore {
         match version {
             VERSION_V1 => Self::open_v1(mmap),
             VERSION_V2 => Self::open_v2(&mmap),
-            VERSION_V3 => Self::open_v3(mmap),
+            VERSION_V3 => Self::open_block_compressed(mmap, /*is_v3_legacy=*/true),
+            VERSION_V4 => Self::open_block_compressed(mmap, /*is_v3_legacy=*/false),
             _ => Err(HeimdallError::Build(format!(
                 "unsupported record store version: {}",
                 version
@@ -199,6 +221,64 @@ impl RecordStore {
             records: RecordData::Mmap { mmap },
             record_count,
             mmap: None,
+            block_cache: Mutex::new(BlockCache::new()),
+        })
+    }
+
+    /// Open V3 (24-byte legacy) or V4 (40-byte current) block-compressed format.
+    /// Both share the 48-byte header and per-block directory layout — only the
+    /// per-record size differs. V3 records are lifted to V4 on read.
+    fn open_block_compressed(mmap: Mmap, is_v3_legacy: bool) -> Result<Self, HeimdallError> {
+        if mmap.len() < V3_HEADER_SIZE {
+            return Err(HeimdallError::Build(
+                "record store too small for header".into(),
+            ));
+        }
+
+        let record_count = u64::from_le_bytes(mmap[8..16].try_into().unwrap());
+        let record_block_size = u32::from_le_bytes(mmap[16..20].try_into().unwrap());
+        let record_block_count = u32::from_le_bytes(mmap[20..24].try_into().unwrap());
+        let sp_block_size = u32::from_le_bytes(mmap[24..28].try_into().unwrap());
+        let sp_block_count = u32::from_le_bytes(mmap[28..32].try_into().unwrap());
+        let record_blocks_offset = u64::from_le_bytes(mmap[32..40].try_into().unwrap());
+        let sp_blocks_offset = u64::from_le_bytes(mmap[40..48].try_into().unwrap());
+
+        let record_block_dir_offset = V3_HEADER_SIZE;
+        let sp_block_dir_offset =
+            record_block_dir_offset + record_block_count as usize * 8;
+
+        let dirs_end = sp_block_dir_offset + sp_block_count as usize * 8;
+        if dirs_end > mmap.len() {
+            return Err(HeimdallError::Build(format!(
+                "record store block directories extend past file end ({} > {})",
+                dirs_end,
+                mmap.len()
+            )));
+        }
+
+        let record_size_bytes = if is_v3_legacy {
+            std::mem::size_of::<PlaceRecordV3>() as u32
+        } else {
+            std::mem::size_of::<PlaceRecord>() as u32
+        };
+
+        Ok(Self {
+            records: RecordData::BlockCompressed {
+                record_block_size,
+                record_size_bytes,
+                is_v3_legacy,
+                record_block_count,
+                record_block_dir_offset,
+                record_blocks_offset,
+            },
+            record_count,
+            string_pool: StringPoolData::BlockCompressed {
+                sp_block_size,
+                sp_block_count,
+                sp_block_dir_offset,
+                sp_blocks_offset,
+            },
+            mmap: Some(mmap),
             block_cache: Mutex::new(BlockCache::new()),
         })
     }
@@ -274,19 +354,23 @@ impl RecordStore {
         let name_offsets = decode_u32(&name_offset_bytes, n);
         let osm_ids = decode_u32(&osm_id_bytes, n);
 
-        // Reconstruct PlaceRecord array
+        // Reconstruct PlaceRecord array — V2 columns are 24-byte-equivalent
+        // schema; lift each row to the V4 PlaceRecord with bbox = 0,
+        // class_type = 0, osm_id widened from u32 to u64.
         let mut records = Vec::with_capacity(n);
         for i in 0..n {
             let place_type = place_type_from_u8(place_type_bytes[i]);
             records.push(PlaceRecord {
                 coord: Coord { lat: lats[i], lon: lons[i] },
+                bbox: BBoxDelta::default(),
+                osm_id: osm_ids[i] as u64,
                 admin1_id: admin1s[i],
                 admin2_id: admin2s[i],
                 importance: importances[i],
+                class_type: 0,
                 place_type,
                 flags: flags_bytes[i],
                 name_offset: name_offsets[i],
-                osm_id: osm_ids[i],
             });
         }
 
@@ -304,85 +388,39 @@ impl RecordStore {
         })
     }
 
-    /// Open V3 block-compressed format. Just reads the 48-byte header — zero decompression,
-    /// zero heap allocation beyond the mmap itself.
-    fn open_v3(mmap: Mmap) -> Result<Self, HeimdallError> {
-        if mmap.len() < V3_HEADER_SIZE {
-            return Err(HeimdallError::Build(
-                "V3 record store too small for header".into(),
-            ));
-        }
-
-        let record_count = u64::from_le_bytes(mmap[8..16].try_into().unwrap());
-        let record_block_size = u32::from_le_bytes(mmap[16..20].try_into().unwrap());
-        let record_block_count = u32::from_le_bytes(mmap[20..24].try_into().unwrap());
-        let sp_block_size = u32::from_le_bytes(mmap[24..28].try_into().unwrap());
-        let sp_block_count = u32::from_le_bytes(mmap[28..32].try_into().unwrap());
-        let record_blocks_offset = u64::from_le_bytes(mmap[32..40].try_into().unwrap());
-        let sp_blocks_offset = u64::from_le_bytes(mmap[40..48].try_into().unwrap());
-
-        // Block directories follow immediately after the header
-        let record_block_dir_offset = V3_HEADER_SIZE;
-        let sp_block_dir_offset =
-            record_block_dir_offset + record_block_count as usize * 8;
-
-        // Validate that directory fits in the mmap
-        let dirs_end = sp_block_dir_offset + sp_block_count as usize * 8;
-        if dirs_end > mmap.len() {
-            return Err(HeimdallError::Build(format!(
-                "V3 block directories extend past file end ({} > {})",
-                dirs_end,
-                mmap.len()
-            )));
-        }
-
-        Ok(Self {
-            records: RecordData::BlockCompressed {
-                record_block_size,
-                record_block_count,
-                record_block_dir_offset,
-                record_blocks_offset,
-            },
-            record_count,
-            string_pool: StringPoolData::BlockCompressed {
-                sp_block_size,
-                sp_block_count,
-                sp_block_dir_offset,
-                sp_blocks_offset,
-            },
-            mmap: Some(mmap),
-            block_cache: Mutex::new(BlockCache::new()),
-        })
-    }
-
     pub fn len(&self) -> usize {
         self.record_count as usize
     }
 
-    /// Get a PlaceRecord by its index. Returns by value (PlaceRecord is 24 bytes, Copy).
-    /// V1/V2: O(1) with no allocation. V3: decompresses one 64KB block per call.
+    /// Get a PlaceRecord by its index. Returns by value (PlaceRecord is 40 bytes, Copy).
+    /// V1: legacy 24-byte mmap'd records, lifted on read.
+    /// V2: O(1) into the Owned vec (already lifted on open).
+    /// V3: 24-byte block-compressed records, lifted on read.
+    /// V4: 40-byte block-compressed records, read directly.
     pub fn get(&self, id: u32) -> Result<PlaceRecord, HeimdallError> {
         if id as u64 >= self.record_count {
             return Err(HeimdallError::RecordOutOfBounds(id));
         }
         match &self.records {
             RecordData::Mmap { mmap } => {
-                let offset = V1_HEADER_SIZE + (id as usize) * std::mem::size_of::<PlaceRecord>();
-                let record = unsafe {
-                    *(mmap[offset..].as_ptr() as *const PlaceRecord)
-                };
-                Ok(record)
+                // V1: legacy 24-byte layout.
+                let v3_size = std::mem::size_of::<PlaceRecordV3>();
+                let offset = V1_HEADER_SIZE + (id as usize) * v3_size;
+                let v3 = unsafe { *(mmap[offset..].as_ptr() as *const PlaceRecordV3) };
+                Ok(PlaceRecord::from(v3))
             }
             RecordData::Owned { records } => {
                 Ok(records[id as usize])
             }
             RecordData::BlockCompressed {
                 record_block_size,
+                record_size_bytes,
+                is_v3_legacy,
                 record_block_count: _,
                 record_block_dir_offset,
                 record_blocks_offset,
             } => {
-                let record_size = std::mem::size_of::<PlaceRecord>(); // 24
+                let record_size = *record_size_bytes as usize;
                 let byte_offset = id as usize * record_size;
                 let block_idx = byte_offset / *record_block_size as usize;
                 let local_offset = byte_offset % *record_block_size as usize;
@@ -393,14 +431,21 @@ impl RecordStore {
 
                 if local_offset + record_size > decompressed.len() {
                     return Err(HeimdallError::Build(format!(
-                        "V3 record block {} too small: need {}+{}, have {}",
+                        "record block {} too small: need {}+{}, have {}",
                         block_idx, local_offset, record_size, decompressed.len()
                     )));
                 }
-                let record = unsafe {
-                    *(decompressed[local_offset..].as_ptr() as *const PlaceRecord)
-                };
-                Ok(record)
+                if *is_v3_legacy {
+                    let v3 = unsafe {
+                        *(decompressed[local_offset..].as_ptr() as *const PlaceRecordV3)
+                    };
+                    Ok(PlaceRecord::from(v3))
+                } else {
+                    let record = unsafe {
+                        *(decompressed[local_offset..].as_ptr() as *const PlaceRecord)
+                    };
+                    Ok(record)
+                }
             }
         }
     }
@@ -801,10 +846,10 @@ impl RecordStoreBuilder {
         id
     }
 
-    /// Write V3 block-compressed format (default).
-    /// LZ4-compressed 64KB blocks for both records and string pool.
+    /// Write V4 block-compressed format (default).
+    /// LZ4-compressed blocks for records (record-aligned size) and string pool.
     pub fn write(&self, path: &Path) -> Result<(), HeimdallError> {
-        self.write_v3(path)
+        self.write_v4(path)
     }
 
     /// Write V2 columnar format with zstd compression (legacy).
@@ -834,7 +879,10 @@ impl RecordStoreBuilder {
             place_types.push(r.place_type as u8);
             flags.push(r.flags);
             name_offsets.push(r.name_offset);
-            osm_ids.push(r.osm_id);
+            // V2 column format is u32 — truncate from the v4 u64. V2 is
+            // legacy-only (read fallback); we no longer use it as the default
+            // writer, but keep round-trip parity by saturating.
+            osm_ids.push(r.osm_id.min(u32::MAX as u64) as u32);
         }
 
         // Encode columns
@@ -945,15 +993,20 @@ impl RecordStoreBuilder {
         Ok(())
     }
 
-    /// Write V3 block-compressed format: LZ4-compressed 64KB blocks.
-    /// Records stored as flat PlaceRecord array (24 bytes each, repr(C)).
+    /// Write V4 block-compressed format: LZ4-compressed blocks.
+    /// Records stored as flat PlaceRecord array (40 bytes each, repr(C)).
+    /// Record block size aligned to record size so records never straddle.
     /// String pool stored as-is, broken into blocks.
-    fn write_v3(&self, path: &Path) -> Result<(), HeimdallError> {
+    fn write_v4(&self, path: &Path) -> Result<(), HeimdallError> {
         use std::io::Write;
 
         let n = self.records.len();
-        let record_size = std::mem::size_of::<PlaceRecord>(); // 24
-        let block_size = V3_DEFAULT_BLOCK_SIZE as usize;
+        let record_size = std::mem::size_of::<PlaceRecord>(); // 40
+        // Record block size must be a multiple of record_size so records
+        // never span a block boundary on the read path.
+        let block_size = (V4_DEFAULT_BLOCK_SIZE as usize / record_size) * record_size;
+        let sp_block_size = V4_DEFAULT_SP_BLOCK_SIZE as usize;
+        debug_assert!(block_size % record_size == 0);
 
         // --- Serialize records as flat byte array ---
         let records_raw_len = n * record_size;
@@ -981,12 +1034,12 @@ impl RecordStoreBuilder {
         let sp_block_count = if sp_raw_len == 0 {
             0
         } else {
-            (sp_raw_len + block_size - 1) / block_size
+            (sp_raw_len + sp_block_size - 1) / sp_block_size
         };
         let mut sp_compressed_blocks: Vec<Vec<u8>> = Vec::with_capacity(sp_block_count);
         for i in 0..sp_block_count {
-            let start = i * block_size;
-            let end = (start + block_size).min(sp_raw_len);
+            let start = i * sp_block_size;
+            let end = (start + sp_block_size).min(sp_raw_len);
             let block_data = &self.string_pool[start..end];
             let compressed = lz4_flex::compress_prepend_size(block_data);
             sp_compressed_blocks.push(compressed);
@@ -1022,16 +1075,16 @@ impl RecordStoreBuilder {
         let total_sp_blocks_size = sp_offset as usize;
 
         // --- Log stats ---
-        let v1_size = 24 + records_raw_len + sp_raw_len;
-        let v3_data_size = total_record_blocks_size + total_sp_blocks_size;
-        let v3_total = V3_HEADER_SIZE
+        let v4_data_size = total_record_blocks_size + total_sp_blocks_size;
+        let v4_total = V3_HEADER_SIZE
             + record_block_count * 8
             + sp_block_count * 8
-            + v3_data_size;
+            + v4_data_size;
 
         tracing::info!(
-            "  V3 records: {} blocks, {:>8} raw -> {:>8} compressed ({:.1}%)",
+            "  V4 records: {} blocks ({} B aligned), {:>8} raw -> {:>8} compressed ({:.1}%)",
             record_block_count,
+            block_size,
             records_raw_len,
             total_record_blocks_size,
             if records_raw_len > 0 {
@@ -1041,7 +1094,7 @@ impl RecordStoreBuilder {
             }
         );
         tracing::info!(
-            "  V3 string pool: {} blocks, {:>8} raw -> {:>8} compressed ({:.1}%)",
+            "  V4 string pool: {} blocks, {:>8} raw -> {:>8} compressed ({:.1}%)",
             sp_block_count,
             sp_raw_len,
             total_sp_blocks_size,
@@ -1052,16 +1105,8 @@ impl RecordStoreBuilder {
             }
         );
         tracing::info!(
-            "  V1 equivalent:         {:>8} bytes", v1_size
-        );
-        tracing::info!(
-            "  V3 total:              {:>8} bytes ({:.1}% of V1)",
-            v3_total,
-            if v1_size > 0 {
-                v3_total as f64 / v1_size as f64 * 100.0
-            } else {
-                0.0
-            }
+            "  V4 total:              {:>8} bytes",
+            v4_total,
         );
 
         // --- Write file ---
@@ -1069,11 +1114,11 @@ impl RecordStoreBuilder {
 
         // Header (48 bytes)
         f.write_all(&MAGIC.to_le_bytes())?;
-        f.write_all(&VERSION_V3.to_le_bytes())?;
+        f.write_all(&VERSION_V4.to_le_bytes())?;
         f.write_all(&(n as u64).to_le_bytes())?;
-        f.write_all(&V3_DEFAULT_BLOCK_SIZE.to_le_bytes())?; // record_block_size
+        f.write_all(&(block_size as u32).to_le_bytes())?; // record_block_size
         f.write_all(&(record_block_count as u32).to_le_bytes())?;
-        f.write_all(&V3_DEFAULT_BLOCK_SIZE.to_le_bytes())?; // sp_block_size
+        f.write_all(&(sp_block_size as u32).to_le_bytes())?; // sp_block_size
         f.write_all(&(sp_block_count as u32).to_le_bytes())?;
         f.write_all(&(record_blocks_start as u64).to_le_bytes())?;
         f.write_all(&(sp_blocks_start as u64).to_le_bytes())?;

@@ -274,6 +274,9 @@ pub fn read_gnis_places(txt_path: &Path) -> Result<Vec<RawPlace>> {
             },
             population: None,
             wikidata: None,
+            class: Some("place".to_owned()),
+            class_value: None,
+            bbox: None,
         });
     }
 

@@ -127,6 +127,9 @@ pub fn to_raw_place(p: BdtopoPlace) -> heimdall_core::types::RawPlace {
         admin2: None,
         population: p.population,
         wikidata: p.wikidata,
+        class: Some("place".to_owned()),
+        class_value: None,
+        bbox: None,
     }
 }
 
