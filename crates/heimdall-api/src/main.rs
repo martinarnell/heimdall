@@ -2354,9 +2354,21 @@ async fn reverse(
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let zoom = if params.zoom > 0 { Some(params.zoom) } else { None };
 
-    let mut best: Option<(u32, f64, usize, &CountryIndex)> = None;
+    // Collect both the nearest place AND (at zoom>=17) the nearest address
+    // across every loaded country in a single pass. The place winner is
+    // always needed: it provides admin context for the address response,
+    // and it's the fallback when no address is close enough to the query.
+    //
+    // TODO_NOMINATIM_PARITY Phase 1.1: ranking rule.
+    //   - zoom >= 17 AND nearest address within 50 m  → return the address
+    //   - otherwise                                    → return the place
+    // 200 m is the cap on candidate distance considered, 50 m is the
+    // "you tapped on this building" cutoff for promoting it over the
+    // place name. See TODO_NOMINATIM_PARITY.md §1.1.
+    let mut best_place: Option<(u32, f64, &CountryIndex)> = None;
+    let mut best_addr: Option<(heimdall_core::addr_index::AddrResult, f64, &CountryIndex)> = None;
 
-    for (ci, country) in state.countries.iter().enumerate() {
+    for country in state.countries.iter() {
         if let Some(ref gi) = country.geohash_index {
             let candidates = gi.nearest(
                 params.lat, params.lon,
@@ -2364,14 +2376,118 @@ async fn reverse(
                 1, zoom,
             );
             if let Some(&(id, dist)) = candidates.first() {
-                if best.is_none() || dist < best.unwrap().1 {
-                    best = Some((id, dist, ci, country));
+                if best_place.as_ref().map_or(true, |(_, d, _)| dist < *d) {
+                    best_place = Some((id, dist, country));
+                }
+            }
+        }
+        if params.zoom >= 17 {
+            if let Some(ref ai) = country.addr_index {
+                if let Some(addr) = ai.nearest_address(params.lat, params.lon, 200.0) {
+                    let q = Coord::new(params.lat, params.lon);
+                    let d = q.distance_m(&addr.coord);
+                    if best_addr.as_ref().map_or(true, |(_, bd, _)| d < *bd) {
+                        best_addr = Some((addr, d, country));
+                    }
                 }
             }
         }
     }
 
-    let (record_id, distance_m, _country_index, country) = match best {
+    // Address branch: full Nominatim-shaped pyramid with road / house_number
+    // / postcode populated from the address hit, and the upper-tier admin
+    // chain borrowed from the place winner (Phase 2.1 will replace the
+    // nearest-centroid admin with proper polygon containment).
+    if params.zoom >= 17 {
+        if let Some((addr_result, addr_d, addr_country)) = best_addr.as_ref() {
+            if *addr_d <= 50.0 {
+                let cc = std::str::from_utf8(&addr_country.code).unwrap_or("??").to_lowercase();
+
+                // Borrow admin context from best_place if any. Cross-country
+                // is fine here — the place-winner is the closest hit globally,
+                // so its admin chain is the best available context.
+                let (place_admin1, place_admin2, place_settle) = best_place
+                    .as_ref()
+                    .map(|(rid, _, pc)| {
+                        let store = pc.index.record_store();
+                        let r = store.get(*rid).ok();
+                        let admin1 = r.as_ref().and_then(|r| pc.index.admin_entry(r.admin1_id).map(|a| a.name.clone()));
+                        let admin2 = r.as_ref().and_then(|r| pc.index.admin_entry(r.admin2_id).map(|a| a.name.clone()));
+                        let settle = r.as_ref()
+                            .map(|r| {
+                                let name = store.primary_name(r);
+                                place_type_to_settlement(&r.place_type, &name)
+                            })
+                            .unwrap_or((None, None, None, None));
+                        (admin1, admin2, settle)
+                    })
+                    .unwrap_or((None, None, (None, None, None, None)));
+                let (city, town, village, suburb) = place_settle;
+
+                let postcode_str = if addr_result.postcode > 0 {
+                    Some(format!("{}", addr_result.postcode))
+                } else { None };
+
+                // Compose display_name as Nominatim does for an address hit.
+                // Skip empty parts so we don't emit "Hamngatan, , Stockholm"
+                // when (e.g.) suburb is missing.
+                let mut parts: Vec<String> = Vec::with_capacity(8);
+                if !addr_result.housenumber.is_empty() && !addr_result.street.is_empty() {
+                    parts.push(format!("{} {}", addr_result.housenumber, addr_result.street));
+                } else if !addr_result.street.is_empty() {
+                    parts.push(addr_result.street.clone());
+                }
+                let pick_settle = suburb.as_ref().or(city.as_ref()).or(town.as_ref()).or(village.as_ref());
+                if let Some(s) = suburb.as_ref() { parts.push(s.clone()); }
+                if let Some(s) = city.as_ref().or(town.as_ref()).or(village.as_ref()) {
+                    if Some(s) != suburb.as_ref() { parts.push(s.clone()); }
+                }
+                if let Some(s) = place_admin2.as_ref() { parts.push(s.clone()); }
+                if let Some(s) = place_admin1.as_ref() { parts.push(s.clone()); }
+                if let Some(s) = postcode_str.as_ref() { parts.push(s.clone()); }
+                parts.push(addr_country.name.clone());
+                let _ = pick_settle; // tiered selection lives in addr/parts above
+                let display_name = parts.join(", ");
+
+                let mut result = serde_json::json!({
+                    "place_id": 0,
+                    "osm_type": "way",
+                    "osm_id": serde_json::Value::Null,
+                    "display_name": display_name,
+                    "lat": format!("{:.7}", addr_result.coord.lat_f64()),
+                    "lon": format!("{:.7}", addr_result.coord.lon_f64()),
+                    "type": "house",
+                    "importance": 0.0_f64,
+                    "distance_m": format!("{:.0}", addr_d),
+                });
+
+                if params.addressdetails > 0 {
+                    let mut addr = serde_json::Map::new();
+                    if !addr_result.housenumber.is_empty() {
+                        addr.insert("house_number".into(), serde_json::Value::String(addr_result.housenumber.clone()));
+                    }
+                    if !addr_result.street.is_empty() {
+                        addr.insert("road".into(), serde_json::Value::String(addr_result.street.clone()));
+                    }
+                    if let Some(v) = suburb { addr.insert("suburb".into(), serde_json::Value::String(v)); }
+                    if let Some(v) = city { addr.insert("city".into(), serde_json::Value::String(v)); }
+                    if let Some(v) = town { addr.insert("town".into(), serde_json::Value::String(v)); }
+                    if let Some(v) = village { addr.insert("village".into(), serde_json::Value::String(v)); }
+                    if let Some(v) = place_admin2 { addr.insert("county".into(), serde_json::Value::String(v)); }
+                    if let Some(v) = place_admin1 { addr.insert("state".into(), serde_json::Value::String(v)); }
+                    if let Some(v) = postcode_str { addr.insert("postcode".into(), serde_json::Value::String(v)); }
+                    addr.insert("country".into(), serde_json::Value::String(addr_country.name.clone()));
+                    addr.insert("country_code".into(), serde_json::Value::String(cc));
+                    result["address"] = serde_json::Value::Object(addr);
+                }
+                return Ok(Json(result));
+            }
+        }
+    }
+
+    // Place branch: today's behaviour, unchanged for old indices and any
+    // zoom < 17 / no-nearby-address case.
+    let (record_id, distance_m, country) = match best_place {
         Some(b) => b,
         None => return Ok(Json(serde_json::json!({"error": "no results"}))),
     };

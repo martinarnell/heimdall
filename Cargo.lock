@@ -1658,6 +1658,7 @@ dependencies = [
  "memmap2 0.9.10",
  "postcard",
  "serde",
+ "tempfile",
  "thiserror 1.0.69",
  "tracing",
  "zstd",
