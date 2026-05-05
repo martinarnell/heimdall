@@ -61,4 +61,12 @@ data/index-se-dev
 /data/data-dev/
 
 # ── Top-level benchmark artefacts (large, regen via heimdall-compare) ─
-/benchmarks/
+# Ignore directory contents but allow exceptions below for pinned baselines
+# (must use /benchmarks/* not /benchmarks/ — directory-level ignores prevent
+# git from entering the directory at all, breaking the negations).
+/benchmarks/*
+# Pinned baselines committed deliberately as regression references.
+# Add new entries here when you pin another corpus.
+!/benchmarks/us-queries-190-seed42.jsonl
+!/benchmarks/us-baseline-pre-parity.sqlite
+!/benchmarks/us-baseline-pre-parity.md
