@@ -2568,9 +2568,27 @@ async fn autocomplete(
     Ok(Json(all_results))
 }
 
+#[derive(Debug, Deserialize)]
+struct StatusParams {
+    /// Phase 3.4 — `format=json` returns the rich diagnostic JSON (the
+    /// historical default). Anything else (including the default) returns
+    /// Nominatim's plain "OK" so health-check clients that literal-string
+    /// match keep working.
+    #[serde(default)]
+    format: Option<String>,
+}
+
 async fn status(
+    Query(params): Query<StatusParams>,
     State(state): State<Arc<AppState>>,
-) -> Json<serde_json::Value> {
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+
+    if params.format.as_deref() != Some("json") {
+        // Nominatim parity (audit #27): default response is plain text "OK".
+        return ([(axum::http::header::CONTENT_TYPE, "text/plain; charset=utf-8")], "OK").into_response();
+    }
+
     let uptime = state.started_at
         .elapsed()
         .map(|d| d.as_secs())
@@ -2599,7 +2617,7 @@ async fn status(
         "countries": countries,
         "total_places": total_places,
         "total_addresses": total_addrs,
-    }))
+    })).into_response()
 }
 
 // ---------------------------------------------------------------------------
@@ -3572,8 +3590,11 @@ fn enrich_jsonv2(mut obj: serde_json::Value) -> serde_json::Value {
 /// Format a Vec<NominatimResult> for the requested response shape.
 /// `format=json` (default) returns a plain JSON array; `format=jsonv2`
 /// adds `addresstype` and `name` to each result; `format=geojson`
-/// wraps results in a `FeatureCollection`. Unknown formats fall back
-/// to `json` (mirrors Nominatim's lenient handling).
+/// wraps results in a `FeatureCollection`; `format=geocodejson`
+/// (Phase 4.2, audit #14) emits the Pelias-style geocoding shape with
+/// a `geocoding` envelope and properties keyed by the geocoding spec.
+/// Unknown formats fall back to `json` (mirrors Nominatim's lenient
+/// handling).
 fn format_search_response(format: &str, results: Vec<NominatimResult>) -> serde_json::Value {
     let array: Vec<serde_json::Value> = results
         .into_iter()
@@ -3604,17 +3625,123 @@ fn format_search_response(format: &str, results: Vec<NominatimResult>) -> serde_
                 "features": features,
             })
         }
+        "geocodejson" => {
+            let features: Vec<serde_json::Value> = array
+                .into_iter()
+                .map(geocodejson_feature)
+                .collect();
+            serde_json::json!({
+                "type": "FeatureCollection",
+                "geocoding": {
+                    "version": "0.1.0",
+                    "licence": NOMINATIM_LICENCE,
+                    "attribution": NOMINATIM_LICENCE,
+                    "query": serde_json::Value::Null,
+                },
+                "features": features,
+            })
+        }
         _ => serde_json::Value::Array(array),
+    }
+}
+
+/// Phase 4.2 — convert a Nominatim-shaped JSON object into a single
+/// geocodejson `Feature`. The geocoding spec keys (`label`, `name`,
+/// `country`, `city`, `postcode`, `housenumber`, `street`, …) map onto
+/// fields we already build, and unmapped keys are dropped. Geometry is
+/// always a Point at the result's lat/lon.
+fn geocodejson_feature(v: serde_json::Value) -> serde_json::Value {
+    let lat = v.get("lat").and_then(|x| x.as_str()).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+    let lon = v.get("lon").and_then(|x| x.as_str()).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+    let display_name = v.get("display_name").and_then(|x| x.as_str()).unwrap_or("");
+    let place_type = v.get("type").and_then(|x| x.as_str()).unwrap_or("");
+    let address = v.get("address");
+
+    let leading_name = display_name.split(", ").next().unwrap_or("").to_owned();
+
+    let mut properties = serde_json::Map::new();
+    properties.insert("type".into(), serde_json::Value::String(geocodejson_type(place_type).to_owned()));
+    properties.insert("label".into(), serde_json::Value::String(display_name.to_owned()));
+    properties.insert("name".into(), serde_json::Value::String(leading_name));
+
+    if let Some(id) = v.get("place_id") {
+        properties.insert("id".into(), id.clone());
+    }
+    if let Some(osm_type) = v.get("osm_type") {
+        properties.insert("osm_type".into(), osm_type.clone());
+    }
+    if let Some(osm_id) = v.get("osm_id") {
+        properties.insert("osm_id".into(), osm_id.clone());
+    }
+    if let Some(addr) = address {
+        // Map Nominatim's `address` block into geocodejson's flatter
+        // top-level keys. Unmapped fields stay implicit (geocodejson is
+        // permissive about extras, but we keep the spec-canonical ones).
+        for (src_key, dst_key) in [
+            ("house_number", "housenumber"),
+            ("road", "street"),
+            ("suburb", "district"),
+            ("city", "city"),
+            ("town", "city"),
+            ("village", "city"),
+            ("county", "county"),
+            ("state", "state"),
+            ("postcode", "postcode"),
+            ("country", "country"),
+            ("country_code", "country_code"),
+        ] {
+            if let Some(val) = addr.get(src_key) {
+                if !val.is_null() {
+                    properties.insert(dst_key.into(), val.clone());
+                }
+            }
+        }
+    }
+
+    serde_json::json!({
+        "type": "Feature",
+        "properties": { "geocoding": properties },
+        "geometry": { "type": "Point", "coordinates": [lon, lat] },
+    })
+}
+
+/// Phase 4.2 — map our `place_type` strings onto the geocodejson `type`
+/// vocabulary (`house`, `street`, `locality`, `city`, `region`, `country`,
+/// `poi`, `unknown`). Falls back to `poi` for the long tail, matching
+/// Pelias's behaviour for amenity / tourism / landmark records.
+fn geocodejson_type(s: &str) -> &'static str {
+    match s {
+        "house" => "house",
+        "street" | "road" => "street",
+        "country" => "country",
+        "state" | "region" => "region",
+        "county" => "county",
+        "city" | "town" => "city",
+        "village" | "hamlet" | "suburb" | "neighbourhood" | "quarter" => "locality",
+        "postcode" => "postcode",
+        _ => "poi",
     }
 }
 
 /// Format a single Nominatim-shaped JSON object (e.g. /reverse output)
 /// for the requested response shape. `json` and `jsonv2` keep the
-/// object form; `geojson` wraps in a FeatureCollection.
+/// object form; `geojson` wraps in a FeatureCollection;
+/// `geocodejson` (Phase 4.2) wraps as a one-feature geocodejson
+/// FeatureCollection.
 fn format_single_response(format: &str, obj: serde_json::Value) -> serde_json::Value {
     match format {
         "jsonv2" => enrich_jsonv2(obj),
         "geojson" => wrap_single_as_geojson(obj),
+        "geocodejson" => serde_json::json!({
+            "type": "FeatureCollection",
+            "geocoding": {
+                "version": "0.1.0",
+                "licence": NOMINATIM_LICENCE,
+                "attribution": NOMINATIM_LICENCE,
+                "query": serde_json::Value::Null,
+            },
+            "features": [geocodejson_feature(obj)],
+        }),
         _ => obj,
     }
 }
@@ -5696,6 +5823,74 @@ mod tests {
         let geo = format_search_response("geojson", vec![]);
         assert_eq!(geo["type"], "FeatureCollection");
         assert_eq!(geo["features"].as_array().unwrap().len(), 0);
+        let gcj = format_search_response("geocodejson", vec![]);
+        assert_eq!(gcj["type"], "FeatureCollection");
+        assert_eq!(gcj["geocoding"]["version"], "0.1.0");
+        assert_eq!(gcj["features"].as_array().unwrap().len(), 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // geocodejson format (Phase 4.2, audit #14)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn geocodejson_envelope_has_geocoding_block() {
+        let v = format_search_response("geocodejson", vec![mk_simple_result()]);
+        assert_eq!(v["type"], "FeatureCollection");
+        assert_eq!(v["geocoding"]["version"], "0.1.0");
+        assert!(v["geocoding"]["licence"].is_string());
+        let features = v["features"].as_array().unwrap();
+        assert_eq!(features.len(), 1);
+        let feat = &features[0];
+        assert_eq!(feat["type"], "Feature");
+        assert_eq!(feat["geometry"]["type"], "Point");
+        // geocodejson keeps everything under `properties.geocoding`
+        assert_eq!(feat["properties"]["geocoding"]["label"],
+            "Stockholm, Stockholms län, Sweden");
+        assert_eq!(feat["properties"]["geocoding"]["name"], "Stockholm");
+        assert_eq!(feat["properties"]["geocoding"]["type"], "city");
+    }
+
+    #[test]
+    fn geocodejson_feature_unmaps_address_block() {
+        let mut r = mk_simple_result();
+        r.address = Some(AddressDetails {
+            house_number: Some("88".into()),
+            road: Some("Drottninggatan".into()),
+            suburb: None,
+            city: Some("Stockholm".into()),
+            town: None,
+            village: None,
+            county: None,
+            state: Some("Stockholms län".into()),
+            postcode: Some("111 51".into()),
+            country: Some("Sweden".into()),
+            country_code: Some("se".into()),
+        });
+        let v = format_search_response("geocodejson", vec![r]);
+        let p = &v["features"][0]["properties"]["geocoding"];
+        assert_eq!(p["housenumber"], "88");
+        assert_eq!(p["street"], "Drottninggatan");
+        assert_eq!(p["city"], "Stockholm");
+        assert_eq!(p["postcode"], "111 51");
+        assert_eq!(p["country"], "Sweden");
+        assert_eq!(p["country_code"], "se");
+    }
+
+    #[test]
+    fn geocodejson_single_response_wraps_one_feature() {
+        let obj = serde_json::json!({
+            "place_id": 7,
+            "lat": "59.0",
+            "lon": "18.0",
+            "type": "city",
+            "display_name": "Test, Sweden",
+        });
+        let v = format_single_response("geocodejson", obj);
+        assert_eq!(v["type"], "FeatureCollection");
+        assert_eq!(v["geocoding"]["version"], "0.1.0");
+        assert_eq!(v["features"].as_array().unwrap().len(), 1);
+        assert_eq!(v["features"][0]["properties"]["geocoding"]["label"], "Test, Sweden");
     }
 
     #[test]

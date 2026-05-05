@@ -861,6 +861,34 @@ Phase 2.3 namedetails sidecar; this PR just consumes it.
 
 ---
 
+## Phase 3.4 + 4.2 — shipped (format polish)
+
+Two cheap wins bundled together. No schema break, no reindex.
+
+### Phase 3.4 — `/status` Nominatim shape (audit #27)
+
+* Default `/status` now returns plain `OK` text (Nominatim parity).
+  Health-check clients that literal-string match the response keep
+  working.
+* The rich diagnostic JSON (countries, places, addresses, uptime) is
+  preserved behind `?format=json`. Same body as before, opt-in.
+
+### Phase 4.2 — `format=geocodejson` (audit #14)
+
+* New `format=geocodejson` on /search and /reverse. Pelias-flavoured
+  FeatureCollection envelope with a `geocoding` block (`version`,
+  `licence`, `attribution`) plus features whose `properties.geocoding`
+  carries the spec-canonical fields (`label`, `name`, `type`,
+  `housenumber`, `street`, `city`, `postcode`, `country`,
+  `country_code`, …).
+* `place_type` strings are mapped onto the geocodejson `type`
+  vocabulary (`house`, `street`, `locality`, `city`, `region`,
+  `country`, `postcode`, `poi`).
+* Empty results emit the right outer shape so clients can key on
+  `geocoding.version` without a length check.
+
+---
+
 ## Phase 2.8 — shipped (Wikidata QID lookup)
 
 Audit item #33. Sidecar-only — no schema break, no global reindex.
