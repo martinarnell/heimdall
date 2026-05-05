@@ -3114,6 +3114,200 @@ async fn lookup(
 }
 
 // ---------------------------------------------------------------------------
+// /details — Phase 3.2 (audit #25)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct DetailsParams {
+    /// Stable place_id (Phase 0). Either this or `osm_type`+`osm_id`
+    /// must be supplied.
+    #[serde(default)]
+    place_id: Option<u64>,
+    /// OSM type letter — `N`, `W`, or `R`. Combine with `osm_id`.
+    #[serde(default)]
+    osm_type: Option<String>,
+    /// OSM id. Combine with `osm_type`.
+    #[serde(default)]
+    osm_id: Option<u64>,
+    #[serde(default = "default_format")]
+    format: String,
+    #[serde(default, rename = "accept-language")]
+    accept_language: Option<String>,
+    /// Nominatim parity — accepted, treated as default-on
+    /// (`extratags`/`namedetails` always emitted on /details since the
+    /// whole point of the endpoint is full introspection).
+    #[serde(default)]
+    #[allow(dead_code)]
+    addressdetails: u8,
+    #[serde(default)]
+    #[allow(dead_code)]
+    keywords: u8,
+    #[serde(default)]
+    #[allow(dead_code)]
+    polygon_geojson: u8,
+}
+
+async fn details(
+    Query(params): Query<DetailsParams>,
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let locales = parse_locales(
+        params.accept_language.as_deref(),
+        header_accept_language(&headers),
+    );
+
+    // Resolve (country_index, record_id) from whichever identifier the
+    // caller supplied. place_id wins when both are present.
+    let resolved = if let Some(pid) = params.place_id {
+        let map = state
+            .stable_place_id_map
+            .get_or_init(|| build_stable_place_id_map(&state.countries));
+        map.get(&pid).copied()
+    } else if let (Some(t), Some(id)) = (params.osm_type.as_deref(), params.osm_id) {
+        let letter = t.chars().next()
+            .map(|c| c.to_ascii_uppercase())
+            .unwrap_or('?');
+        if !matches!(letter, 'N' | 'W' | 'R') {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "osm_type must be N, W or R".to_owned(),
+            ));
+        }
+        let osm_map = state.osm_id_map
+            .get_or_init(|| build_osm_id_map(&state.countries));
+        osm_map.get(&(letter, id)).copied()
+    } else {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "place_id or osm_type+osm_id required".to_owned(),
+        ));
+    };
+
+    let (country_index, record_id) = match resolved {
+        Some(t) => t,
+        None => return Err((StatusCode::NOT_FOUND, "place not found".to_owned())),
+    };
+
+    let country = &state.countries[country_index];
+    let record = country.index.record_store().get(record_id)
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "record fetch failed".to_owned()))?;
+    let raw_name = country.index.record_store().primary_name(&record);
+    let name = localised_name(country, record_id, &locales).unwrap_or_else(|| raw_name.clone());
+
+    let (admin1, admin2) = resolve_admin_names(
+        country,
+        Some(record.admin1_id),
+        Some(record.admin2_id),
+        record.coord.lat_f64(),
+        record.coord.lon_f64(),
+    );
+
+    let display_name = compose_display_name(
+        Some(&name),
+        None,
+        None,
+        admin2.as_deref(),
+        admin1.as_deref(),
+        None,
+        Some(&country.name),
+    );
+
+    let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
+    let (cls_str, type_str) = resolve_class_value(country, &record);
+
+    // Address pyramid (always emitted on /details; this endpoint is
+    // explicitly the introspection one).
+    let mut address = serde_json::Map::new();
+    if let Some(ref v) = admin2 { address.insert("county".into(), serde_json::Value::String(v.clone())); }
+    if let Some(ref v) = admin1 { address.insert("state".into(), serde_json::Value::String(v.clone())); }
+    address.insert("country".into(), serde_json::Value::String(country.name.clone()));
+    address.insert("country_code".into(), serde_json::Value::String(cc.clone()));
+
+    // extratags + namedetails — always populated for /details.
+    let extratags_map: serde_json::Map<String, serde_json::Value> = country.extratags
+        .get(record_id)
+        .map(|pairs| pairs.iter()
+            .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+            .collect())
+        .unwrap_or_default();
+    let namedetails_map: serde_json::Map<String, serde_json::Value> = country.namedetails
+        .get(record_id)
+        .map(|pairs| pairs.iter()
+            .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+            .collect())
+        .unwrap_or_default();
+
+    // place_rank — derived from the lowercased PlaceType label.
+    let pt_label = format!("{:?}", record.place_type).to_lowercase();
+    let place_rank = place_rank_from_str(&pt_label);
+
+    // bbox + centroid
+    let (south, north, west, east) = record.bbox.decode_f64(record.coord);
+    let bbox = serde_json::json!([
+        format!("{:.7}", south),
+        format!("{:.7}", north),
+        format!("{:.7}", west),
+        format!("{:.7}", east),
+    ]);
+
+    // Wikidata QID, when stored in extratags
+    let wikidata_qid = extratags_map
+        .get("wikidata")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_owned());
+
+    let body = serde_json::json!({
+        "place_id": stable_place_id(&record),
+        "parent_place_id": serde_json::Value::Null,
+        "osm_type": osm_type_from_flags(record.flags),
+        "osm_id": if record.osm_id != 0 { Some(record.osm_id) } else { None::<u64> },
+        "category": cls_str,
+        "type": type_str,
+        "admin_level": serde_json::Value::Null,
+        "localname": name,
+        "names": namedetails_map,
+        "addresstags": serde_json::Value::Object(address),
+        "housenumber": serde_json::Value::Null,
+        "calculated_postcode": serde_json::Value::Null,
+        "country_code": cc,
+        "indexed_date": serde_json::Value::Null,
+        "importance": record.importance as f64 / 65535.0,
+        "calculated_importance": record.importance as f64 / 65535.0,
+        "rank_address": place_rank,
+        "rank_search": place_rank,
+        "isarea": (record.flags & heimdall_core::types::FLAG_IS_RELATION) != 0
+            || (record.flags & heimdall_core::types::FLAG_IS_WAY) != 0,
+        "centroid": {
+            "type": "Point",
+            "coordinates": [record.coord.lon_f64(), record.coord.lat_f64()],
+        },
+        "geometry": {
+            // Phase 3.2 v1 ships the bbox as the geometry. Full polygon
+            // output is Phase 3.1 (#17). When that lands, swap in the
+            // real polygon for admin records (we have them via the
+            // runtime PiP sidecar) and the way bbox for non-admin.
+            "type": "Polygon",
+            "coordinates": [[
+                [west, south],
+                [east, south],
+                [east, north],
+                [west, north],
+                [west, south],
+            ]],
+        },
+        "boundingbox": bbox,
+        "extratags": extratags_map,
+        "namedetails": namedetails_map,
+        "display_name": display_name,
+        "licence": NOMINATIM_LICENCE,
+    });
+
+    let _ = params.format;
+    Ok(Json(body))
+}
+
+// ---------------------------------------------------------------------------
 // Place ID encoding
 // ---------------------------------------------------------------------------
 
@@ -5137,6 +5331,7 @@ async fn main() -> anyhow::Result<()> {
                 .route("/autocomplete", get(autocomplete))
                 .route("/reverse", get(reverse))
                 .route("/lookup", get(lookup))
+                .route("/details", get(details))
                 .route("/status", get(status))
                 .route("/metrics", get(metrics::handler));
 
