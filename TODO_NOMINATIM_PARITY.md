@@ -990,3 +990,110 @@ Old indices return no QID hits, but everything else keeps working.
   full Phase 2.2 class/type/bbox, Phase 2.3 sidecars work
   end-to-end). `match_type` is set to `"qid"` so consumers can spot
   QID-matched results.
+
+---
+
+## Phase 2.4 — shipped (buildings as places)
+
+Audit item #29. No schema break, no sidecar — uses existing
+`PlaceRecord` fields and the Phase 2.2 `class_types.bin` interner to
+surface "building" as the OSM class. New building records appear after
+the next country rebuild; old indices keep working unchanged.
+
+### What changed
+
+* `extract::scan_way` now allows `building=*` ways with a `name=*` to
+  pass the qualifying gate when they carry a notability signal —
+  `wikidata`, `wikipedia`, an `alt_name`/`loc_name`/`short_name`, or a
+  `name:<lang>` translation. Mirrors the existing highway notability
+  gate; pure `building=yes` with just a name stays filtered (avoids
+  flooding the FST with every named warehouse and detached house).
+* Vasamuseet (`building=museum + tourism=museum + wikidata=Q901371`)
+  keeps its existing tourism path — the qualifying-tag check still
+  beats the building gate.
+* `place_type` for notability-gated buildings is `Landmark`; OSM
+  class/type pair is `("building", <building-value>)` (e.g.
+  `building=yes`, `building=castle`, `building=hotel`).
+* `way_qualifies` updated to mirror the new gate so pre-pass 2 caches
+  the right node IDs.
+
+### What's on the wire
+
+Buildings extracted under the new gate behave like any other
+record-backed place: forward search returns them by name, reverse
+geocoding can hit them, `/details` introspects them, `extratags` /
+`namedetails` flow through. Empire State Building, Sagrada Família,
+the named UK village hall — all addressable via `?q=<name>`.
+
+---
+
+## Phase 2.5 — shipped (address interpolation)
+
+Audit item #30. No schema break, no new sidecar — synthesised
+addresses flow through the existing `addresses.parquet` →
+`pack_addresses` path. New interpolated houses appear after the next
+country rebuild.
+
+### What's on disk (build time only)
+
+* Pre-pass 2 collects interpolation way endpoint node IDs alongside
+  the existing relation/qualifying-way refs, and adds the way refs to
+  `needed_node_ids` so the polyline coords resolve in the main pass.
+* Pass 1 captures `addr:housenumber` from each interpolation endpoint
+  node into a small `HashMap<i64, String>` (sized at ≈2× interpolation
+  ways per country — typically a few thousand entries, sub-MB).
+* Pass 1 ways buffer interpolation ways alongside building / address
+  / qualifying ways. At flush time, the polyline is resolved against
+  the node cache, endpoint housenumbers are looked up, and one
+  `RawAddress` is emitted per intermediate housenumber.
+* Cumulative arc length (cartesian, cos-corrected — accurate for
+  sub-km ways) gives the fractional position. The way's direction
+  (lo→hi vs hi→lo on the housenumber axis) is detected from the
+  endpoint values and the interpolation flips accordingly so houses
+  always land on the correct side of the polyline.
+* Synthesised addresses inherit `addr:street/postcode/city` from the
+  way, take the way's osm_id, and feed straight into
+  `pack_addresses`'s street-grouping (the existing city → muni_id
+  hash fallback handles muni resolution when the way isn't in
+  `admin_map`).
+
+### Configuration / safety
+
+* `addr:interpolation=odd | even | all` are supported. `alphabetic`
+  (1A, 1B, 1C…) is skipped — rare and doesn't fit integer arithmetic.
+* `MAX_INTERPOLATIONS = 200` per way as a safety cap against
+  pathological tags (e.g. `all` between 1 and 9999). The hard limit
+  is generous; typical interpolation ways span 5–25 houses.
+* Interpolation ways missing `addr:street`, missing endpoint
+  housenumbers, or with non-integer endpoints are silently skipped.
+  Endpoints themselves are not re-emitted — they're already in the
+  address pipeline as standalone nodes.
+
+### What's on the wire
+
+Forward search for "47 Country Lane" now resolves on rural roads
+where only "1" and "99" exist as real OSM nodes — assuming the
+interpolation way exists in the source PBF. US / UK / AU rural
+coverage is the headline win.
+
+---
+
+## Phase 2 — done
+
+All eight items from the Phase 2 plan are now shipped:
+
+| Item | PR / commit |
+|---|---|
+| 2.1 polygon containment | b3003eb |
+| 2.2 schema-bump batch | 71864cc |
+| 2.3 extratags + namedetails | 0a7606e |
+| 2.4 buildings as places | this PR |
+| 2.5 address interpolation | this PR |
+| 2.6 postcodes as places | 33f5336 |
+| 2.7 relation-typed results | 71864cc (rolled into 2.2 schema bump) |
+| 2.8 Wikidata QID lookup | db648da |
+
+Phase 3 items (#3.1 polygon outputs, #3.3 category search) and
+Phase 4 polish remain. The 192-country reindex tax was paid by 2.2;
+2.4 and 2.5 ride that index on the next per-country rebuild without a
+further schema bump.
