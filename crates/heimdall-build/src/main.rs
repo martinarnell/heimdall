@@ -2490,6 +2490,7 @@ fn place_type_from_u8(v: u8) -> heimdall_core::types::PlaceType {
         6 => PlaceType::Hamlet,
         7 => PlaceType::Farm,
         8 => PlaceType::Locality,
+        9 => PlaceType::Postcode,
         10 => PlaceType::Suburb,
         11 => PlaceType::Quarter,
         12 => PlaceType::Neighbourhood,

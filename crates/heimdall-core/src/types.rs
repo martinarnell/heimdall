@@ -70,6 +70,7 @@ pub enum PlaceType {
     Hamlet = 6,
     Farm = 7,      // gård — very common in Swedish OSM
     Locality = 8,  // named place, no population tag
+    Postcode = 9,  // synthetic postcode centroid (Phase 2.6, audit #31)
 
     // Infrastructure
     Suburb = 10,
@@ -137,6 +138,7 @@ impl PlaceType {
             Self::Suburb | Self::Quarter => 55,
             Self::Hamlet | Self::Farm => 40,
             Self::Locality => 35,
+            Self::Postcode => 30,
             Self::Island => 50,
             Self::Airport | Self::Station => 65,
             Self::Square => 50,
