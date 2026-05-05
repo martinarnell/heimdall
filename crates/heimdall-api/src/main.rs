@@ -7,7 +7,7 @@
 
 use axum::{
     extract::{Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::Json,
     routing::get,
     Router,
@@ -192,6 +192,14 @@ struct SearchParams {
     #[serde(default)]
     namedetails: u8,
 
+    /// Nominatim `?accept-language=` (Phase 1.3) — preferred locale list
+    /// for localised place names. Combined with the `Accept-Language`
+    /// HTTP header (query string wins on conflict). Result's primary
+    /// name is replaced with the matching `name:<lang>` from the
+    /// namedetails sidecar when one is available.
+    #[serde(default, rename = "accept-language")]
+    accept_language: Option<String>,
+
     /// Nominatim's default-on dedupe (`dedupe=1`). Drop later results
     /// whose `(place_id)` or `(lat, lon, type, display_name)` was
     /// already returned. Set `dedupe=0` to keep duplicates — useful
@@ -319,6 +327,8 @@ struct LookupParams {
     extratags: u8,
     #[serde(default)]
     namedetails: u8,
+    #[serde(default, rename = "accept-language")]
+    accept_language: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -918,7 +928,12 @@ fn split_postcode_city(s: &str) -> Option<(String, String)> {
 async fn search(
     Query(params): Query<SearchParams>,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let locales = parse_locales(
+        params.accept_language.as_deref(),
+        header_accept_language(&headers),
+    );
     let structured = has_structured_params(&params);
 
     // q= and structured params are mutually exclusive
@@ -1039,7 +1054,7 @@ async fn search(
                             } else { None },
                         class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
                         });
-                        return Ok(Json(search_finalize(&params, &state, response)));
+                        return Ok(Json(search_finalize(&params, &state, &locales, response)));
                     }
                 }
             }
@@ -1076,7 +1091,7 @@ async fn search(
                         } else { None },
                     class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
                     });
-                    return Ok(Json(search_finalize(&params, &state, response)));
+                    return Ok(Json(search_finalize(&params, &state, &locales, response)));
                 }
             }
         }
@@ -1131,7 +1146,7 @@ async fn search(
                         } else { None },
                     class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
                     });
-                    return Ok(Json(search_finalize(&params, &state, response)));
+                    return Ok(Json(search_finalize(&params, &state, &locales, response)));
                 }
             }
         }
@@ -1194,7 +1209,7 @@ async fn search(
                     } else { None },
                 class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
                 });
-                return Ok(Json(search_finalize(&params, &state, response)));
+                return Ok(Json(search_finalize(&params, &state, &locales, response)));
             }
         }
     }
@@ -1333,7 +1348,7 @@ async fn search(
             postcode_match_found = true;
         }
         if postcode_match_found {
-            return Ok(Json(search_finalize(&params, &state, response)));
+            return Ok(Json(search_finalize(&params, &state, &locales, response)));
         }
         // Postcode portion missed — could be a real-but-unindexed code
         // (we miss entire prefixes when the national address feed is broken,
@@ -1441,7 +1456,7 @@ async fn search(
         // place-name lookups for the same digit string will be useless —
         // short-circuit to keep the postcode result clean.
         if postcode_match_found {
-            return Ok(Json(search_finalize(&params, &state, response)));
+            return Ok(Json(search_finalize(&params, &state, &locales, response)));
         }
     }
 
@@ -1819,7 +1834,7 @@ async fn search(
                         } else { None },
                     class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
                     });
-                    return Ok(Json(search_finalize(&params, &state, response)));
+                    return Ok(Json(search_finalize(&params, &state, &locales, response)));
                 }
             }
         }
@@ -2414,6 +2429,13 @@ async fn search(
     let response: Vec<NominatimResult> = paired.into_iter().map(|(r, _)| r).collect();
     let mut response = apply_search_filters(&params, response);
     response.truncate(limit);
+    apply_locale_overrides(&state, &mut response, &locales);
+    enrich_with_sidecars(
+        &state,
+        &mut response,
+        params.extratags != 0,
+        params.namedetails != 0,
+    );
 
     metrics::record_result_count("search", response.len());
     Ok(Json(format_search_response(&params.format, response)))
@@ -2581,6 +2603,8 @@ struct ReverseParams {
     extratags: u8,
     #[serde(default)]
     namedetails: u8,
+    #[serde(default, rename = "accept-language")]
+    accept_language: Option<String>,
 }
 
 fn default_zoom() -> u8 { 16 }
@@ -2588,7 +2612,12 @@ fn default_zoom() -> u8 { 16 }
 async fn reverse(
     Query(params): Query<ReverseParams>,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
+    let locales = parse_locales(
+        params.accept_language.as_deref(),
+        header_accept_language(&headers),
+    );
     let zoom = if params.zoom > 0 { Some(params.zoom) } else { None };
 
     // Collect both the nearest place AND (at zoom>=17) the nearest address
@@ -2754,7 +2783,12 @@ async fn reverse(
 
     let record = country.index.record_store().get(record_id)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let name = country.index.record_store().primary_name(&record);
+    let raw_name = country.index.record_store().primary_name(&record);
+    // Phase 1.3 — prefer a localised name when one is available in the
+    // namedetails sidecar. Falls through to the primary name when no
+    // matching `name:<locale>` was extracted at build time.
+    let name = localised_name(country, record_id, &locales)
+        .unwrap_or_else(|| raw_name.clone());
     // Polygon containment at the record's coord overrides the
     // build-time admin assignment (Phase 2.1, audit #10). Records
     // were enriched with build-time PiP, so for places this mostly
@@ -2839,7 +2873,12 @@ async fn reverse(
 async fn lookup(
     Query(params): Query<LookupParams>,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let locales = parse_locales(
+        params.accept_language.as_deref(),
+        header_accept_language(&headers),
+    );
     if params.place_ids.is_none() && params.osm_ids.is_none() {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -3026,8 +3065,9 @@ async fn lookup(
         }
     }
 
-    // Phase 2.3 — enrich with extratags / namedetails when requested.
+    // Phase 1.3 + 2.3 — locale overrides then sidecar enrichment.
     let mut results = results;
+    apply_locale_overrides(&state, &mut results, &locales);
     enrich_with_sidecars(
         &state,
         &mut results,
@@ -3479,8 +3519,17 @@ fn format_single_response(format: &str, obj: serde_json::Value) -> serde_json::V
 /// return site so all eight branches honour `format=` consistently.
 /// Phase 2.3: enriches each result with `extratags` / `namedetails`
 /// sidecar payloads when the corresponding query flag is set.
-fn search_finalize(params: &SearchParams, state: &AppState, results: Vec<NominatimResult>) -> serde_json::Value {
+/// Phase 1.3: applies Accept-Language overrides to the leading
+/// `display_name` component when a matching `name:<locale>` is in the
+/// namedetails sidecar.
+fn search_finalize(
+    params: &SearchParams,
+    state: &AppState,
+    locales: &[String],
+    results: Vec<NominatimResult>,
+) -> serde_json::Value {
     let mut filtered = apply_search_filters(params, results);
+    apply_locale_overrides(state, &mut filtered, locales);
     enrich_with_sidecars(
         state,
         &mut filtered,
@@ -3488,6 +3537,132 @@ fn search_finalize(params: &SearchParams, state: &AppState, results: Vec<Nominat
         params.namedetails != 0,
     );
     format_search_response(&params.format, filtered)
+}
+
+/// Phase 1.3 — parse a Nominatim-style locale preference list out of
+/// (a) the `accept-language=` query parameter and (b) the HTTP
+/// `Accept-Language` header. Query parameter wins when both are present
+/// (Nominatim's documented precedence). Returns lowercase ISO codes in
+/// preference order, q-values respected, deduped. Empty when nothing's
+/// provided.
+fn parse_locales(query: Option<&str>, header: Option<&str>) -> Vec<String> {
+    let raw = match query.filter(|s| !s.trim().is_empty()) {
+        Some(q) => q,
+        None => match header {
+            Some(h) if !h.trim().is_empty() => h,
+            _ => return Vec::new(),
+        },
+    };
+    // RFC 7231 form: "en-GB,en;q=0.9,sv;q=0.8". We want stable sort by
+    // q descending (default 1.0), original order on tie.
+    let mut entries: Vec<(usize, f32, String)> = raw.split(',')
+        .enumerate()
+        .filter_map(|(i, item)| {
+            let mut parts = item.trim().split(';');
+            let tag = parts.next()?.trim().to_lowercase();
+            if tag.is_empty() || tag == "*" {
+                return None;
+            }
+            let q: f32 = parts
+                .find_map(|p| p.trim().strip_prefix("q="))
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(1.0);
+            Some((i, q, tag))
+        })
+        .collect();
+    entries.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+        .then(a.0.cmp(&b.0)));
+    let mut out: Vec<String> = Vec::with_capacity(entries.len() * 2);
+    let mut seen = std::collections::HashSet::new();
+    for (_, _, tag) in entries {
+        // Insert the full tag (e.g. "en-gb") AND the bare primary
+        // subtag ("en"). OSM `name:xx` keys are bare ISO 639-1, so a
+        // request for `en-GB` should still match `name:en` after the
+        // primary tag. The full tag is checked first so dialect-
+        // specific overrides win when one happens to exist.
+        if seen.insert(tag.clone()) {
+            out.push(tag.clone());
+        }
+        if let Some(primary) = tag.split('-').next() {
+            let p = primary.to_owned();
+            if p != tag && seen.insert(p.clone()) {
+                out.push(p);
+            }
+        }
+    }
+    out
+}
+
+/// Phase 1.3 — read the `Accept-Language` HTTP header as a string slice.
+/// Defensive against non-UTF-8 bytes.
+fn header_accept_language(headers: &HeaderMap) -> Option<&str> {
+    headers.get(axum::http::header::ACCEPT_LANGUAGE)
+        .and_then(|v| v.to_str().ok())
+}
+
+/// Phase 1.3 — find the best localised primary name for a record from
+/// the namedetails sidecar, given an ordered locale preference list.
+/// Returns `None` when neither the record nor any locale is in scope.
+fn localised_name(country: &CountryIndex, record_id: u32, locales: &[String]) -> Option<String> {
+    if locales.is_empty() {
+        return None;
+    }
+    let pairs = country.namedetails.get(record_id)?;
+    for loc in locales {
+        let key = format!("name:{}", loc);
+        if let Some((_, v)) = pairs.iter().find(|(k, _)| k == &key) {
+            if !v.is_empty() {
+                return Some(v.clone());
+            }
+        }
+    }
+    None
+}
+
+/// Phase 1.3 — swap each result's display-name leading component for the
+/// matching `name:<locale>` entry in the namedetails sidecar, when one
+/// is available. The leading component is whatever comes before the
+/// first ", " in `display_name`; everything else (admin chain, country)
+/// stays as-is for now since per-admin localisation needs a separate
+/// sidecar.
+fn apply_locale_overrides(
+    state: &AppState,
+    results: &mut [NominatimResult],
+    locales: &[String],
+) {
+    if locales.is_empty() {
+        return;
+    }
+    for r in results.iter_mut() {
+        let (country_idx, record_id) = match r.internal {
+            Some(t) => t,
+            None => continue,
+        };
+        let country = match state.countries.get(country_idx as usize) {
+            Some(c) => c,
+            None => continue,
+        };
+        let pairs = match country.namedetails.get(record_id) {
+            Some(p) => p,
+            None => continue,
+        };
+        let localised: Option<&str> = locales.iter().find_map(|loc| {
+            let key = format!("name:{}", loc);
+            pairs.iter()
+                .find(|(k, _)| k == &key)
+                .map(|(_, v)| v.as_str())
+        });
+        if let Some(name) = localised {
+            // Replace only the leading component up to the first ", ".
+            // If display_name has no separator (single-token), swap the
+            // whole string.
+            let new_display = match r.display_name.find(", ") {
+                Some(idx) => format!("{}{}", name, &r.display_name[idx..]),
+                None => name.to_owned(),
+            };
+            r.display_name = new_display;
+        }
+    }
 }
 
 /// Phase 2.3 — populate `extratags` / `namedetails` on each result from
@@ -4776,6 +4951,7 @@ mod tests {
             addressdetails: 0,
             extratags: 0,
             namedetails: 0,
+            accept_language: None,
             dedupe: 1,
             exclude_place_ids: None,
             featuretype: None,
@@ -5494,6 +5670,51 @@ mod tests {
         let v = serde_json::to_value(r).unwrap();
         assert_eq!(v["extratags"], serde_json::json!({}));
         assert_eq!(v["namedetails"], serde_json::json!({}));
+    }
+
+    // -----------------------------------------------------------------------
+    // Accept-Language parser (Phase 1.3, audit #16)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_locales_query_overrides_header() {
+        let out = parse_locales(Some("de"), Some("en;q=0.9,sv;q=0.8"));
+        assert_eq!(out, vec!["de"]);
+    }
+
+    #[test]
+    fn parse_locales_falls_back_to_header_when_query_absent() {
+        let out = parse_locales(None, Some("en;q=0.9,sv;q=0.8"));
+        assert_eq!(out, vec!["en", "sv"]);
+    }
+
+    #[test]
+    fn parse_locales_q_values_sort_descending() {
+        let out = parse_locales(None, Some("sv;q=0.5,en;q=0.9,de;q=0.7"));
+        assert_eq!(out, vec!["en", "de", "sv"]);
+    }
+
+    #[test]
+    fn parse_locales_strips_dialect_to_primary_subtag() {
+        // en-GB is the explicit ask, but `name:en` is what's tagged in OSM
+        // — we want to fall through to `en` so the request actually
+        // matches.
+        let out = parse_locales(None, Some("en-GB"));
+        assert_eq!(out, vec!["en-gb", "en"]);
+    }
+
+    #[test]
+    fn parse_locales_handles_empty_inputs() {
+        assert_eq!(parse_locales(None, None), Vec::<String>::new());
+        assert_eq!(parse_locales(Some(""), None), Vec::<String>::new());
+        assert_eq!(parse_locales(None, Some("")), Vec::<String>::new());
+        assert_eq!(parse_locales(None, Some("*")), Vec::<String>::new());
+    }
+
+    #[test]
+    fn parse_locales_dedupes() {
+        let out = parse_locales(None, Some("en,en-US,en"));
+        assert_eq!(out, vec!["en", "en-us"]);
     }
 
     // -----------------------------------------------------------------------
