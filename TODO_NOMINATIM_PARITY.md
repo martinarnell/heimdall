@@ -833,3 +833,28 @@ are set, since the sidecar files are absent.
 ### What's still open from the audit
 
 Same list as before, minus #18/#19.
+
+---
+
+## Phase 1.3 — shipped (Accept-Language localised display_name)
+
+Audit item #16. Free i18n — the data was already on disk via the
+Phase 2.3 namedetails sidecar; this PR just consumes it.
+
+### What's on the wire
+
+* New `?accept-language=` query param + standard `Accept-Language`
+  header support on /search, /reverse, /lookup. Query string wins on
+  conflict (Nominatim's documented precedence).
+* RFC 7231 q-value parsing with stable sort by q desc; ties keep
+  source order. Dialect tags (`en-GB`) are also expanded to their
+  primary subtag (`en`) so OSM's bare `name:xx` tags actually match.
+* The leading `display_name` component is replaced with the matching
+  `name:<locale>` from the namedetails sidecar when one is available.
+  /reverse's place branch swaps in the localised name BEFORE
+  `compose_display_name` runs, so the whole place-component string
+  reflects the locale (including downstream uses like
+  `place_type_to_settlement`).
+* The rest of the address pyramid (admin chain, country) stays
+  unchanged for now — per-admin localisation needs a separate sidecar
+  to ship.
