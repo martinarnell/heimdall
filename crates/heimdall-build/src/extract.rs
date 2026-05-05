@@ -864,6 +864,7 @@ fn scan_way(way: &osmpbf::Way) -> Option<PendingWay> {
     let mut qualifying_tag: Option<(String, String)> = None;
     let mut is_highway = false;
     let mut is_building = false;
+    let mut building_value: Option<String> = None;
     let mut has_wikipedia = false;
     let mut highway_value: Option<String> = None;
     let mut is_area = false;
@@ -887,7 +888,7 @@ fn scan_way(way: &osmpbf::Way) -> Option<PendingWay> {
             "wikipedia" => has_wikipedia = true,
             "highway" => { is_highway = true; highway_value = Some(v.to_owned()); }
             "area" => { if v == "yes" { is_area = true; } }
-            "building" => is_building = true,
+            "building" => { is_building = true; building_value = Some(v.to_owned()); }
             k if k.starts_with("name:") => {
                 let lang = &k[5..];
                 if lang.len() == 2 {
@@ -907,17 +908,8 @@ fn scan_way(way: &osmpbf::Way) -> Option<PendingWay> {
         }
     }
 
-    // Must have a name. Buildings are always skipped (pure geometry).
-    // Highways are skipped UNLESS they carry a notability signal — this
-    // catches famous named streets (Avenyn, Drottninggatan, Sveavägen) so
-    // the city-context disambiguation has something to rank.
+    // Must have a name.
     let name = name?;
-    // Buildings are skipped UNLESS they carry a real qualifying tag —
-    // Vasamuseet is `building=museum, tourism=museum, wikidata=Q901371`,
-    // and the tourism wins over the geometry tag.
-    if is_building && qualifying_tag.is_none() && place_tag.is_none() {
-        return None;
-    }
     // Highway notability gate. Without this, every residential street in the
     // PBF gets indexed and floods the FST. We accept four signals:
     //   - wikidata / wikipedia (regionally famous)
@@ -926,10 +918,24 @@ fn scan_way(way: &osmpbf::Way) -> Option<PendingWay> {
     //     in Finland, Brussels in Belgium, Wales, Catalonia, …). The
     //     `name:sv` (or any `name:<lang>`) tag itself is the notability
     //     signal: someone bothered to translate it because it matters.
-    let highway_qualifies = is_highway
-        && (wikidata.is_some() || has_wikipedia
-            || !alt_names.is_empty() || !name_intl.is_empty());
+    let has_notability = wikidata.is_some() || has_wikipedia
+        || !alt_names.is_empty() || !name_intl.is_empty();
+    let highway_qualifies = is_highway && has_notability;
     if is_highway && !highway_qualifies {
+        return None;
+    }
+    // Building notability gate (Phase 2.4 / audit #29). A building qualifies
+    // as a searchable place if it has another qualifying POI tag (Vasamuseet
+    // = building=museum + tourism=museum, the tourism wins) OR carries a
+    // notability signal of its own — wikidata/wikipedia (Empire State
+    // Building, Sagrada Família), an alt/loc/short_name, or a translated
+    // name. Pure `building=yes, name=*` with nothing else stays out so we
+    // don't flood the FST with every named warehouse and detached house.
+    let building_qualifies = is_building && place_tag.is_none()
+        && qualifying_tag.is_none() && has_notability;
+    if is_building && qualifying_tag.is_none() && place_tag.is_none()
+        && !building_qualifies
+    {
         return None;
     }
 
@@ -959,6 +965,11 @@ fn scan_way(way: &osmpbf::Way) -> Option<PendingWay> {
         } else {
             PlaceType::Street
         }
+    } else if building_qualifies {
+        // Notable named building (Empire State Building, Sagrada Família, …).
+        // Bucket as Landmark — it ranks alongside other notable POIs and
+        // gets the same importance weight at query time.
+        PlaceType::Landmark
     } else {
         return None;
     };
@@ -974,6 +985,10 @@ fn scan_way(way: &osmpbf::Way) -> Option<PendingWay> {
             } else if matches!(place_type, PlaceType::Street) {
                 // Notable named highway picked up via the highway-qualifies path.
                 highway_value.clone().map(|v| ("highway".to_owned(), v))
+            } else if building_qualifies {
+                // Notable named building — class=building, type=<value>
+                // (e.g. building=yes, building=hotel, building=castle).
+                building_value.clone().map(|v| ("building".to_owned(), v))
             } else {
                 None
             }
@@ -1600,10 +1615,13 @@ fn way_qualifies(way: &osmpbf::Way) -> bool {
         // Notable highway only — ~50–500 famous streets per country.
         return has_notability;
     }
-    // Buildings need a real qualifying tag (Vasamuseet =
-    // building=museum + tourism=museum). Pure building=yes is geometry only.
+    // Buildings qualify when they ALSO have a real POI tag (Vasamuseet =
+    // building=museum + tourism=museum, the tourism wins) OR carry a
+    // notability signal of their own (wikidata, wikipedia, alt/loc/short
+    // name, name:<lang>) — Empire State Building, Sagrada Família, etc.
+    // Pure building=yes with just a name stays out.
     if is_building {
-        return has_qualifying;
+        return has_qualifying || has_notability;
     }
     has_qualifying
 }
