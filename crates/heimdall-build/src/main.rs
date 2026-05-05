@@ -2443,6 +2443,9 @@ pub(crate) fn read_osm_places(parquet_path: &Path) -> Result<Vec<heimdall_core::
                 } else {
                     Some(wikidatas.value(i).to_owned())
                 },
+                class: None,
+                class_value: None,
+                bbox: None,
             });
         }
     }

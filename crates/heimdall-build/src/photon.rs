@@ -254,6 +254,9 @@ pub fn parse_es_documents(docs: &[serde_json::Value]) -> PhotonParseResult {
                 admin2: None,
                 population: synthetic_population,
                 wikidata,
+                class: (!osm_key.is_empty()).then(|| osm_key.to_owned()),
+                class_value: (!osm_value.is_empty()).then(|| osm_value.to_owned()),
+                bbox: None,
             });
         }
 
@@ -406,6 +409,9 @@ pub fn parse_single_es_document(doc: &serde_json::Value) -> (Option<RawPlace>, O
             admin2: None,
             population: synthetic_population,
             wikidata,
+            class: (!osm_key.is_empty()).then(|| osm_key.to_owned()),
+            class_value: (!osm_value.is_empty()).then(|| osm_value.to_owned()),
+            bbox: None,
         })
     } else {
         None
@@ -618,6 +624,9 @@ pub fn parse(input: &Path) -> Result<PhotonParseResult> {
                 admin2: None,
                 population: synthetic_population,
                 wikidata,
+                class: (!osm_key.is_empty()).then(|| osm_key.to_owned()),
+                class_value: (!osm_value.is_empty()).then(|| osm_value.to_owned()),
+                bbox: None,
             });
         }
 
@@ -889,6 +898,9 @@ pub fn import(input: &Path, output: &Path) -> Result<PhotonImportResult> {
                 admin2: if county_name.is_empty() { None } else { Some(county_name.clone()) },
                 population: synthetic_population,
                 wikidata,
+                class: (!osm_key.is_empty()).then(|| osm_key.to_owned()),
+                class_value: (!osm_value.is_empty()).then(|| osm_value.to_owned()),
+                bbox: None,
             });
         }
 

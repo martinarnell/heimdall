@@ -313,6 +313,9 @@ pub fn read_gn250_places(csv_path: &Path) -> Result<Vec<RawPlace>> {
             admin2: None,
             population,
             wikidata: None,
+            class: Some("place".to_owned()),
+            class_value: None,
+            bbox: None,
         });
     }
 

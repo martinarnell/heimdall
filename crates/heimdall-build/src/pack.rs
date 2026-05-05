@@ -23,8 +23,67 @@ use tracing::info;
 use heimdall_core::types::*;
 use heimdall_core::record_store::RecordStoreBuilder;
 use heimdall_core::reverse::GeohashIndexBuilder;
+use heimdall_core::class_type::ClassTypeBuilder;
 use heimdall_normalize::Normalizer;
 use crate::enrich::EnrichResult;
+
+/// Best-effort `(class, type)` defaults synthesised from `PlaceType` for
+/// records whose source (Photon snapshots, govt importers, synthetic
+/// admin nodes, …) didn't carry the original OSM tag pair. Mirrors
+/// Nominatim's two-axis vocabulary: `place=*` for populated/admin
+/// hierarchies, `boundary=administrative` for admin relations,
+/// `natural=*` for water/forest features, etc.
+fn default_class_for_place_type(pt: PlaceType) -> String {
+    match pt {
+        PlaceType::Country | PlaceType::State | PlaceType::County => "boundary".to_owned(),
+        PlaceType::Lake | PlaceType::Mountain | PlaceType::Forest
+            | PlaceType::Bay | PlaceType::Cape | PlaceType::Island | PlaceType::Islet => "natural".to_owned(),
+        PlaceType::River => "waterway".to_owned(),
+        PlaceType::Airport => "aeroway".to_owned(),
+        PlaceType::Station => "railway".to_owned(),
+        PlaceType::Square => "place".to_owned(),
+        PlaceType::Street => "highway".to_owned(),
+        PlaceType::Landmark => "tourism".to_owned(),
+        PlaceType::University | PlaceType::Hospital | PlaceType::PublicBuilding => "amenity".to_owned(),
+        PlaceType::Park => "leisure".to_owned(),
+        _ => "place".to_owned(),
+    }
+}
+
+fn default_type_for_place_type(pt: PlaceType) -> String {
+    match pt {
+        PlaceType::Country => "administrative".to_owned(),
+        PlaceType::State => "administrative".to_owned(),
+        PlaceType::County => "administrative".to_owned(),
+        PlaceType::City => "city".to_owned(),
+        PlaceType::Town => "town".to_owned(),
+        PlaceType::Village => "village".to_owned(),
+        PlaceType::Hamlet => "hamlet".to_owned(),
+        PlaceType::Farm => "farm".to_owned(),
+        PlaceType::Locality => "locality".to_owned(),
+        PlaceType::Suburb => "suburb".to_owned(),
+        PlaceType::Quarter => "quarter".to_owned(),
+        PlaceType::Neighbourhood => "neighbourhood".to_owned(),
+        PlaceType::Island => "island".to_owned(),
+        PlaceType::Islet => "islet".to_owned(),
+        PlaceType::Square => "square".to_owned(),
+        PlaceType::Street => "primary".to_owned(),
+        PlaceType::Lake => "water".to_owned(),
+        PlaceType::River => "river".to_owned(),
+        PlaceType::Mountain => "peak".to_owned(),
+        PlaceType::Forest => "wood".to_owned(),
+        PlaceType::Bay => "bay".to_owned(),
+        PlaceType::Cape => "cape".to_owned(),
+        PlaceType::Airport => "aerodrome".to_owned(),
+        PlaceType::Station => "station".to_owned(),
+        PlaceType::Landmark => "attraction".to_owned(),
+        PlaceType::University => "university".to_owned(),
+        PlaceType::Hospital => "hospital".to_owned(),
+        PlaceType::PublicBuilding => "townhall".to_owned(),
+        PlaceType::Park => "park".to_owned(),
+        PlaceType::Unknown => "yes".to_owned(),
+    }
+}
 
 pub struct PackStats {
     pub record_count: usize,
@@ -155,6 +214,8 @@ pub fn pack(
     let mut skipped_empty = 0usize;
     let mut skipped_unknown = 0usize;
 
+    let mut class_type_builder = ClassTypeBuilder::new();
+
     // Stream parquet batch-by-batch — never holds all RawPlace in memory.
     // Only the key HashMaps + RecordStoreBuilder grow with data.
     {
@@ -191,6 +252,22 @@ pub fn pack(
                 .as_any().downcast_ref::<StringArray>().unwrap();
             let osm_types = batch.column_by_name("osm_type").and_then(|c|
                 c.as_any().downcast_ref::<UInt8Array>().map(|a| a.clone()));
+            // Phase 2.2 — new columns. Older parquet files (pre-bump,
+            // intermediate from `--skip-extract`) may not carry them yet,
+            // so each lookup tolerates a missing column by falling back to
+            // None across the batch.
+            let osm_class_arr = batch.column_by_name("osm_class")
+                .and_then(|c| c.as_any().downcast_ref::<StringArray>().cloned());
+            let osm_class_value_arr = batch.column_by_name("osm_class_value")
+                .and_then(|c| c.as_any().downcast_ref::<StringArray>().cloned());
+            let bbox_south_arr = batch.column_by_name("bbox_south")
+                .and_then(|c| c.as_any().downcast_ref::<Int32Array>().cloned());
+            let bbox_north_arr = batch.column_by_name("bbox_north")
+                .and_then(|c| c.as_any().downcast_ref::<Int32Array>().cloned());
+            let bbox_west_arr = batch.column_by_name("bbox_west")
+                .and_then(|c| c.as_any().downcast_ref::<Int32Array>().cloned());
+            let bbox_east_arr = batch.column_by_name("bbox_east")
+                .and_then(|c| c.as_any().downcast_ref::<Int32Array>().cloned());
 
             for i in 0..n {
                 let name = names.value(i);
@@ -240,22 +317,83 @@ pub fn pack(
                     parent_population,
                 );
 
-                let mut flags: u8 = 0;
-                if population.is_some() { flags |= 0x01; }
-                if !alt_names_arr.is_null(i) && !alt_names_arr.value(i).is_empty() { flags |= 0x02; }
-                if !old_names_arr.is_null(i) && !old_names_arr.value(i).is_empty() { flags |= 0x04; }
-                if is_relation { flags |= 0x08; }
+                let is_way = osm_types.as_ref().map_or(false, |t| t.value(i) == 1);
+
+                // Resolve (class, value) — preferred from parquet, otherwise
+                // synthesise a best-effort default from `place_type` so the
+                // API still emits a sensible Nominatim-style class/type pair
+                // for non-OSM sources.
+                let class_str = osm_class_arr.as_ref()
+                    .filter(|a| !a.is_null(i))
+                    .map(|a| a.value(i).to_owned());
+                let class_value_str = osm_class_value_arr.as_ref()
+                    .filter(|a| !a.is_null(i))
+                    .map(|a| a.value(i).to_owned());
+                let (class_str, class_value_str) = match (class_str, class_value_str) {
+                    (Some(c), Some(v)) => (c, v),
+                    (Some(c), None) => (c, default_type_for_place_type(place_type)),
+                    (None, Some(v)) => (default_class_for_place_type(place_type), v),
+                    (None, None) => (
+                        default_class_for_place_type(place_type),
+                        default_type_for_place_type(place_type),
+                    ),
+                };
+                let class_type = class_type_builder.intern(&class_str, &class_value_str);
+
+                // Resolve bbox: parquet column wins; otherwise synthesise a
+                // small ~50m bbox from the coord so every record carries
+                // at least a hint of extent for clients that fit-zoom on it.
                 let coord = Coord::new(lat, lon);
+                let bbox_from_parquet = match (
+                    bbox_south_arr.as_ref().filter(|a| !a.is_null(i)).map(|a| a.value(i)),
+                    bbox_north_arr.as_ref().filter(|a| !a.is_null(i)).map(|a| a.value(i)),
+                    bbox_west_arr .as_ref().filter(|a| !a.is_null(i)).map(|a| a.value(i)),
+                    bbox_east_arr .as_ref().filter(|a| !a.is_null(i)).map(|a| a.value(i)),
+                ) {
+                    (Some(s), Some(n), Some(w), Some(e)) => Some((s, n, w, e)),
+                    _ => None,
+                };
+                let (bbox, bbox_set) = match bbox_from_parquet {
+                    Some((s, n, w, e)) => {
+                        (BBoxDelta::encode(coord, s, n, w, e), true)
+                    }
+                    None => {
+                        // ~50m around the centroid (≈ 450 microdegrees of
+                        // latitude). Saturates safely if encode is asked
+                        // for huge values; here it's tiny.
+                        const HALF_EXTENT_UDEG: i32 = 450;
+                        (
+                            BBoxDelta::encode(
+                                coord,
+                                coord.lat - HALF_EXTENT_UDEG,
+                                coord.lat + HALF_EXTENT_UDEG,
+                                coord.lon - HALF_EXTENT_UDEG,
+                                coord.lon + HALF_EXTENT_UDEG,
+                            ),
+                            false,
+                        )
+                    }
+                };
+
+                let mut flags: u8 = 0;
+                if population.is_some() { flags |= FLAG_HAS_POPULATION; }
+                if !alt_names_arr.is_null(i) && !alt_names_arr.value(i).is_empty() { flags |= FLAG_HAS_ALT_NAME; }
+                if !old_names_arr.is_null(i) && !old_names_arr.value(i).is_empty() { flags |= FLAG_HAS_OLD_NAME; }
+                if is_relation { flags |= FLAG_IS_RELATION; }
+                if is_way { flags |= FLAG_IS_WAY; }
+                if bbox_set { flags |= FLAG_HAS_BBOX; }
 
                 let record = PlaceRecord {
                     coord,
+                    bbox,
+                    osm_id: osm_id as u64,
                     admin1_id,
                     admin2_id,
                     importance,
+                    class_type,
                     place_type,
                     flags,
                     name_offset: 0,
-                    osm_id: osm_id as u32,
                 };
 
                 // Parse alt/old/intl names from semicolon-delimited parquet strings
@@ -446,6 +584,14 @@ pub fn pack(
             }
         }
     } // parquet reader dropped, Arrow batch buffers freed
+
+    // Write class_types interning table sidecar (Phase 2.2). Loaded by the
+    // API at startup to resolve `PlaceRecord::class_type` u16 → (class, type)
+    // strings for jsonv2 / Nominatim parity.
+    let class_types_path = output_dir.join("class_types.bin");
+    class_type_builder.write(&class_types_path)
+        .map_err(|e| anyhow::anyhow!("write class_types.bin: {}", e))?;
+    info!("class_types.bin: {} interned (class, type) pairs", class_type_builder.len() - 1);
 
     // Write record store
     let record_store_path = output_dir.join("records.bin");
@@ -1128,6 +1274,9 @@ fn read_parquet(path: &Path) -> Result<Vec<RawPlace>> {
                 } else {
                     Some(wikidatas.value(i).to_owned())
                 },
+                class: None,
+                class_value: None,
+                bbox: None,
             });
         }
     }
