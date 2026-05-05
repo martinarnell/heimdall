@@ -106,6 +106,11 @@ struct CountryIndex {
     addr_index: Option<AddressIndex>,
     zip_index: Option<ZipIndex>,
     geohash_index: Option<GeohashIndex>,
+    /// Runtime point-in-polygon index for admin1/admin2 (audit #10).
+    /// Loaded from `runtime_polygons.bin` when present; `None` for old
+    /// indices, in which case /reverse falls back to the stored
+    /// nearest-centroid admin chain on the place record.
+    admin_polygons: Option<heimdall_core::admin_polygons::AdminPolygonIndex>,
     normalizer: Normalizer,
     #[allow(dead_code)]
     bbox: BoundingBox,
@@ -2478,34 +2483,47 @@ async fn reverse(
     }
 
     // Address branch: full Nominatim-shaped pyramid with road / house_number
-    // / postcode populated from the address hit, and the upper-tier admin
-    // chain borrowed from the place winner (Phase 2.1 will replace the
-    // nearest-centroid admin with proper polygon containment).
+    // / postcode populated from the address hit. Admin1/admin2 prefer
+    // polygon containment at the *house* coord (Phase 2.1) — falls
+    // back to the closest place's borrowed admin chain when the
+    // country's runtime polygon sidecar is absent or coverage misses.
     if params.zoom >= 17 {
         if let Some((addr_result, addr_d, addr_country)) = best_addr.as_ref() {
             if *addr_d <= 50.0 {
                 let cc = std::str::from_utf8(&addr_country.code).unwrap_or("??").to_lowercase();
 
-                // Borrow admin context from best_place if any. Cross-country
-                // is fine here — the place-winner is the closest hit globally,
-                // so its admin chain is the best available context.
-                let (place_admin1, place_admin2, place_settle) = best_place
+                // Borrow admin + settlement context from best_place if any.
+                // Cross-country is fine for `place_settle` — it just feeds
+                // the suburb/city/town label. Admin1/admin2 ids come back
+                // here only as fallback for the PiP step below.
+                let (fb_admin1_id, fb_admin2_id, place_settle) = best_place
                     .as_ref()
                     .map(|(rid, _, pc)| {
                         let store = pc.index.record_store();
                         let r = store.get(*rid).ok();
-                        let admin1 = r.as_ref().and_then(|r| pc.index.admin_entry(r.admin1_id).map(|a| a.name.clone()));
-                        let admin2 = r.as_ref().and_then(|r| pc.index.admin_entry(r.admin2_id).map(|a| a.name.clone()));
+                        let a1 = r.as_ref().map(|r| r.admin1_id);
+                        let a2 = r.as_ref().map(|r| r.admin2_id);
                         let settle = r.as_ref()
                             .map(|r| {
                                 let name = store.primary_name(r);
                                 place_type_to_settlement(&r.place_type, &name)
                             })
                             .unwrap_or((None, None, None, None));
-                        (admin1, admin2, settle)
+                        (a1, a2, settle)
                     })
                     .unwrap_or((None, None, (None, None, None, None)));
                 let (city, town, village, suburb) = place_settle;
+
+                // Polygon containment at the house coord on the address's
+                // own country index. Falls back to the borrowed admin ids
+                // when the country has no runtime polygon sidecar yet.
+                let (place_admin1, place_admin2) = resolve_admin_names(
+                    addr_country,
+                    fb_admin1_id,
+                    fb_admin2_id,
+                    addr_result.coord.lat_f64(),
+                    addr_result.coord.lon_f64(),
+                );
 
                 let postcode_str = if addr_result.postcode > 0 {
                     Some(format!("{}", addr_result.postcode))
@@ -2577,8 +2595,18 @@ async fn reverse(
     let record = country.index.record_store().get(record_id)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let name = country.index.record_store().primary_name(&record);
-    let admin1 = country.index.admin_entry(record.admin1_id).map(|a| a.name.clone());
-    let admin2 = country.index.admin_entry(record.admin2_id).map(|a| a.name.clone());
+    // Polygon containment at the record's coord overrides the
+    // build-time admin assignment (Phase 2.1, audit #10). Records
+    // were enriched with build-time PiP, so for places this mostly
+    // catches build/runtime divergence; the bigger win is for
+    // addresses (handled in the address branch above).
+    let (admin1, admin2) = resolve_admin_names(
+        country,
+        Some(record.admin1_id),
+        Some(record.admin2_id),
+        record.coord.lat_f64(),
+        record.coord.lon_f64(),
+    );
 
     let display_name = compose_display_name(
         Some(&name),
@@ -3084,6 +3112,40 @@ fn to_nominatim_enriched(
         }
     }
     result
+}
+
+/// Resolve admin1/admin2 names for a (lat, lon) in the given country,
+/// preferring runtime point-in-polygon containment when the index has
+/// `runtime_polygons.bin`. Falls back to the supplied admin ids
+/// (typically from a place record stored at build-time) when PiP
+/// misses or the polygon index is absent.
+///
+/// This is the audit-#10 fix path — replaces the nearest-centroid
+/// admin chain with the polygon-containment chain at query time.
+/// Removes the Lund→Staffanstorp class of error wherever the runtime
+/// index ships with polygons (Phase 2.1).
+fn resolve_admin_names(
+    country: &CountryIndex,
+    fallback_admin1: Option<u16>,
+    fallback_admin2: Option<u16>,
+    pip_lat: f64,
+    pip_lon: f64,
+) -> (Option<String>, Option<String>) {
+    let (pip1, pip2) = country
+        .admin_polygons
+        .as_ref()
+        .map(|idx| idx.containing(pip_lat, pip_lon))
+        .unwrap_or((None, None));
+
+    let admin1_id = pip1.or(fallback_admin1);
+    let admin2_id = pip2.or(fallback_admin2);
+
+    let admin1 = admin1_id
+        .and_then(|id| country.index.admin_entry(id).map(|a| a.name.clone()));
+    let admin2 = admin2_id
+        .and_then(|id| country.index.admin_entry(id).map(|a| a.name.clone()));
+
+    (admin1, admin2)
 }
 
 /// Map a `format!("{:?}", PlaceType).to_lowercase()` string to the
@@ -4011,6 +4073,23 @@ fn load_country_index_inner(path: &std::path::Path, lightweight: bool) -> anyhow
 
     let zip_index = ZipIndex::open(path).ok().flatten();
 
+    // Runtime PiP index — `runtime_polygons.bin` is the post-Phase-2.1
+    // sidecar produced by enrich.rs. Old indices (no rebuild) won't
+    // have it; loading falls through to None and /reverse keeps using
+    // the stored nearest-centroid admin chain.
+    let admin_polygons = heimdall_core::admin_polygons::AdminPolygonIndex
+        ::open(&path.join("runtime_polygons.bin"))
+        .unwrap_or_else(|e| {
+            tracing::warn!("runtime_polygons.bin failed to load ({e}); falling back to centroid admin");
+            None
+        });
+    if let Some(ref idx) = admin_polygons {
+        tracing::info!(
+            "  runtime_polygons.bin loaded: {} admin1 + {} admin2 polygons",
+            idx.admin1_count(), idx.admin2_count(),
+        );
+    }
+
     let places = index.record_count();
     let addresses = addr_index.as_ref().map(|a| a.record_count()).unwrap_or(0);
 
@@ -4025,6 +4104,7 @@ fn load_country_index_inner(path: &std::path::Path, lightweight: bool) -> anyhow
         addr_index,
         zip_index,
         geohash_index,
+        admin_polygons,
         normalizer,
         bbox,
         meta: CountryMeta {
