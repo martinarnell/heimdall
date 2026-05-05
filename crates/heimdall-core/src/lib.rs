@@ -12,6 +12,7 @@ pub mod global_index;
 pub mod ngram;
 pub mod admin_polygons;
 pub mod class_type;
+pub mod sidecar_kv;
 
 pub use types::*;
 pub use error::HeimdallError;

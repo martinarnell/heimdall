@@ -389,6 +389,16 @@ pub struct RawPlace {
     /// from `coord`).
     #[serde(default)]
     pub bbox: Option<RawBBox>,
+
+    /// Free-form OSM tags surfaced by the API as Nominatim's
+    /// `extratags` (Phase 2.3). Captured during extract from a curated
+    /// allowlist (`wikipedia`, `population`, `capital`, `ele`,
+    /// `opening_hours`, `phone`, `website`, …); pack writes them to a
+    /// per-record sidecar keyed by `record_id`. `wikidata` and
+    /// `population` may also live in the typed fields above — they are
+    /// echoed into `extratags` for serialisation parity.
+    #[serde(default)]
+    pub extratags: Vec<(String, String)>,
 }
 
 /// Pre-packed bbox (microdegrees) carried through the build pipeline.

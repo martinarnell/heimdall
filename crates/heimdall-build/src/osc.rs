@@ -354,6 +354,7 @@ fn process_element(
                     class: cls,
                     class_value: cls_val,
                     bbox: None,
+                    extratags: vec![],
                 }
             }),
         });

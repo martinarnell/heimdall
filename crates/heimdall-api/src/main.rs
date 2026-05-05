@@ -116,6 +116,12 @@ struct CountryIndex {
     /// older indices that lack `class_types.bin` get an empty table and
     /// fall back to `place_type`-derived defaults.
     class_types: heimdall_core::class_type::ClassTypeTable,
+    /// Phase 2.3 — sparse per-record sidecars surfaced by the API when
+    /// the client requests `?extratags=1` / `?namedetails=1`. Both fall
+    /// through to empty tables on legacy indices so older builds keep
+    /// answering, just without these payloads.
+    extratags: heimdall_core::sidecar_kv::KvSidecar,
+    namedetails: heimdall_core::sidecar_kv::KvSidecar,
     normalizer: Normalizer,
     #[allow(dead_code)]
     bbox: BoundingBox,
@@ -173,6 +179,18 @@ struct SearchParams {
     limit: usize,
     #[serde(default)]
     addressdetails: u8,
+
+    /// Nominatim `?extratags=1` (Phase 2.3) — attach the per-record
+    /// `extratags` map (population, wikidata, wikipedia, ele, …) to
+    /// each result. Off by default; same shape as Nominatim's payload.
+    #[serde(default)]
+    extratags: u8,
+
+    /// Nominatim `?namedetails=1` (Phase 2.3) — attach the per-record
+    /// `namedetails` map (name, name:en, alt_name, old_name, …) to
+    /// each result. Off by default; same shape as Nominatim.
+    #[serde(default)]
+    namedetails: u8,
 
     /// Nominatim's default-on dedupe (`dedupe=1`). Drop later results
     /// whose `(place_id)` or `(lat, lon, type, display_name)` was
@@ -297,6 +315,10 @@ struct LookupParams {
     format: String,
     #[serde(default)]
     addressdetails: u8,
+    #[serde(default)]
+    extratags: u8,
+    #[serde(default)]
+    namedetails: u8,
 }
 
 #[derive(Debug, Default)]
@@ -325,6 +347,18 @@ struct NominatimResult {
     importance: f64,
     match_type: Option<String>,
     address: Option<AddressDetails>,
+
+    /// Phase 2.3 — Nominatim `extratags` (population, wikidata, wikipedia,
+    /// ele, …). Populated when the client passes `?extratags=1` and the
+    /// underlying record has a payload in the per-country sidecar.
+    #[allow(dead_code)] // serialised via custom `Serialize`
+    extratags: Option<Vec<(String, String)>>,
+
+    /// Phase 2.3 — Nominatim `namedetails` (name, name:en, alt_name,
+    /// old_name, …). Populated when the client passes `?namedetails=1`
+    /// and the underlying record has a payload in the per-country sidecar.
+    #[allow(dead_code)] // serialised via custom `Serialize`
+    namedetails: Option<Vec<(String, String)>>,
 
     /// Internal: (country_index, record_id) for filters that need to
     /// re-fetch the underlying record (e.g. city-context tier). `None`
@@ -470,6 +504,22 @@ impl Serialize for NominatimResult {
         }
         if let Some(ref v) = self.address {
             m.serialize_entry("address", v)?;
+        }
+        // Phase 2.3 — emit `extratags` / `namedetails` as JSON objects
+        // (Nominatim shape). Last-write-wins on duplicate keys, which
+        // matches Nominatim's own behaviour and is fine for these maps
+        // since the build pipeline never injects duplicates.
+        if let Some(ref pairs) = self.extratags {
+            let map: serde_json::Map<String, serde_json::Value> = pairs.iter()
+                .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                .collect();
+            m.serialize_entry("extratags", &map)?;
+        }
+        if let Some(ref pairs) = self.namedetails {
+            let map: serde_json::Map<String, serde_json::Value> = pairs.iter()
+                .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                .collect();
+            m.serialize_entry("namedetails", &map)?;
         }
         m.end()
     }
@@ -987,9 +1037,9 @@ async fn search(
                                     country_code: Some("us".to_owned()),
                                 })
                             } else { None },
-                        class: None, boundingbox: None, internal: None,
+                        class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
                         });
-                        return Ok(Json(search_finalize(&params, response)));
+                        return Ok(Json(search_finalize(&params, &state, response)));
                     }
                 }
             }
@@ -1024,9 +1074,9 @@ async fn search(
                                 country_code: Some(cc),
                             })
                         } else { None },
-                    class: None, boundingbox: None, internal: None,
+                    class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
                     });
-                    return Ok(Json(search_finalize(&params, response)));
+                    return Ok(Json(search_finalize(&params, &state, response)));
                 }
             }
         }
@@ -1079,9 +1129,9 @@ async fn search(
                                 country_code: Some("us".to_owned()),
                             })
                         } else { None },
-                    class: None, boundingbox: None, internal: None,
+                    class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
                     });
-                    return Ok(Json(search_finalize(&params, response)));
+                    return Ok(Json(search_finalize(&params, &state, response)));
                 }
             }
         }
@@ -1142,9 +1192,9 @@ async fn search(
                             country_code: Some("us".to_owned()),
                         })
                     } else { None },
-                class: None, boundingbox: None, internal: None,
+                class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
                 });
-                return Ok(Json(search_finalize(&params, response)));
+                return Ok(Json(search_finalize(&params, &state, response)));
             }
         }
     }
@@ -1278,12 +1328,12 @@ async fn search(
                         country_code: Some(cc),
                     })
                 } else { None },
-            class: None, boundingbox: None, internal: None,
+            class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
             });
             postcode_match_found = true;
         }
         if postcode_match_found {
-            return Ok(Json(search_finalize(&params, response)));
+            return Ok(Json(search_finalize(&params, &state, response)));
         }
         // Postcode portion missed — could be a real-but-unindexed code
         // (we miss entire prefixes when the national address feed is broken,
@@ -1380,7 +1430,7 @@ async fn search(
                                 country_code: Some(cc),
                             })
                         } else { None },
-                    class: None, boundingbox: None, internal: None,
+                    class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
                     });
                     postcode_match_found = true;
                     break;
@@ -1391,7 +1441,7 @@ async fn search(
         // place-name lookups for the same digit string will be useless —
         // short-circuit to keep the postcode result clean.
         if postcode_match_found {
-            return Ok(Json(search_finalize(&params, response)));
+            return Ok(Json(search_finalize(&params, &state, response)));
         }
     }
 
@@ -1767,9 +1817,9 @@ async fn search(
                                 country_code: Some(cc),
                             })
                         } else { None },
-                    class: None, boundingbox: None, internal: None,
+                    class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
                     });
-                    return Ok(Json(search_finalize(&params, response)));
+                    return Ok(Json(search_finalize(&params, &state, response)));
                 }
             }
         }
@@ -1863,7 +1913,7 @@ async fn search(
                                 &r, &addr_query, country, &cc,
                             ))
                         } else { None },
-                    class: None, boundingbox: None, internal: None,
+                    class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
                     });
                 }
                 if response.iter().any(|r| r.match_type.as_deref() == Some("address")) {
@@ -1919,7 +1969,7 @@ async fn search(
                                     country_code: Some(cc.clone()),
                                 })
                             } else { None },
-                        class: None, boundingbox: None, internal: None,
+                        class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
                         });
                         break;
                     }
@@ -1999,7 +2049,7 @@ async fn search(
                                         country_code: Some(cc.clone()),
                                     })
                                 } else { None },
-                            class: None, boundingbox: None, internal: None,
+                            class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
                             });
                             break;
                         }
@@ -2527,6 +2577,10 @@ struct ReverseParams {
     format: String,
     #[serde(default)]
     addressdetails: u8,
+    #[serde(default)]
+    extratags: u8,
+    #[serde(default)]
+    namedetails: u8,
 }
 
 fn default_zoom() -> u8 { 16 }
@@ -2677,6 +2731,15 @@ async fn reverse(
                     addr.insert("country_code".into(), serde_json::Value::String(cc));
                     result["address"] = serde_json::Value::Object(addr);
                 }
+                // Phase 2.3 — synthetic address branch has no per-record
+                // sidecar; emit empty maps when the flags are set so the
+                // response shape stays Nominatim-compatible.
+                if params.extratags != 0 {
+                    result["extratags"] = serde_json::Value::Object(serde_json::Map::new());
+                }
+                if params.namedetails != 0 {
+                    result["namedetails"] = serde_json::Value::Object(serde_json::Map::new());
+                }
                 return Ok(Json(format_single_response(&params.format, result)));
             }
         }
@@ -2746,6 +2809,24 @@ async fn reverse(
         addr.insert("country".into(), serde_json::Value::String(country.name.clone()));
         addr.insert("country_code".into(), serde_json::Value::String(cc.clone()));
         result["address"] = serde_json::Value::Object(addr);
+    }
+
+    // Phase 2.3 — sidecar payloads on the place branch.
+    if params.extratags != 0 {
+        let map = country.extratags.get(record_id)
+            .map(|pairs| pairs.iter()
+                .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                .collect::<serde_json::Map<_, _>>())
+            .unwrap_or_default();
+        result["extratags"] = serde_json::Value::Object(map);
+    }
+    if params.namedetails != 0 {
+        let map = country.namedetails.get(record_id)
+            .map(|pairs| pairs.iter()
+                .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                .collect::<serde_json::Map<_, _>>())
+            .unwrap_or_default();
+        result["namedetails"] = serde_json::Value::Object(map);
     }
 
     Ok(Json(format_single_response(&params.format, result)))
@@ -2853,6 +2934,8 @@ async fn lookup(
                 importance: record.importance as f64 / 65535.0,
                 match_type: None,
                 address,
+                extratags: None,
+                namedetails: None,
                 internal: Some((country_index as u16, record_id)),
             });
         }
@@ -2934,12 +3017,23 @@ async fn lookup(
                     importance: record.importance as f64 / 65535.0,
                     match_type: None,
                     address,
+                    extratags: None,
+                    namedetails: None,
                     internal: Some((country_index as u16, record_id)),
                 });
             }
             // If not found, omit from results (don't error)
         }
     }
+
+    // Phase 2.3 — enrich with extratags / namedetails when requested.
+    let mut results = results;
+    enrich_with_sidecars(
+        &state,
+        &mut results,
+        params.extratags != 0,
+        params.namedetails != 0,
+    );
 
     Ok(Json(format_search_response(&params.format, results)))
 }
@@ -3142,6 +3236,8 @@ fn posting_to_nominatim(
         importance: record.importance as f64 / 65535.0,
         match_type: Some(match_type_str.to_owned()),
         address,
+        extratags: None,
+        namedetails: None,
         internal: Some((country_idx as u16, posting.record_id)),
     })
 }
@@ -3207,7 +3303,7 @@ fn to_nominatim(
         importance: r.importance as f64 / 65535.0,
         match_type: Some(match_type_str.to_owned()),
         address,
-        class: None, boundingbox: None, internal: None,
+        class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
     }
 }
 
@@ -3381,9 +3477,63 @@ fn format_single_response(format: &str, obj: serde_json::Value) -> serde_json::V
 
 /// Run filters then format. Single helper called at every /search
 /// return site so all eight branches honour `format=` consistently.
-fn search_finalize(params: &SearchParams, results: Vec<NominatimResult>) -> serde_json::Value {
-    let filtered = apply_search_filters(params, results);
+/// Phase 2.3: enriches each result with `extratags` / `namedetails`
+/// sidecar payloads when the corresponding query flag is set.
+fn search_finalize(params: &SearchParams, state: &AppState, results: Vec<NominatimResult>) -> serde_json::Value {
+    let mut filtered = apply_search_filters(params, results);
+    enrich_with_sidecars(
+        state,
+        &mut filtered,
+        params.extratags != 0,
+        params.namedetails != 0,
+    );
     format_search_response(&params.format, filtered)
+}
+
+/// Phase 2.3 — populate `extratags` / `namedetails` on each result from
+/// the per-country sidecars when the client opted in. Always emits an
+/// (empty) map when the flag is set so the response shape stays stable;
+/// Nominatim does the same.
+fn enrich_with_sidecars(
+    state: &AppState,
+    results: &mut [NominatimResult],
+    want_extratags: bool,
+    want_namedetails: bool,
+) {
+    if !want_extratags && !want_namedetails {
+        return;
+    }
+    for r in results.iter_mut() {
+        let (country_idx, record_id) = match r.internal {
+            Some(t) => t,
+            None => {
+                // Synthetic result (postcode / address / zip lookup). Still
+                // emit empty maps when the flag is set — clients fail-on
+                // missing-key, not on empty value.
+                if want_extratags && r.extratags.is_none() { r.extratags = Some(vec![]); }
+                if want_namedetails && r.namedetails.is_none() { r.namedetails = Some(vec![]); }
+                continue;
+            }
+        };
+        let country = match state.countries.get(country_idx as usize) {
+            Some(c) => c,
+            None => continue,
+        };
+        if want_extratags {
+            r.extratags = Some(
+                country.extratags.get(record_id)
+                    .map(|p| p.to_vec())
+                    .unwrap_or_default()
+            );
+        }
+        if want_namedetails {
+            r.namedetails = Some(
+                country.namedetails.get(record_id)
+                    .map(|p| p.to_vec())
+                    .unwrap_or_default()
+            );
+        }
+    }
 }
 
 /// Parse a comma-separated `place_id` list (from `exclude_place_ids=`)
@@ -4226,6 +4376,28 @@ fn load_country_index_inner(path: &std::path::Path, lightweight: bool) -> anyhow
         tracing::info!("  class_types.bin loaded: {} interned (class, type) pairs", class_types.len() - 1);
     }
 
+    // Phase 2.3 — extratags + namedetails sidecars. Missing files mean
+    // an older index; the API still answers /search etc. but `?extratags=1`
+    // and `?namedetails=1` simply produce no payload.
+    let extratags = heimdall_core::sidecar_kv::KvSidecar
+        ::load(&path.join("extratags.bin"))
+        .unwrap_or_else(|e| {
+            tracing::warn!("extratags.bin failed to load ({e}); responses will omit extratags payloads");
+            heimdall_core::sidecar_kv::KvSidecar::new()
+        });
+    if !extratags.is_empty() {
+        tracing::info!("  extratags.bin loaded: {} records carry extratags", extratags.len());
+    }
+    let namedetails = heimdall_core::sidecar_kv::KvSidecar
+        ::load(&path.join("namedetails.bin"))
+        .unwrap_or_else(|e| {
+            tracing::warn!("namedetails.bin failed to load ({e}); responses will omit namedetails payloads");
+            heimdall_core::sidecar_kv::KvSidecar::new()
+        });
+    if !namedetails.is_empty() {
+        tracing::info!("  namedetails.bin loaded: {} records carry namedetails", namedetails.len());
+    }
+
     let places = index.record_count();
     let addresses = addr_index.as_ref().map(|a| a.record_count()).unwrap_or(0);
 
@@ -4242,6 +4414,8 @@ fn load_country_index_inner(path: &std::path::Path, lightweight: bool) -> anyhow
         geohash_index,
         admin_polygons,
         class_types,
+        extratags,
+        namedetails,
         normalizer,
         bbox,
         meta: CountryMeta {
@@ -4600,6 +4774,8 @@ mod tests {
             format: "json".to_owned(),
             limit: 5,
             addressdetails: 0,
+            extratags: 0,
+            namedetails: 0,
             dedupe: 1,
             exclude_place_ids: None,
             featuretype: None,
@@ -4741,7 +4917,7 @@ mod tests {
             importance: 0.5,
             match_type: None,
             address: None,
-        class: None, boundingbox: None, internal: None,
+        class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
         };
         assert!(result_in_bbox(&r, &bb));
     }
@@ -4763,7 +4939,7 @@ mod tests {
             importance: 0.5,
             match_type: None,
             address: None,
-        class: None, boundingbox: None, internal: None,
+        class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
         };
         assert!(!result_in_bbox(&r, &bb));
     }
@@ -4785,7 +4961,7 @@ mod tests {
             importance: 0.5,
             match_type: None,
             address: None,
-        class: None, boundingbox: None, internal: None,
+        class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
         };
         assert!(result_in_bbox(&r, &bb));
     }
@@ -4807,7 +4983,7 @@ mod tests {
             importance: 0.5,
             match_type: None,
             address: None,
-        class: None, boundingbox: None, internal: None,
+        class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
         };
         assert!(!result_in_bbox(&r, &bb));
     }
@@ -5007,7 +5183,7 @@ mod tests {
             importance: 0.5,
             match_type: None,
             address: None,
-        class: None, boundingbox: None, internal: None,
+        class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
         };
         let json = serde_json::to_string(&r).unwrap();
         assert!(!json.contains("address"));
@@ -5041,7 +5217,7 @@ mod tests {
                 country: Some("Sweden".into()),
                 country_code: Some("se".into()),
             }),
-        class: None, boundingbox: None, internal: None,
+        class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
         };
         let json = serde_json::to_string(&r).unwrap();
         assert!(json.contains("\"address\""));
@@ -5059,7 +5235,7 @@ mod tests {
             display_name: "Test".into(),
             lat: "0".into(), lon: "0".into(),
             place_type: "city".into(),
-            importance: 0.5, match_type: None, address: None, class: None, boundingbox: None, internal: None,
+            importance: 0.5, match_type: None, address: None, class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
         };
         let v: serde_json::Value = serde_json::to_value(&r).unwrap();
         assert_eq!(v["licence"], NOMINATIM_LICENCE);
@@ -5092,7 +5268,7 @@ mod tests {
             display_name: "Test".into(),
             lat: "0".into(), lon: "0".into(),
             place_type: "city".into(),
-            importance: 0.5, match_type: None, address: None, class: None, boundingbox: None, internal: None,
+            importance: 0.5, match_type: None, address: None, class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
         };
         let v: serde_json::Value = serde_json::to_value(&r).unwrap();
         assert_eq!(v["place_rank"], 16);
@@ -5171,7 +5347,7 @@ mod tests {
             importance: 0.7,
             match_type: None,
             address: None,
-            class: None, boundingbox: None, internal: None,
+            class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
         }
     }
 
@@ -5271,6 +5447,56 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // extratags / namedetails serialization (Phase 2.3, audit #18 / #19)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn extratags_absent_when_field_is_none() {
+        let r = mk_simple_result();
+        let v = serde_json::to_value(r).unwrap();
+        assert!(v.get("extratags").is_none(),
+            "extratags must be omitted when the result wasn't enriched");
+        assert!(v.get("namedetails").is_none(),
+            "namedetails must be omitted when the result wasn't enriched");
+    }
+
+    #[test]
+    fn extratags_serialized_as_object() {
+        let mut r = mk_simple_result();
+        r.extratags = Some(vec![
+            ("population".into(), "1500000".into()),
+            ("wikidata".into(), "Q1486".into()),
+        ]);
+        r.namedetails = Some(vec![
+            ("name".into(), "Stockholm".into()),
+            ("name:en".into(), "Stockholm".into()),
+            ("name:de".into(), "Stockholm".into()),
+        ]);
+        let v = serde_json::to_value(r).unwrap();
+        let extra = v.get("extratags").expect("extratags emitted");
+        assert!(extra.is_object(), "extratags is a JSON object, not an array");
+        assert_eq!(extra["population"], "1500000");
+        assert_eq!(extra["wikidata"], "Q1486");
+        let nd = v.get("namedetails").expect("namedetails emitted");
+        assert!(nd.is_object());
+        assert_eq!(nd["name"], "Stockholm");
+        assert_eq!(nd["name:en"], "Stockholm");
+        assert_eq!(nd["name:de"], "Stockholm");
+    }
+
+    #[test]
+    fn extratags_empty_payload_emits_empty_object() {
+        // ?extratags=1 against a record with no extratags must still emit
+        // `"extratags": {}` so clients keying on the field don't break.
+        let mut r = mk_simple_result();
+        r.extratags = Some(vec![]);
+        r.namedetails = Some(vec![]);
+        let v = serde_json::to_value(r).unwrap();
+        assert_eq!(v["extratags"], serde_json::json!({}));
+        assert_eq!(v["namedetails"], serde_json::json!({}));
+    }
+
+    // -----------------------------------------------------------------------
     // Search post-filters (TODO_NOMINATIM_PARITY Phase 1.5: #20-23)
     // -----------------------------------------------------------------------
 
@@ -5286,7 +5512,7 @@ mod tests {
             importance: 0.5,
             match_type: None,
             address: None,
-            class: None, boundingbox: None, internal: None,
+            class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
         }
     }
 

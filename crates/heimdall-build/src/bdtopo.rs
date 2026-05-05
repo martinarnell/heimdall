@@ -130,6 +130,7 @@ pub fn to_raw_place(p: BdtopoPlace) -> heimdall_core::types::RawPlace {
         class: Some("place".to_owned()),
         class_value: None,
         bbox: None,
+        extratags: vec![],
     }
 }
 
