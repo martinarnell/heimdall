@@ -6,14 +6,22 @@
 ///   - Values are u64 (we use record_id: u32, cast to u64)
 ///
 /// Strategy:
-///   1. Load all places from Parquet
+///   1. Stream places from Parquet
 ///   2. Generate all normalized name variants (via heimdall-normalize)
-///   3. Collect (normalized_key, record_id) pairs
-///   4. Sort by key
-///   5. Deduplicate — for collisions, keep highest importance record
-///   6. Feed sorted pairs into FstMapBuilder
+///   3. Push (normalized_key, (record_id, importance)) pairs into a
+///      `SortBuffer` (Phase 5 follow-up: replaces the prior TSV-on-disk +
+///      GNU `sort` shell-out)
+///   4. `SortBuffer::finish()` merges/sorts; we stream the sorted pairs
+///   5. Group by key — for collisions, keep the highest-importance record
+///      and write a sidecar posting list (top-N by importance desc)
+///   6. Feed sorted (key, posting_offset) pairs into MapBuilder
+///
+/// Byte-identity contract: the FST output is the same bytes that the old
+/// TSV+GNU-sort pipeline emitted. Stable sort by raw key bytes preserves
+/// push order between equal keys; the per-key dedup/truncation logic is
+/// unchanged. Pinned by the
+/// `pack_fst_from_typed_buffer_matches_legacy_tsv_path` unit test.
 
-use std::io::Write;
 use std::path::Path;
 use std::collections::HashMap;
 use anyhow::Result;
@@ -26,6 +34,7 @@ use heimdall_core::reverse::GeohashIndexBuilder;
 use heimdall_core::class_type::ClassTypeBuilder;
 use heimdall_normalize::Normalizer;
 use crate::enrich::EnrichResult;
+use crate::sort_buffer::{SortBuffer, PackOptions};
 
 /// Best-effort `(class, type)` defaults synthesised from `PlaceType` for
 /// records whose source (Photon snapshots, govt importers, synthetic
@@ -183,29 +192,30 @@ pub fn pack(
     };
     let mut record_builder = RecordStoreBuilder::new();
 
-    // key: normalized_name, value: (record_id, importance)
-    // For collisions, keep the more important record
-    // (record_id, importance, is_populated_place)
-    // Disk-backed FST key collection — write to temp files instead of HashMap.
-    // Sort externally and build FST from the sorted stream.
-    let key_dir = output_dir.join(".fst_keys_tmp");
-    std::fs::create_dir_all(&key_dir)?;
-    let mut exact_writer = std::io::BufWriter::with_capacity(
-        4 * 1024 * 1024,
-        std::fs::File::create(key_dir.join("exact.tsv"))?,
-    );
-    let mut phonetic_writer = std::io::BufWriter::with_capacity(
-        4 * 1024 * 1024,
-        std::fs::File::create(key_dir.join("phonetic.tsv"))?,
-    );
-    // Trigram TSV: same `key\trecord_id\timportance\tpop_flag` format as
-    // exact/phonetic so build_fst_from_disk reads it unmodified. Each
-    // indexed name expands to ~name_len trigrams, so the file is ~10×
-    // bigger than exact.tsv pre-sort.
-    let mut ngram_writer = std::io::BufWriter::with_capacity(
-        4 * 1024 * 1024,
-        std::fs::File::create(key_dir.join("ngram.tsv"))?,
-    );
+    // FST key collection — push (key, (record_id, importance)) pairs into
+    // a typed SortBuffer per FST. SortBuffer's in-memory fast path keeps
+    // small countries spill-free; for huge countries (US) it spills to
+    // scratch with bounded RAM. Replaces the prior TSV-on-disk + GNU `sort`
+    // shell-out (Phase 5 follow-up — see TODO_REBUILD_MODES.md).
+    //
+    // pop_flag is intentionally NOT carried — the legacy TSV stored it as
+    // column 4 but the read side parsed only columns 1-3, so it was dead
+    // weight. Dropping it shrinks the per-pair budget by 1 byte plus the
+    // postcard tag in spill files.
+    let pack_opts = PackOptions::default_for(output_dir);
+    std::fs::create_dir_all(&pack_opts.scratch_dir)?;
+    // Per-FST scratch sub-dirs so concurrent finish() merges don't hit the
+    // same nonce filenames. Cheap (just mkdir).
+    let exact_scratch = pack_opts.scratch_dir.join("pack_exact");
+    let phonetic_scratch = pack_opts.scratch_dir.join("pack_phonetic");
+    let ngram_scratch = pack_opts.scratch_dir.join("pack_ngram");
+    let mut exact_buf = SortBuffer::<(u32, u16)>::new(pack_opts.sort_mem, &exact_scratch)?;
+    let mut phonetic_buf = SortBuffer::<(u32, u16)>::new(pack_opts.sort_mem, &phonetic_scratch)?;
+    // Trigrams expand each name to ~name_len entries, so this buffer
+    // reaches ~10× the exact one in a real pack. Same mem_limit applies
+    // to each buffer independently — the spill machinery in SortBuffer
+    // handles the size growth without changing call-site code.
+    let mut ngram_buf = SortBuffer::<(u32, u16)>::new(pack_opts.sort_mem, &ngram_scratch)?;
     let mut exact_count = 0usize;
     let mut phonetic_count = 0usize;
     let mut ngram_count = 0usize;
@@ -421,18 +431,10 @@ pub fn pack(
 
                 geohash_builder.add(lat, lon, id);
 
-                let is_populated = matches!(
-                    place_type,
-                    PlaceType::City | PlaceType::Town | PlaceType::Village
-                        | PlaceType::Suburb | PlaceType::Hamlet
-                );
-                let collision_score = (is_populated, importance);
-
-                // Write FST keys to disk — collision resolution happens after sort
-                let pop_flag: u8 = if is_populated { 1 } else { 0 };
-
+                // Push FST keys into typed SortBuffers. Collision resolution
+                // happens at the FST-build site after a stable sort.
                 let primary_lower = name.to_lowercase();
-                write!(exact_writer, "{}\t{}\t{}\t{}\n", primary_lower, id, importance, pop_flag)?;
+                exact_buf.push(primary_lower.as_bytes().to_vec(), (id, importance))?;
                 exact_count += 1;
 
                 // Per-word indexing: multi-word names also get an FST key
@@ -448,8 +450,8 @@ pub fn pack(
                 // lists where the right record drowns in 1000s of
                 // unrelated hits.
                 index_per_word_keys(
-                    &mut exact_writer, &mut exact_count, &primary_lower,
-                    id, importance, pop_flag, normalizer.stopwords(),
+                    &mut exact_buf, &mut exact_count, &primary_lower,
+                    id, importance, normalizer.stopwords(),
                 )?;
 
                 // Split compound bilingual names (e.g. "Casteddu/Cagliari", "Bolzano - Bozen")
@@ -468,13 +470,13 @@ pub fn pack(
                         for part in primary_lower.split(sep) {
                             let part = part.trim();
                             if !part.is_empty() && part != primary_lower {
-                                write!(exact_writer, "{}\t{}\t{}\t{}\n", part, id, split_demoted, pop_flag)?;
+                                exact_buf.push(part.as_bytes().to_vec(), (id, split_demoted))?;
                                 exact_count += 1;
                                 // Also write normalized (diacritics-stripped) variants of each split part
                                 // so that e.g. "san sebastián" also generates "san sebastian"
                                 for norm_part in normalizer.normalize(part) {
                                     if !norm_part.is_empty() && norm_part != part {
-                                        write!(exact_writer, "{}\t{}\t{}\t{}\n", norm_part, id, split_demoted, pop_flag)?;
+                                        exact_buf.push(norm_part.as_bytes().to_vec(), (id, split_demoted))?;
                                         exact_count += 1;
                                     }
                                 }
@@ -486,14 +488,14 @@ pub fn pack(
                 for alt in &all_alts {
                     let key = alt.to_lowercase();
                     if !key.is_empty() {
-                        write!(exact_writer, "{}\t{}\t{}\t{}\n", key, id, importance, pop_flag)?;
+                        exact_buf.push(key.as_bytes().to_vec(), (id, importance))?;
                         exact_count += 1;
                         // Per-word entries for the alt too, so individual
                         // words from name:* / old_name / official_name
                         // also resolve.
                         index_per_word_keys(
-                            &mut exact_writer, &mut exact_count, &key,
-                            id, importance, pop_flag, normalizer.stopwords(),
+                            &mut exact_buf, &mut exact_count, &key,
+                            id, importance, normalizer.stopwords(),
                         )?;
                         // Also write a stop-word-stripped variant. "ABBA
                         // The Museum" → "abba museum" so the canonical
@@ -502,7 +504,7 @@ pub fn pack(
                         // in English/Swedish/German.
                         let no_stops = strip_stopwords(&key);
                         if no_stops != key && !no_stops.is_empty() {
-                            write!(exact_writer, "{}\t{}\t{}\t{}\n", no_stops, id, importance, pop_flag)?;
+                            exact_buf.push(no_stops.into_bytes(), (id, importance))?;
                             exact_count += 1;
                         }
                         // Run the alt name through the normalizer too so
@@ -511,7 +513,7 @@ pub fn pack(
                         for candidate in normalizer.normalize(alt) {
                             let cand_lower = candidate.to_lowercase();
                             if !cand_lower.is_empty() && cand_lower != key {
-                                write!(exact_writer, "{}\t{}\t{}\t{}\n", cand_lower, id, importance, pop_flag)?;
+                                exact_buf.push(cand_lower.into_bytes(), (id, importance))?;
                                 exact_count += 1;
                             }
                         }
@@ -521,14 +523,14 @@ pub fn pack(
                 let candidates = normalizer.normalize(name);
                 for candidate in &candidates {
                     if !candidate.is_empty() {
-                        write!(exact_writer, "{}\t{}\t{}\t{}\n", candidate, id, importance, pop_flag)?;
+                        exact_buf.push(candidate.as_bytes().to_vec(), (id, importance))?;
                         exact_count += 1;
                     }
                 }
 
                 let phonetic_key = normalizer.phonetic_key(name);
                 if !phonetic_key.is_empty() {
-                    write!(phonetic_writer, "{}\t{}\t{}\t{}\n", phonetic_key, id, importance, pop_flag)?;
+                    phonetic_buf.push(phonetic_key.into_bytes(), (id, importance))?;
                     phonetic_count += 1;
                 }
 
@@ -542,11 +544,11 @@ pub fn pack(
                 // variants: trigrams already implicitly handle partial
                 // tokens. Adding extra variants blows up the FST without
                 // meaningful recall gain.
-                let trigrams_emit = |writer: &mut std::io::BufWriter<std::fs::File>,
-                                     counter: &mut usize,
-                                     text: &str,
-                                     imp: u16|
-                 -> std::io::Result<()> {
+                let mut trigrams_emit = |buf: &mut SortBuffer<(u32, u16)>,
+                                         counter: &mut usize,
+                                         text: &str,
+                                         imp: u16|
+                 -> Result<()> {
                     if text.is_empty() || text.len() > 80 { return Ok(()); }
                     for tg in heimdall_core::ngram::trigrams(text) {
                         // Skip the boundary-only trigram for very common
@@ -555,13 +557,13 @@ pub fn pack(
                         if tg.len() == 3 && tg.starts_with('^') && tg.ends_with('$') {
                             continue;
                         }
-                        write!(writer, "{}\t{}\t{}\t{}\n", tg, id, imp, pop_flag)?;
+                        buf.push(tg.into_bytes(), (id, imp))?;
                         *counter += 1;
                     }
                     Ok(())
                 };
 
-                trigrams_emit(&mut ngram_writer, &mut ngram_count,
+                trigrams_emit(&mut ngram_buf, &mut ngram_count,
                               &primary_lower, importance)?;
 
                 // Diacritic-stripped + abbreviation-expanded variants of
@@ -569,7 +571,7 @@ pub fn pack(
                 // are derived forms.
                 for candidate in &candidates {
                     if !candidate.is_empty() && candidate != &primary_lower {
-                        trigrams_emit(&mut ngram_writer, &mut ngram_count,
+                        trigrams_emit(&mut ngram_buf, &mut ngram_count,
                                       candidate, importance.saturating_sub(50))?;
                     }
                 }
@@ -578,7 +580,7 @@ pub fn pack(
                 // name takes precedence on ties.
                 for alt in &all_alts {
                     let alt_lower = alt.to_lowercase();
-                    trigrams_emit(&mut ngram_writer, &mut ngram_count,
+                    trigrams_emit(&mut ngram_buf, &mut ngram_count,
                                   &alt_lower, importance.saturating_sub(50))?;
                 }
             }
@@ -609,24 +611,20 @@ pub fn pack(
         info!("Geohash compressed: {:.1} KB → {:.1} KB", geo_orig as f64 / 1024.0, geo_comp as f64 / 1024.0);
     }
 
-    // Flush key writers
-    exact_writer.flush()?;
-    phonetic_writer.flush()?;
-    ngram_writer.flush()?;
-    drop(exact_writer);
-    drop(phonetic_writer);
-    drop(ngram_writer);
-    info!("FST keys written: {} exact, {} phonetic, {} ngram",
+    info!("FST keys collected: {} exact, {} phonetic, {} ngram",
         exact_count, phonetic_count, ngram_count);
+    info!(
+        "SortBuffer state — exact: {} runs / {} bytes spilled; phonetic: {} runs / {} bytes; ngram: {} runs / {} bytes",
+        exact_buf.run_count(), exact_buf.spilled_bytes(),
+        phonetic_buf.run_count(), phonetic_buf.spilled_bytes(),
+        ngram_buf.run_count(), ngram_buf.spilled_bytes(),
+    );
 
-    // Build 3 FSTs in parallel
-    let exact_tsv = key_dir.join("exact.tsv");
-    let phonetic_tsv = key_dir.join("phonetic.tsv");
-    let ngram_tsv = key_dir.join("ngram.tsv");
+    // Build 3 FSTs in parallel from the SortBuffers' merged streams.
     let fst_exact_path = output_dir.join("fst_exact.fst");
     let fst_phonetic_path = output_dir.join("fst_phonetic.fst");
     let fst_ngram_path = output_dir.join("fst_ngram.fst");
-    // Sidecar posting-list files. Hold up to N=8 record_ids per key
+    // Sidecar posting-list files. Hold up to N=16 record_ids per key
     // (sorted by importance desc) so same-name alternates can survive
     // FST collision resolution. The FST value becomes the byte offset
     // into the sidecar; if the sidecar is missing, the FST value is
@@ -637,7 +635,7 @@ pub fn pack(
 
     let (res_exact, (res_phonetic, res_ngram)) = rayon::join(
         || -> Result<usize> {
-            let bytes = build_fst_from_disk(&exact_tsv, &fst_exact_path, Some(&record_lists_exact_path))?;
+            let bytes = build_fst_from_buf(exact_buf, &fst_exact_path, Some(&record_lists_exact_path))?;
             heimdall_core::compressed_io::compress_file(&fst_exact_path, 19)?;
             if record_lists_exact_path.exists() {
                 heimdall_core::compressed_io::compress_file(&record_lists_exact_path, 19)?;
@@ -646,7 +644,7 @@ pub fn pack(
         },
         || rayon::join(
             || -> Result<usize> {
-                let bytes = build_fst_from_disk(&phonetic_tsv, &fst_phonetic_path, Some(&record_lists_phonetic_path))?;
+                let bytes = build_fst_from_buf(phonetic_buf, &fst_phonetic_path, Some(&record_lists_phonetic_path))?;
                 heimdall_core::compressed_io::compress_file(&fst_phonetic_path, 19)?;
                 if record_lists_phonetic_path.exists() {
                     heimdall_core::compressed_io::compress_file(&record_lists_phonetic_path, 19)?;
@@ -660,7 +658,7 @@ pub fn pack(
                 // cap is too tight; use a larger ngram-specific cap so
                 // we keep enough candidates per trigram to still find a
                 // good intersection while bounding worst-case memory.
-                let bytes = build_fst_from_disk_ngram(&ngram_tsv, &fst_ngram_path, &record_lists_ngram_path)?;
+                let bytes = build_fst_from_buf_ngram(ngram_buf, &fst_ngram_path, &record_lists_ngram_path)?;
                 heimdall_core::compressed_io::compress_file(&fst_ngram_path, 19)?;
                 if record_lists_ngram_path.exists() {
                     heimdall_core::compressed_io::compress_file(&record_lists_ngram_path, 19)?;
@@ -676,8 +674,16 @@ pub fn pack(
         fst_exact_bytes as f64 / 1e6, fst_phonetic_bytes as f64 / 1e6,
         fst_ngram_bytes as f64 / 1e6);
 
-    // Clean up temp key files
-    std::fs::remove_dir_all(&key_dir).ok();
+    // Clean up per-FST scratch sub-dirs (now empty — MergedIter::Drop
+    // already removed any spill files). Best-effort: a leftover dir
+    // doesn't break the index.
+    std::fs::remove_dir_all(&exact_scratch).ok();
+    std::fs::remove_dir_all(&phonetic_scratch).ok();
+    std::fs::remove_dir_all(&ngram_scratch).ok();
+    // Also try to remove the parent .scratch/ dir if empty (it'll be
+    // empty unless something else co-occupies it, which shouldn't
+    // happen for pack.rs invocations).
+    std::fs::remove_dir(&pack_opts.scratch_dir).ok();
 
     info!(
         "Packed {} records (skipped {} empty-name, {} unknown-type from {} total)",
@@ -710,15 +716,21 @@ const MAX_POSTINGS_PER_KEY: usize = 16;
 /// the right needle.
 const MAX_NGRAM_POSTINGS_PER_KEY: usize = 4096;
 
-/// Trigram-specific FST builder. Same disk-sort + group-by-key pattern as
-/// `build_fst_from_disk` but with a much larger posting cap because
-/// common trigrams legitimately appear in thousands of names. Posting
-/// list values are u32 record_ids (no importance stored separately —
-/// they're already sorted by importance desc when written).
-fn build_fst_from_disk_ngram(tsv_path: &Path, fst_path: &Path, sidecar_path: &Path) -> Result<usize> {
-    use std::io::{BufRead, Write};
+/// Build the trigram FST from a `SortBuffer<(u32, u16)>` of
+/// `(key, (record_id, importance))` pairs.
+///
+/// Same group-by-key + top-N posting-list pattern as `build_fst_from_buf`
+/// but with `MAX_NGRAM_POSTINGS_PER_KEY` (4096) instead of the smaller
+/// `MAX_POSTINGS_PER_KEY` (16) — common letter pairs like `^st` appear
+/// in thousands of records and need a much larger cap.
+fn build_fst_from_buf_ngram(
+    buf: SortBuffer<(u32, u16)>,
+    fst_path: &Path,
+    sidecar_path: &Path,
+) -> Result<usize> {
+    use std::io::Write;
 
-    if !tsv_path.exists() || std::fs::metadata(tsv_path)?.len() == 0 {
+    if buf.is_empty() {
         let file = std::io::BufWriter::new(std::fs::File::create(fst_path)?);
         let mut builder = MapBuilder::new(file)?;
         builder.finish()?;
@@ -726,18 +738,6 @@ fn build_fst_from_disk_ngram(tsv_path: &Path, fst_path: &Path, sidecar_path: &Pa
         return Ok(std::fs::metadata(fst_path)?.len() as usize);
     }
 
-    let sorted_path = tsv_path.with_extension("sorted.tsv");
-    let sort_status = std::process::Command::new("sort")
-        .env("LC_ALL", "C")
-        .args(["-t", "\t", "-k1,1", "-s", "--buffer-size=256M"])
-        .arg(tsv_path)
-        .stdout(std::fs::File::create(&sorted_path)?)
-        .status()?;
-    if !sort_status.success() {
-        anyhow::bail!("sort command failed for {}", tsv_path.display());
-    }
-
-    let reader = std::io::BufReader::new(std::fs::File::open(&sorted_path)?);
     let file = std::io::BufWriter::new(std::fs::File::create(fst_path)?);
     let mut builder = MapBuilder::new(file)?;
 
@@ -747,15 +747,17 @@ fn build_fst_from_disk_ngram(tsv_path: &Path, fst_path: &Path, sidecar_path: &Pa
     );
     let mut sidecar_offset: u64 = 0;
 
-    let mut prev_key = String::new();
+    let mut prev_key: Vec<u8> = Vec::new();
     let mut group: Vec<(u32, u16)> = Vec::new();
+    let mut have_prev = false;
 
-    let flush_group = |builder: &mut MapBuilder<std::io::BufWriter<std::fs::File>>,
-                       sidecar_writer: &mut std::io::BufWriter<std::fs::File>,
-                       sidecar_offset: &mut u64,
-                       key: &str,
-                       group: &mut Vec<(u32, u16)>|
-     -> Result<()> {
+    fn flush_ngram_group(
+        builder: &mut MapBuilder<std::io::BufWriter<std::fs::File>>,
+        sidecar_writer: &mut std::io::BufWriter<std::fs::File>,
+        sidecar_offset: &mut u64,
+        key: &[u8],
+        group: &mut Vec<(u32, u16)>,
+    ) -> Result<()> {
         if key.is_empty() || group.is_empty() {
             return Ok(());
         }
@@ -775,54 +777,53 @@ fn build_fst_from_disk_ngram(tsv_path: &Path, fst_path: &Path, sidecar_path: &Pa
             sidecar_writer.write_all(&id.to_le_bytes())?;
         }
         *sidecar_offset += 2 + (group.len() as u64) * 4;
-        builder.insert(key.as_bytes(), offset)?;
+        builder.insert(key, offset)?;
 
         group.clear();
         Ok(())
-    };
+    }
 
-    for line in reader.lines() {
-        let line = line?;
-        let parts: Vec<&str> = line.split('\t').collect();
-        if parts.len() < 4 { continue; }
-
-        let key = parts[0];
-        let id: u32 = parts[1].parse().unwrap_or(0);
-        let importance: u16 = parts[2].parse().unwrap_or(0);
-
-        if key != prev_key {
-            flush_group(&mut builder, &mut sidecar_writer, &mut sidecar_offset, &prev_key, &mut group)?;
-            prev_key = key.to_owned();
+    for entry in buf.finish()? {
+        let (key, (id, importance)) = entry?;
+        if !have_prev {
+            prev_key = key;
+            have_prev = true;
+        } else if key != prev_key {
+            flush_ngram_group(&mut builder, &mut sidecar_writer, &mut sidecar_offset, &prev_key, &mut group)?;
+            prev_key = key;
         }
         group.push((id, importance));
     }
-    flush_group(&mut builder, &mut sidecar_writer, &mut sidecar_offset, &prev_key, &mut group)?;
+    if have_prev {
+        flush_ngram_group(&mut builder, &mut sidecar_writer, &mut sidecar_offset, &prev_key, &mut group)?;
+    }
 
     builder.finish()?;
     sidecar_writer.flush()?;
 
-    std::fs::remove_file(&sorted_path).ok();
-    std::fs::remove_file(tsv_path).ok();
-
     Ok(std::fs::metadata(fst_path)?.len() as usize)
 }
 
-/// Build FST from a disk TSV file: external sort → group by key → write top-N postings
-/// to sidecar → stream offsets into FST.
-///
-/// TSV format: `key\trecord_id\timportance\tis_populated`
+/// Build the exact / phonetic FST from a `SortBuffer<(u32, u16)>` of
+/// `(key, (record_id, importance))` pairs.
 ///
 /// When `sidecar_path` is `Some`, each FST value is the byte offset of a posting list
 /// in the sidecar. Each posting list begins with a `u16` count followed by
 /// `count × u32` record_ids, sorted by importance descending and capped at
 /// `MAX_POSTINGS_PER_KEY`. When `sidecar_path` is `None`, the legacy single-id
-/// format is written (FST value = record_id) — used for the empty-ngram path.
+/// format is written (FST value = record_id) — used for the empty path.
 ///
-/// Memory: ~sort_chunk_size (auto-tuned) + FST builder streaming buffer.
-fn build_fst_from_disk(tsv_path: &Path, fst_path: &Path, sidecar_path: Option<&Path>) -> Result<usize> {
-    use std::io::{BufRead, Write};
+/// Memory: SortBuffer's mem_limit (default 256 MB) + the FST builder
+/// streaming buffer. SortBuffer spills to disk when the in-memory batch
+/// crosses the budget; small countries stay entirely in RAM.
+fn build_fst_from_buf(
+    buf: SortBuffer<(u32, u16)>,
+    fst_path: &Path,
+    sidecar_path: Option<&Path>,
+) -> Result<usize> {
+    use std::io::Write;
 
-    if !tsv_path.exists() || std::fs::metadata(tsv_path)?.len() == 0 {
+    if buf.is_empty() {
         // Empty — write empty FST and (optionally) empty sidecar
         let file = std::io::BufWriter::new(std::fs::File::create(fst_path)?);
         let mut builder = MapBuilder::new(file)?;
@@ -833,26 +834,11 @@ fn build_fst_from_disk(tsv_path: &Path, fst_path: &Path, sidecar_path: Option<&P
         return Ok(std::fs::metadata(fst_path)?.len() as usize);
     }
 
-    // External sort the TSV by key (first column)
-    // Use the system `sort` command — it handles external sorting with bounded memory
-    let sorted_path = tsv_path.with_extension("sorted.tsv");
-    let sort_status = std::process::Command::new("sort")
-        .env("LC_ALL", "C")
-        .args(["-t", "\t", "-k1,1", "-s", "--buffer-size=128M"])
-        .arg(tsv_path)
-        .stdout(std::fs::File::create(&sorted_path)?)
-        .status()?;
-    if !sort_status.success() {
-        anyhow::bail!("sort command failed for {}", tsv_path.display());
-    }
-
-    // Stream sorted file → group by key → write postings → FST
-    let reader = std::io::BufReader::new(std::fs::File::open(&sorted_path)?);
     let file = std::io::BufWriter::new(std::fs::File::create(fst_path)?);
     let mut builder = MapBuilder::new(file)?;
 
     // Sidecar writer (optional). When `None` we emit single-id values
-    // (legacy path, used only for the empty ngram FST).
+    // (legacy path, used only for the empty ngram fallback).
     let mut sidecar_writer: Option<std::io::BufWriter<std::fs::File>> = match sidecar_path {
         Some(p) => Some(std::io::BufWriter::with_capacity(
             4 * 1024 * 1024,
@@ -862,18 +848,20 @@ fn build_fst_from_disk(tsv_path: &Path, fst_path: &Path, sidecar_path: Option<&P
     };
     let mut sidecar_offset: u64 = 0;
 
-    let mut prev_key = String::new();
+    let mut prev_key: Vec<u8> = Vec::new();
+    let mut have_prev = false;
     // Buffered postings for the current key: (record_id, importance).
     // Sorted by importance desc on group close, deduped by record_id
     // (highest importance wins), then truncated to MAX_POSTINGS_PER_KEY.
     let mut group: Vec<(u32, u16)> = Vec::new();
 
-    let flush_group = |builder: &mut MapBuilder<std::io::BufWriter<std::fs::File>>,
-                       sidecar_writer: &mut Option<std::io::BufWriter<std::fs::File>>,
-                       sidecar_offset: &mut u64,
-                       key: &str,
-                       group: &mut Vec<(u32, u16)>|
-     -> Result<()> {
+    fn flush_group(
+        builder: &mut MapBuilder<std::io::BufWriter<std::fs::File>>,
+        sidecar_writer: &mut Option<std::io::BufWriter<std::fs::File>>,
+        sidecar_offset: &mut u64,
+        key: &[u8],
+        group: &mut Vec<(u32, u16)>,
+    ) -> Result<()> {
         if key.is_empty() || group.is_empty() {
             return Ok(());
         }
@@ -899,44 +887,38 @@ fn build_fst_from_disk(tsv_path: &Path, fst_path: &Path, sidecar_path: Option<&P
                     w.write_all(&id.to_le_bytes())?;
                 }
                 *sidecar_offset += 2 + (group.len() as u64) * 4;
-                builder.insert(key.as_bytes(), offset)?;
+                builder.insert(key, offset)?;
             }
             None => {
                 // Legacy single-id path. Pick the first (highest-importance) entry.
-                builder.insert(key.as_bytes(), group[0].0 as u64)?;
+                builder.insert(key, group[0].0 as u64)?;
             }
         }
 
         group.clear();
         Ok(())
-    };
+    }
 
-    for line in reader.lines() {
-        let line = line?;
-        let parts: Vec<&str> = line.split('\t').collect();
-        if parts.len() < 4 { continue; }
-
-        let key = parts[0];
-        let id: u32 = parts[1].parse().unwrap_or(0);
-        let importance: u16 = parts[2].parse().unwrap_or(0);
-
-        if key != prev_key {
+    for entry in buf.finish()? {
+        let (key, (id, importance)) = entry?;
+        if !have_prev {
+            prev_key = key;
+            have_prev = true;
+        } else if key != prev_key {
             flush_group(&mut builder, &mut sidecar_writer, &mut sidecar_offset, &prev_key, &mut group)?;
-            prev_key = key.to_owned();
+            prev_key = key;
         }
         group.push((id, importance));
     }
     // Flush the last group
-    flush_group(&mut builder, &mut sidecar_writer, &mut sidecar_offset, &prev_key, &mut group)?;
+    if have_prev {
+        flush_group(&mut builder, &mut sidecar_writer, &mut sidecar_offset, &prev_key, &mut group)?;
+    }
 
     builder.finish()?;
     if let Some(mut w) = sidecar_writer {
         w.flush()?;
     }
-
-    // Clean up
-    std::fs::remove_file(&sorted_path).ok();
-    std::fs::remove_file(tsv_path).ok();
 
     Ok(std::fs::metadata(fst_path)?.len() as usize)
 }
@@ -969,15 +951,14 @@ fn build_fst_from_disk(tsv_path: &Path, fst_path: &Path, sidecar_path: Option<&P
 /// - Tokens of 2 chars or shorter (i, av, …) — too dense to be useful.
 /// - The compound-bilingual sep tokens already handled by the slash
 ///   loop above are NOT excluded here; per-word indexing is additive.
-fn index_per_word_keys<W: std::io::Write>(
-    writer: &mut W,
+fn index_per_word_keys(
+    buf: &mut SortBuffer<(u32, u16)>,
     counter: &mut usize,
     primary_lower: &str,
     record_id: u32,
     importance: u16,
-    pop_flag: u8,
     stopwords: &[String],
-) -> std::io::Result<()> {
+) -> Result<()> {
     let words: Vec<&str> = primary_lower.split_whitespace().collect();
     if words.len() < 2 { return Ok(()); }
     // Heavy demotion. Per-word entries must never outrank a full-name
@@ -994,7 +975,7 @@ fn index_per_word_keys<W: std::io::Write>(
         let w = word.trim_matches(|c: char| !c.is_alphanumeric());
         if w.len() <= 2 { continue; }
         if stopwords.iter().any(|sw| sw == w) { continue; }
-        write!(writer, "{}\t{}\t{}\t{}\n", w, record_id, demoted, pop_flag)?;
+        buf.push(w.as_bytes().to_vec(), (record_id, demoted))?;
         *counter += 1;
     }
     Ok(())
@@ -1113,12 +1094,15 @@ fn compute_importance_inline(
     score.min(65535) as u16
 }
 
-// NOTE (Phase 2 — TODO_REBUILD_MODES.md): the in-memory `build_fst`
-// helper that used to live here is removed. The hot path is
-// `build_fst_from_disk` (above), which already does external sort by
-// shelling out to GNU `sort` with a 128 MB buffer — bounded RAM, no
-// `Vec<(String, ...)>` blow-up. The address FST in pack_addr.rs gets
-// the same treatment via `crate::sort_buffer::SortBuffer`.
+// NOTE (Phase 5 follow-up — TODO_REBUILD_MODES.md):
+// The in-memory `build_fst` helper that used to live here was removed in
+// Phase 2 in favour of a TSV-on-disk + GNU `sort` shell-out. That has
+// since been replaced by `build_fst_from_buf` / `build_fst_from_buf_ngram`
+// (above) which consume a typed `SortBuffer<(u32, u16)>` populated
+// directly from the parquet streaming loop — no TSV intermediate, no
+// shell-out, and bounded RAM via SortBuffer's spill machinery. Byte-
+// identity with the old TSV path is pinned by
+// `pack_fst_from_typed_buffer_matches_legacy_tsv_path` below.
 
 /// Read places from the Parquet file written by extract.rs
 fn read_parquet(path: &Path) -> Result<Vec<RawPlace>> {
@@ -1317,5 +1301,380 @@ fn place_type_from_u8(v: u8) -> PlaceType {
         35 => PlaceType::PublicBuilding,
         36 => PlaceType::Park,
         _ => PlaceType::Unknown,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Byte-identity tests pinning the Phase-5 typed-buffer migration:
+    //! the FST + sidecar bytes produced by `build_fst_from_buf` /
+    //! `build_fst_from_buf_ngram` must match the bytes the previous
+    //! GNU-`sort`-on-TSV pipeline produced for the same inputs.
+    //!
+    //! If a future change reorders FST keys at the boundary (e.g. by
+    //! changing collation, dedup tie-breakers, or post-flush ordering),
+    //! one of these tests will fail — flagging that the next 192-country
+    //! rebuild will produce different bytes on disk.
+    use super::*;
+    use std::io::Write as _;
+
+    /// Reference TSV+GNU-sort builder. This is a verbatim copy of the
+    /// pre-Phase-5 code path, kept here as a test-only oracle so the new
+    /// `SortBuffer`-based builder can be byte-compared to it.
+    fn build_fst_via_legacy_tsv_path(
+        inputs: &[(Vec<u8>, u32, u16)],
+        fst_path: &Path,
+        sidecar_path: Option<&Path>,
+    ) -> Result<()> {
+        use std::io::BufRead;
+
+        if inputs.is_empty() {
+            let f = std::io::BufWriter::new(std::fs::File::create(fst_path)?);
+            let mut b = MapBuilder::new(f)?;
+            b.finish()?;
+            if let Some(p) = sidecar_path { std::fs::write(p, &[][..])?; }
+            return Ok(());
+        }
+
+        let dir = fst_path.parent().unwrap().to_path_buf();
+        let tsv_path = dir.join(format!(
+            "{}.tsv",
+            fst_path.file_stem().unwrap().to_string_lossy(),
+        ));
+        {
+            let f = std::fs::File::create(&tsv_path)?;
+            let mut w = std::io::BufWriter::new(f);
+            for (key, id, importance) in inputs {
+                // Same TSV layout as pre-Phase-5: `key\tid\timportance\t<unused-pop-flag>`.
+                // Pop-flag value is irrelevant — column 4 was never read.
+                w.write_all(key)?;
+                writeln!(w, "\t{}\t{}\t0", id, importance)?;
+            }
+        }
+        let sorted_path = tsv_path.with_extension("sorted.tsv");
+        let status = std::process::Command::new("sort")
+            .env("LC_ALL", "C")
+            .args(["-t", "\t", "-k1,1", "-s", "--buffer-size=64M"])
+            .arg(&tsv_path)
+            .stdout(std::fs::File::create(&sorted_path)?)
+            .status()?;
+        anyhow::ensure!(status.success(), "GNU sort failed");
+
+        let reader = std::io::BufReader::new(std::fs::File::open(&sorted_path)?);
+        let f = std::io::BufWriter::new(std::fs::File::create(fst_path)?);
+        let mut builder = MapBuilder::new(f)?;
+        let mut sidecar_writer: Option<std::io::BufWriter<std::fs::File>> = match sidecar_path {
+            Some(p) => Some(std::io::BufWriter::new(std::fs::File::create(p)?)),
+            None => None,
+        };
+        let mut sidecar_offset: u64 = 0;
+        let mut prev_key = String::new();
+        let mut group: Vec<(u32, u16)> = Vec::new();
+
+        let mut flush = |
+            builder: &mut MapBuilder<std::io::BufWriter<std::fs::File>>,
+            sidecar_writer: &mut Option<std::io::BufWriter<std::fs::File>>,
+            sidecar_offset: &mut u64,
+            key: &str,
+            group: &mut Vec<(u32, u16)>,
+        | -> Result<()> {
+            if key.is_empty() || group.is_empty() { return Ok(()); }
+            group.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
+            group.dedup_by_key(|(id, _)| *id);
+            group.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+            if group.len() > MAX_POSTINGS_PER_KEY { group.truncate(MAX_POSTINGS_PER_KEY); }
+            match sidecar_writer.as_mut() {
+                Some(w) => {
+                    let count = group.len() as u16;
+                    let offset = *sidecar_offset;
+                    w.write_all(&count.to_le_bytes())?;
+                    for &(id, _) in group.iter() {
+                        w.write_all(&id.to_le_bytes())?;
+                    }
+                    *sidecar_offset += 2 + (group.len() as u64) * 4;
+                    builder.insert(key.as_bytes(), offset)?;
+                }
+                None => {
+                    builder.insert(key.as_bytes(), group[0].0 as u64)?;
+                }
+            }
+            group.clear();
+            Ok(())
+        };
+
+        for line in reader.lines() {
+            let line = line?;
+            let parts: Vec<&str> = line.split('\t').collect();
+            if parts.len() < 4 { continue; }
+            let key = parts[0];
+            let id: u32 = parts[1].parse().unwrap_or(0);
+            let importance: u16 = parts[2].parse().unwrap_or(0);
+            if key != prev_key {
+                flush(&mut builder, &mut sidecar_writer, &mut sidecar_offset, &prev_key, &mut group)?;
+                prev_key = key.to_owned();
+            }
+            group.push((id, importance));
+        }
+        flush(&mut builder, &mut sidecar_writer, &mut sidecar_offset, &prev_key, &mut group)?;
+        builder.finish()?;
+        if let Some(mut w) = sidecar_writer { w.flush()?; }
+        std::fs::remove_file(&sorted_path).ok();
+        std::fs::remove_file(&tsv_path).ok();
+        Ok(())
+    }
+
+    fn synthetic_pack_inputs(seed: u64) -> Vec<(Vec<u8>, u32, u16)> {
+        // 2000 entries with a healthy duplicate-key rate. Mixes:
+        //   - per-record primary keys (unique)
+        //   - per-word keys ("stockholm", "domkyrka") shared across many records
+        //   - phonetic-style normalised keys
+        // The duplicate key behaviour is what stresses the dedup +
+        // top-N posting logic, which is where ordering bugs would show.
+        let mut out: Vec<(Vec<u8>, u32, u16)> = Vec::new();
+        let mut x = seed.wrapping_mul(2862933555777941757).wrapping_add(3037000493);
+        let mut next = || {
+            x = x.wrapping_mul(2862933555777941757).wrapping_add(3037000493);
+            x
+        };
+        let words = [
+            "stockholm", "domkyrkan", "lund", "kyrka", "globen",
+            "central", "station", "park", "gata", "torget",
+        ];
+        for i in 0..2000u32 {
+            let primary = format!("place-{:04}-{}", i % 500, words[(i as usize) % words.len()]);
+            let imp = ((next() % 60000) as u16).max(1);
+            out.push((primary.clone().into_bytes(), i, imp));
+            // Demoted per-word entry — `imp / 128`, like the real pack.
+            let demoted = ((imp as u32 / 128).max(1)) as u16;
+            for w in primary.split('-') {
+                if w.len() > 2 {
+                    out.push((w.as_bytes().to_vec(), i, demoted));
+                }
+            }
+            // Phonetic (synthetic): folded primary
+            let phonetic_lite: String = primary.chars().filter(|c| c.is_alphabetic()).collect();
+            out.push((phonetic_lite.into_bytes(), i, imp));
+        }
+        out
+    }
+
+    /// Pin: the FST and sidecar bytes from `build_fst_from_buf` match
+    /// the legacy GNU-sort + TSV pipeline byte-for-byte. If this fails,
+    /// the change forces a 192-country reindex.
+    #[test]
+    fn pack_fst_from_typed_buffer_matches_legacy_tsv_path() {
+        let inputs = synthetic_pack_inputs(0xDEADBEEF);
+
+        let dir_legacy = tempfile::tempdir().unwrap();
+        let dir_buf = tempfile::tempdir().unwrap();
+
+        let legacy_fst = dir_legacy.path().join("legacy.fst");
+        let legacy_sc = dir_legacy.path().join("legacy.sidecar");
+        build_fst_via_legacy_tsv_path(&inputs, &legacy_fst, Some(&legacy_sc)).unwrap();
+
+        let buf_fst = dir_buf.path().join("buf.fst");
+        let buf_sc = dir_buf.path().join("buf.sidecar");
+        let scratch = dir_buf.path().join("scratch");
+        let mut sb = SortBuffer::<(u32, u16)>::new(64 * 1024 * 1024, &scratch).unwrap();
+        for (k, id, imp) in &inputs {
+            sb.push(k.clone(), (*id, *imp)).unwrap();
+        }
+        build_fst_from_buf(sb, &buf_fst, Some(&buf_sc)).unwrap();
+
+        let a_fst = std::fs::read(&legacy_fst).unwrap();
+        let b_fst = std::fs::read(&buf_fst).unwrap();
+        assert_eq!(
+            a_fst, b_fst,
+            "FST bytes diverge — legacy path: {} bytes, SortBuffer path: {} bytes",
+            a_fst.len(), b_fst.len(),
+        );
+        let a_sc = std::fs::read(&legacy_sc).unwrap();
+        let b_sc = std::fs::read(&buf_sc).unwrap();
+        assert_eq!(
+            a_sc, b_sc,
+            "sidecar bytes diverge — legacy: {} bytes, SortBuffer: {} bytes",
+            a_sc.len(), b_sc.len(),
+        );
+    }
+
+    /// Same byte-identity contract under SortBuffer's spill path. A tiny
+    /// `mem_limit` forces multiple spills + k-way merge, so the
+    /// post-merge order has to match GNU sort's stable-by-bytes order
+    /// even across spill boundaries.
+    #[test]
+    fn pack_fst_from_typed_buffer_byte_identical_under_spill() {
+        let inputs = synthetic_pack_inputs(0xCAFE_BABE);
+
+        let dir_legacy = tempfile::tempdir().unwrap();
+        let dir_buf = tempfile::tempdir().unwrap();
+
+        let legacy_fst = dir_legacy.path().join("legacy.fst");
+        let legacy_sc = dir_legacy.path().join("legacy.sidecar");
+        build_fst_via_legacy_tsv_path(&inputs, &legacy_fst, Some(&legacy_sc)).unwrap();
+
+        let buf_fst = dir_buf.path().join("buf.fst");
+        let buf_sc = dir_buf.path().join("buf.sidecar");
+        let scratch = dir_buf.path().join("scratch");
+        // 8 KB ceiling forces aggressive spilling on a 2000-entry input.
+        let mut sb = SortBuffer::<(u32, u16)>::new(8 * 1024, &scratch).unwrap();
+        for (k, id, imp) in &inputs {
+            sb.push(k.clone(), (*id, *imp)).unwrap();
+        }
+        // Sanity: we actually exercised the spill path.
+        assert!(sb.run_count() >= 2, "expected ≥ 2 spills, got {}", sb.run_count());
+        build_fst_from_buf(sb, &buf_fst, Some(&buf_sc)).unwrap();
+
+        let a_fst = std::fs::read(&legacy_fst).unwrap();
+        let b_fst = std::fs::read(&buf_fst).unwrap();
+        assert_eq!(a_fst, b_fst, "FST bytes diverge under spill path");
+        let a_sc = std::fs::read(&legacy_sc).unwrap();
+        let b_sc = std::fs::read(&buf_sc).unwrap();
+        assert_eq!(a_sc, b_sc, "sidecar bytes diverge under spill path");
+    }
+
+    /// The ngram builder uses the same group/dedup logic but with a
+    /// larger posting cap. Pin the FST + sidecar bytes against the
+    /// legacy path under that cap.
+    #[test]
+    fn pack_fst_ngram_from_typed_buffer_matches_legacy_tsv_path() {
+        let mut inputs = synthetic_pack_inputs(0x1234_5678);
+        // Inject a hot-key cluster ("^st") to stress dedup with
+        // many id collisions.
+        for i in 0..200u32 {
+            inputs.push((b"^st".to_vec(), i, ((i % 60000) as u16).max(1)));
+            inputs.push((b"sto".to_vec(), i, 100));
+            inputs.push((b"tor".to_vec(), i, 100));
+        }
+
+        // Test-only oracle that mirrors `build_fst_from_buf_ngram`
+        // running over a TSV+GNU-sort intermediate (cap 4096).
+        fn build_ngram_legacy(
+            inputs: &[(Vec<u8>, u32, u16)],
+            fst_path: &Path,
+            sidecar_path: &Path,
+        ) -> Result<()> {
+            use std::io::BufRead;
+            if inputs.is_empty() {
+                let f = std::io::BufWriter::new(std::fs::File::create(fst_path)?);
+                let mut b = MapBuilder::new(f)?;
+                b.finish()?;
+                std::fs::write(sidecar_path, &[][..])?;
+                return Ok(());
+            }
+            let dir = fst_path.parent().unwrap();
+            let tsv = dir.join("ngram.tsv");
+            {
+                let mut w = std::io::BufWriter::new(std::fs::File::create(&tsv)?);
+                for (k, id, imp) in inputs {
+                    w.write_all(k)?;
+                    writeln!(w, "\t{}\t{}\t0", id, imp)?;
+                }
+            }
+            let sorted = tsv.with_extension("sorted.tsv");
+            let status = std::process::Command::new("sort")
+                .env("LC_ALL", "C")
+                .args(["-t", "\t", "-k1,1", "-s", "--buffer-size=64M"])
+                .arg(&tsv)
+                .stdout(std::fs::File::create(&sorted)?)
+                .status()?;
+            anyhow::ensure!(status.success(), "GNU sort failed");
+
+            let reader = std::io::BufReader::new(std::fs::File::open(&sorted)?);
+            let f = std::io::BufWriter::new(std::fs::File::create(fst_path)?);
+            let mut builder = MapBuilder::new(f)?;
+            let mut sidecar = std::io::BufWriter::new(std::fs::File::create(sidecar_path)?);
+            let mut offset: u64 = 0;
+            let mut prev_key = String::new();
+            let mut group: Vec<(u32, u16)> = Vec::new();
+            let mut flush = |
+                builder: &mut MapBuilder<std::io::BufWriter<std::fs::File>>,
+                sidecar: &mut std::io::BufWriter<std::fs::File>,
+                offset: &mut u64,
+                key: &str,
+                group: &mut Vec<(u32, u16)>,
+            | -> Result<()> {
+                if key.is_empty() || group.is_empty() { return Ok(()); }
+                group.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
+                group.dedup_by_key(|(id, _)| *id);
+                group.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+                if group.len() > MAX_NGRAM_POSTINGS_PER_KEY {
+                    group.truncate(MAX_NGRAM_POSTINGS_PER_KEY);
+                }
+                let count = group.len() as u16;
+                let off = *offset;
+                sidecar.write_all(&count.to_le_bytes())?;
+                for &(id, _) in group.iter() {
+                    sidecar.write_all(&id.to_le_bytes())?;
+                }
+                *offset += 2 + (group.len() as u64) * 4;
+                builder.insert(key.as_bytes(), off)?;
+                group.clear();
+                Ok(())
+            };
+            for line in reader.lines() {
+                let line = line?;
+                let parts: Vec<&str> = line.split('\t').collect();
+                if parts.len() < 4 { continue; }
+                let key = parts[0];
+                let id: u32 = parts[1].parse().unwrap_or(0);
+                let imp: u16 = parts[2].parse().unwrap_or(0);
+                if key != prev_key {
+                    flush(&mut builder, &mut sidecar, &mut offset, &prev_key, &mut group)?;
+                    prev_key = key.to_owned();
+                }
+                group.push((id, imp));
+            }
+            flush(&mut builder, &mut sidecar, &mut offset, &prev_key, &mut group)?;
+            builder.finish()?;
+            sidecar.flush()?;
+            std::fs::remove_file(&sorted).ok();
+            std::fs::remove_file(&tsv).ok();
+            Ok(())
+        }
+
+        let dir_legacy = tempfile::tempdir().unwrap();
+        let dir_buf = tempfile::tempdir().unwrap();
+        let legacy_fst = dir_legacy.path().join("legacy.fst");
+        let legacy_sc = dir_legacy.path().join("legacy.sidecar");
+        build_ngram_legacy(&inputs, &legacy_fst, &legacy_sc).unwrap();
+
+        let buf_fst = dir_buf.path().join("buf.fst");
+        let buf_sc = dir_buf.path().join("buf.sidecar");
+        let scratch = dir_buf.path().join("scratch");
+        let mut sb = SortBuffer::<(u32, u16)>::new(64 * 1024 * 1024, &scratch).unwrap();
+        for (k, id, imp) in &inputs {
+            sb.push(k.clone(), (*id, *imp)).unwrap();
+        }
+        build_fst_from_buf_ngram(sb, &buf_fst, &buf_sc).unwrap();
+
+        assert_eq!(
+            std::fs::read(&legacy_fst).unwrap(),
+            std::fs::read(&buf_fst).unwrap(),
+            "ngram FST bytes diverge",
+        );
+        assert_eq!(
+            std::fs::read(&legacy_sc).unwrap(),
+            std::fs::read(&buf_sc).unwrap(),
+            "ngram sidecar bytes diverge",
+        );
+    }
+
+    /// Empty-input behaviour matches the legacy path: empty FST + empty sidecar.
+    #[test]
+    fn pack_fst_from_typed_buffer_empty_matches_legacy() {
+        let dir_legacy = tempfile::tempdir().unwrap();
+        let dir_buf = tempfile::tempdir().unwrap();
+        let legacy_fst = dir_legacy.path().join("legacy.fst");
+        let legacy_sc = dir_legacy.path().join("legacy.sidecar");
+        build_fst_via_legacy_tsv_path(&[], &legacy_fst, Some(&legacy_sc)).unwrap();
+
+        let buf_fst = dir_buf.path().join("buf.fst");
+        let buf_sc = dir_buf.path().join("buf.sidecar");
+        let scratch = dir_buf.path().join("scratch");
+        let sb = SortBuffer::<(u32, u16)>::new(1024, &scratch).unwrap();
+        build_fst_from_buf(sb, &buf_fst, Some(&buf_sc)).unwrap();
+
+        assert_eq!(std::fs::read(&legacy_fst).unwrap(), std::fs::read(&buf_fst).unwrap());
+        assert_eq!(std::fs::read(&legacy_sc).unwrap(), std::fs::read(&buf_sc).unwrap());
     }
 }
