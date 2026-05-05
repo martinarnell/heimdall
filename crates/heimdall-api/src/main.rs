@@ -122,6 +122,10 @@ struct CountryIndex {
     /// answering, just without these payloads.
     extratags: heimdall_core::sidecar_kv::KvSidecar,
     namedetails: heimdall_core::sidecar_kv::KvSidecar,
+    /// Phase 2.8 — Wikidata QID → record_id reverse index. Empty for
+    /// legacy indices; `/search?q=Qxxx` then just returns no hit for
+    /// that country.
+    wikidata_qids: heimdall_core::wikidata_index::WikidataIndex,
     normalizer: Normalizer,
     #[allow(dead_code)]
     bbox: BoundingBox,
@@ -1003,6 +1007,19 @@ async fn search(
     } else {
         state.countries.iter().enumerate().filter(|(_, c)| country_codes.contains(&c.code)).collect()
     };
+
+    // Phase 2.8 — Wikidata QID short-circuit. When `q` is a single
+    // `Q\d+` token, skip the FST pipeline entirely and resolve the QID
+    // directly via the per-country reverse index. `target_countries`
+    // already honours the `countrycodes=` filter. Falls through to
+    // normal search when nothing matches — a literal "Q1428" still has
+    // a chance to hit a name FST entry.
+    if let Some(qid) = heimdall_core::wikidata_index::normalise_qid(query_text.trim()) {
+        let response = qid_lookup(&state, &qid, &target_countries, &params);
+        if !response.is_empty() {
+            return Ok(Json(search_finalize(&params, &state, &locales, response)));
+        }
+    }
 
     // Track which countries are being queried (only when filtered)
     if !country_codes.is_empty() {
@@ -3374,6 +3391,93 @@ fn to_nominatim_enriched(
     result
 }
 
+/// Phase 2.8 — resolve a Wikidata QID to one `NominatimResult` per country
+/// that has a record for it. Iterates the supplied target_countries (which
+/// already honours any `countrycodes=` filter) and short-circuits the
+/// /search pipeline when at least one country matches. Returns an empty
+/// Vec when no country has the QID — caller falls through to normal FST
+/// search so a literal "Q1428" can still hit a name FST entry.
+fn qid_lookup(
+    _state: &Arc<AppState>,
+    qid: &str,
+    target_countries: &[(usize, &CountryIndex)],
+    params: &SearchParams,
+) -> Vec<NominatimResult> {
+    let mut out: Vec<NominatimResult> = Vec::new();
+    for (country_index, country) in target_countries.iter() {
+        let record_id = match country.wikidata_qids.get(qid) {
+            Some(rid) => rid,
+            None => continue,
+        };
+        let record = match country.index.record_store().get(record_id) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        let name = country.index.record_store().primary_name(&record);
+
+        let (admin1, admin2) = resolve_admin_names(
+            country,
+            Some(record.admin1_id),
+            Some(record.admin2_id),
+            record.coord.lat_f64(),
+            record.coord.lon_f64(),
+        );
+
+        let display_name = compose_display_name(
+            Some(&name),
+            None,
+            None,
+            admin2.as_deref(),
+            admin1.as_deref(),
+            None,
+            Some(&country.name),
+        );
+
+        let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
+
+        let address = if params.addressdetails > 0 {
+            let (city, town, village, suburb) = place_type_to_settlement(&record.place_type, &name);
+            Some(AddressDetails {
+                house_number: None,
+                road: None,
+                suburb,
+                city,
+                town,
+                village,
+                county: admin2,
+                state: admin1,
+                postcode: None,
+                country: Some(country.name.clone()),
+                country_code: Some(cc),
+            })
+        } else {
+            None
+        };
+
+        let (cls, val) = resolve_class_value(country, &record);
+        out.push(NominatimResult {
+            place_id: stable_place_id(&record),
+            osm_type: Some(osm_type_from_flags(record.flags).to_owned()),
+            osm_id: if record.osm_id != 0 { Some(record.osm_id) } else { None },
+            display_name,
+            lat: format!("{:.7}", record.coord.lat_f64()),
+            lon: format!("{:.7}", record.coord.lon_f64()),
+            place_type: val,
+            class: Some(cls),
+            boundingbox: Some(boundingbox_strings(&record)),
+            importance: record.importance as f64 / 65535.0,
+            match_type: Some("qid".to_owned()),
+            address,
+            extratags: None,
+            namedetails: None,
+            internal: Some((*country_index as u16, record_id)),
+        });
+    }
+    // Highest-importance match first — same ordering as the rest of /search.
+    out.sort_by(|a, b| b.importance.partial_cmp(&a.importance).unwrap_or(std::cmp::Ordering::Equal));
+    out
+}
+
 /// Resolve admin1/admin2 names for a (lat, lon) in the given country,
 /// preferring runtime point-in-polygon containment when the index has
 /// `runtime_polygons.bin`. Falls back to the supplied admin ids
@@ -4573,6 +4677,19 @@ fn load_country_index_inner(path: &std::path::Path, lightweight: bool) -> anyhow
         tracing::info!("  namedetails.bin loaded: {} records carry namedetails", namedetails.len());
     }
 
+    // Phase 2.8 — Wikidata QID → record_id reverse index. Optional;
+    // missing on pre-2.8 indices so the QID short-circuit just returns
+    // no hit for those countries.
+    let wikidata_qids = heimdall_core::wikidata_index::WikidataIndex
+        ::load(&path.join("wikidata_qids.bin"))
+        .unwrap_or_else(|e| {
+            tracing::warn!("wikidata_qids.bin failed to load ({e}); /search?q=Qxxx will not match this country");
+            heimdall_core::wikidata_index::WikidataIndex::new()
+        });
+    if !wikidata_qids.is_empty() {
+        tracing::info!("  wikidata_qids.bin loaded: {} QIDs", wikidata_qids.len());
+    }
+
     let places = index.record_count();
     let addresses = addr_index.as_ref().map(|a| a.record_count()).unwrap_or(0);
 
@@ -4591,6 +4708,7 @@ fn load_country_index_inner(path: &std::path::Path, lightweight: bool) -> anyhow
         class_types,
         extratags,
         namedetails,
+        wikidata_qids,
         normalizer,
         bbox,
         meta: CountryMeta {

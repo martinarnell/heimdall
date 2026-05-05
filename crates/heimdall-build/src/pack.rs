@@ -33,6 +33,7 @@ use heimdall_core::record_store::RecordStoreBuilder;
 use heimdall_core::reverse::GeohashIndexBuilder;
 use heimdall_core::class_type::ClassTypeBuilder;
 use heimdall_core::sidecar_kv::KvSidecarBuilder;
+use heimdall_core::wikidata_index::{WikidataIndexBuilder, normalise_qid};
 use heimdall_normalize::Normalizer;
 use crate::enrich::EnrichResult;
 use crate::sort_buffer::{SortBuffer, PackOptions};
@@ -233,6 +234,12 @@ pub fn pack(
     // `?namedetails=1` query flags.
     let mut extratags_builder = KvSidecarBuilder::new();
     let mut namedetails_builder = KvSidecarBuilder::new();
+
+    // Phase 2.8 — Wikidata QID → record_id reverse index. Built from the
+    // `wikidata` parquet column; on QID collision the highest-importance
+    // record wins (admin relation usually beats admin node). Surfaces
+    // through `/search?q=Q12345` short-circuit.
+    let mut wikidata_builder = WikidataIndexBuilder::new();
 
     // Stream parquet batch-by-batch — never holds all RawPlace in memory.
     // Only the key HashMaps + RecordStoreBuilder grow with data.
@@ -493,6 +500,17 @@ pub fn pack(
                     }
                 }
 
+                // Phase 2.8 — feed the wikidata reverse index. Any value
+                // that doesn't normalise to `Q\d+` (multi-QID strings,
+                // typos, country codes accidentally tagged as wikidata)
+                // is silently dropped by the builder.
+                if !wikidatas.is_null(i) {
+                    let v = wikidatas.value(i);
+                    if let Some(qid) = normalise_qid(v) {
+                        wikidata_builder.add(&qid, id, importance);
+                    }
+                }
+
                 geohash_builder.add(lat, lon, id);
 
                 // Push FST keys into typed SortBuffers. Collision resolution
@@ -677,6 +695,18 @@ pub fn pack(
         std::fs::metadata(&extratags_path).map(|m| m.len() as f64 / 1e6).unwrap_or(0.0),
         namedetails_count,
         std::fs::metadata(&namedetails_path).map(|m| m.len() as f64 / 1e6).unwrap_or(0.0),
+    );
+
+    // Phase 2.8 — Wikidata QID reverse index. Optional file; missing
+    // means `/search?q=Qxxxx` returns no hit for this country.
+    let wikidata_path = output_dir.join("wikidata_qids.bin");
+    let wikidata_count = wikidata_builder.len();
+    wikidata_builder.write(&wikidata_path)
+        .map_err(|e| anyhow::anyhow!("write wikidata_qids.bin: {}", e))?;
+    info!(
+        "wikidata_qids.bin: {} QIDs ({:.1} MB)",
+        wikidata_count,
+        std::fs::metadata(&wikidata_path).map(|m| m.len() as f64 / 1e6).unwrap_or(0.0),
     );
 
     // Write record store
