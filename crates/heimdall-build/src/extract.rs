@@ -318,25 +318,43 @@ pub fn extract_places(
     // For Canada this reduces 766M cached nodes to ~50M (~93% reduction).
     // -----------------------------------------------------------------------
     info!("Pre-pass 2: scanning ways for needed node IDs...");
+    // Phase 2.5 (audit #30): interpolation ways carry no housenumber on the
+    // way itself — endpoints do. Collect endpoint IDs here so pass 1 can
+    // grab their `addr:housenumber` while the node is being scanned.
+    let mut interpolation_endpoint_ids: std::collections::HashSet<i64> =
+        std::collections::HashSet::new();
+    let mut interpolation_ways_seen = 0usize;
     let mut needed_node_ids: Option<Vec<i64>> = {
         let reader = ElementReader::from_path(pbf_path)?;
         let mut node_refs: Vec<i64> = relation_node_ids; // start with relation node members
         let mut qualifying_ways = 0usize;
         reader.for_each(|element| {
             if let Element::Way(way) = element {
+                let is_interp = is_interpolation_way(&way);
                 let dominated = has_addr_tags(&way)
                     || way_qualifies(&way)
-                    || relation_way_ids.contains(&way.id());
+                    || relation_way_ids.contains(&way.id())
+                    || is_interp;
                 if dominated {
                     qualifying_ways += 1;
-                    node_refs.extend(way.refs());
+                    let refs: Vec<i64> = way.refs().collect();
+                    if is_interp {
+                        interpolation_ways_seen += 1;
+                        if let (Some(&first), Some(&last)) = (refs.first(), refs.last()) {
+                            interpolation_endpoint_ids.insert(first);
+                            interpolation_endpoint_ids.insert(last);
+                        }
+                    }
+                    node_refs.extend(refs);
                 }
             }
         })?;
         node_refs.sort_unstable();
         node_refs.dedup();
-        info!("  {} unique node IDs from {} qualifying ways ({:.0} MB)",
-            node_refs.len(), qualifying_ways, node_refs.len() as f64 * 8.0 / 1e6);
+        info!("  {} unique node IDs from {} qualifying ways ({:.0} MB); {} interpolation ways",
+            node_refs.len(), qualifying_ways,
+            node_refs.len() as f64 * 8.0 / 1e6,
+            interpolation_ways_seen);
         Some(node_refs)
     };
 
@@ -394,9 +412,18 @@ pub fn extract_places(
         Address { street: String, housenumber: String, postcode: Option<String>, city: Option<String> },
         Named(PendingWay),
         RelationMember,
+        // Phase 2.5 (audit #30) — interpolation way; endpoint housenumbers
+        // are looked up at flush time from `endpoint_housenums`.
+        Interpolation { spec: InterpolationSpec, first_node: i64, last_node: i64 },
     }
     let mut way_buf: Vec<BufferedWay> = Vec::with_capacity(WAY_BATCH_SIZE);
     let mut all_refs: Vec<i64> = Vec::with_capacity(WAY_BATCH_SIZE * 10);
+
+    // Phase 2.5: housenumber tag of every interpolation endpoint node.
+    // Populated during pass 1 node scan and consumed at way-flush time.
+    // Sized at 2 × interpolation ways (typically a few thousand entries
+    // per country, sub-MB).
+    let mut endpoint_housenums: HashMap<i64, String> = HashMap::new();
 
     let mut cache_sorted = false;
     let mut needed_cursor: usize = 0;
@@ -405,6 +432,7 @@ pub fn extract_places(
     let mut nodes_extracted = 0usize;
     let mut addr_nodes_extracted = 0usize;
     let mut addr_ways_resolved = 0usize;
+    let mut interpolated_addresses_emitted = 0usize;
     let mut ways_seen = 0usize;
 
     let reader = ElementReader::from_path(pbf_path)?;
@@ -433,6 +461,17 @@ pub fn extract_places(
                 ) {
                     places.push(place);
                     nodes_extracted += 1;
+                }
+                // Phase 2.5: capture housenumber for interpolation endpoints
+                // before we throw away the tag iterator. Allocates only when
+                // the node is actually an endpoint of an interpolation way.
+                if interpolation_endpoint_ids.contains(&node.id()) {
+                    for (k, v) in node.tags() {
+                        if k == "addr:housenumber" && !v.is_empty() {
+                            endpoint_housenums.insert(node.id(), v.to_owned());
+                            break;
+                        }
+                    }
                 }
                 {
                     let (addr, building) = extract_addr_node(
@@ -482,6 +521,14 @@ pub fn extract_places(
                 ) {
                     places.push(place);
                     nodes_extracted += 1;
+                }
+                if interpolation_endpoint_ids.contains(&node.id()) {
+                    for (k, v) in node.tags() {
+                        if k == "addr:housenumber" && !v.is_empty() {
+                            endpoint_housenums.insert(node.id(), v.to_owned());
+                            break;
+                        }
+                    }
                 }
                 {
                     let (addr, building) = extract_addr_node(
@@ -556,6 +603,23 @@ pub fn extract_places(
                         kind: BufferedWayKind::RelationMember,
                     });
                 }
+                // Phase 2.5 (audit #30) — interpolation way buffered like
+                // an Address way; both endpoint node IDs are stashed so the
+                // flush path can look up their housenumbers.
+                if is_interpolation_way(&way) {
+                    if let Some(spec) = scan_interpolation_way(&way) {
+                        if let (Some(&first), Some(&last)) =
+                            (refs.first(), refs.last())
+                        {
+                            way_buf.push(BufferedWay {
+                                id: way_id, ref_start, ref_count,
+                                kind: BufferedWayKind::Interpolation {
+                                    spec, first_node: first, last_node: last,
+                                },
+                            });
+                        }
+                    }
+                }
 
                 // Flush batch when full — one big batch_get for all buffered ways
                 if way_buf.len() >= WAY_BATCH_SIZE {
@@ -624,6 +688,25 @@ pub fn extract_places(
                                     extratags: vec![],
                                     node_refs,
                                 });
+                            }
+                            BufferedWayKind::Interpolation { spec, first_node, last_node } => {
+                                let resolved_coords: Vec<(f64, f64)> =
+                                    coords.iter().filter_map(|c| *c).collect();
+                                if let (Some(start_str), Some(end_str)) = (
+                                    endpoint_housenums.get(&first_node),
+                                    endpoint_housenums.get(&last_node),
+                                ) {
+                                    if let (Ok(start_n), Ok(end_n)) = (
+                                        start_str.parse::<u32>(),
+                                        end_str.parse::<u32>(),
+                                    ) {
+                                        interpolated_addresses_emitted +=
+                                            synthesise_interpolated_addresses(
+                                                bw.id, &spec, start_n, end_n,
+                                                &resolved_coords, &mut addresses,
+                                            );
+                                    }
+                                }
                             }
                         }
                     }
@@ -709,6 +792,25 @@ pub fn extract_places(
                         node_refs,
                     });
                 }
+                BufferedWayKind::Interpolation { spec, first_node, last_node } => {
+                    let resolved_coords: Vec<(f64, f64)> =
+                        coords.iter().filter_map(|c| *c).collect();
+                    if let (Some(start_str), Some(end_str)) = (
+                        endpoint_housenums.get(&first_node),
+                        endpoint_housenums.get(&last_node),
+                    ) {
+                        if let (Ok(start_n), Ok(end_n)) = (
+                            start_str.parse::<u32>(),
+                            end_str.parse::<u32>(),
+                        ) {
+                            interpolated_addresses_emitted +=
+                                synthesise_interpolated_addresses(
+                                    bw.id, &spec, start_n, end_n,
+                                    &resolved_coords, &mut addresses,
+                                );
+                        }
+                    }
+                }
             }
         }
     }
@@ -718,10 +820,11 @@ pub fn extract_places(
     }
 
     info!(
-        "Single pass complete: {} nodes ({} cached, {} places, {} addrs), {} ways ({} named, {} relation members), {} relations",
+        "Single pass complete: {} nodes ({} cached, {} places, {} addrs), {} ways ({} named, {} relation members, {} interpolated addrs), {} relations",
         nodes_seen, nodes_cached, nodes_extracted, addr_nodes_extracted,
         ways_seen, way_index.len(),
         pending_ways.len() - way_index.len(), // relation-only ways
+        interpolated_addresses_emitted,
         pending_relations.len(),
     );
 
@@ -864,6 +967,7 @@ fn scan_way(way: &osmpbf::Way) -> Option<PendingWay> {
     let mut qualifying_tag: Option<(String, String)> = None;
     let mut is_highway = false;
     let mut is_building = false;
+    let mut building_value: Option<String> = None;
     let mut has_wikipedia = false;
     let mut highway_value: Option<String> = None;
     let mut is_area = false;
@@ -887,7 +991,7 @@ fn scan_way(way: &osmpbf::Way) -> Option<PendingWay> {
             "wikipedia" => has_wikipedia = true,
             "highway" => { is_highway = true; highway_value = Some(v.to_owned()); }
             "area" => { if v == "yes" { is_area = true; } }
-            "building" => is_building = true,
+            "building" => { is_building = true; building_value = Some(v.to_owned()); }
             k if k.starts_with("name:") => {
                 let lang = &k[5..];
                 if lang.len() == 2 {
@@ -907,17 +1011,8 @@ fn scan_way(way: &osmpbf::Way) -> Option<PendingWay> {
         }
     }
 
-    // Must have a name. Buildings are always skipped (pure geometry).
-    // Highways are skipped UNLESS they carry a notability signal — this
-    // catches famous named streets (Avenyn, Drottninggatan, Sveavägen) so
-    // the city-context disambiguation has something to rank.
+    // Must have a name.
     let name = name?;
-    // Buildings are skipped UNLESS they carry a real qualifying tag —
-    // Vasamuseet is `building=museum, tourism=museum, wikidata=Q901371`,
-    // and the tourism wins over the geometry tag.
-    if is_building && qualifying_tag.is_none() && place_tag.is_none() {
-        return None;
-    }
     // Highway notability gate. Without this, every residential street in the
     // PBF gets indexed and floods the FST. We accept four signals:
     //   - wikidata / wikipedia (regionally famous)
@@ -926,10 +1021,24 @@ fn scan_way(way: &osmpbf::Way) -> Option<PendingWay> {
     //     in Finland, Brussels in Belgium, Wales, Catalonia, …). The
     //     `name:sv` (or any `name:<lang>`) tag itself is the notability
     //     signal: someone bothered to translate it because it matters.
-    let highway_qualifies = is_highway
-        && (wikidata.is_some() || has_wikipedia
-            || !alt_names.is_empty() || !name_intl.is_empty());
+    let has_notability = wikidata.is_some() || has_wikipedia
+        || !alt_names.is_empty() || !name_intl.is_empty();
+    let highway_qualifies = is_highway && has_notability;
     if is_highway && !highway_qualifies {
+        return None;
+    }
+    // Building notability gate (Phase 2.4 / audit #29). A building qualifies
+    // as a searchable place if it has another qualifying POI tag (Vasamuseet
+    // = building=museum + tourism=museum, the tourism wins) OR carries a
+    // notability signal of its own — wikidata/wikipedia (Empire State
+    // Building, Sagrada Família), an alt/loc/short_name, or a translated
+    // name. Pure `building=yes, name=*` with nothing else stays out so we
+    // don't flood the FST with every named warehouse and detached house.
+    let building_qualifies = is_building && place_tag.is_none()
+        && qualifying_tag.is_none() && has_notability;
+    if is_building && qualifying_tag.is_none() && place_tag.is_none()
+        && !building_qualifies
+    {
         return None;
     }
 
@@ -959,6 +1068,11 @@ fn scan_way(way: &osmpbf::Way) -> Option<PendingWay> {
         } else {
             PlaceType::Street
         }
+    } else if building_qualifies {
+        // Notable named building (Empire State Building, Sagrada Família, …).
+        // Bucket as Landmark — it ranks alongside other notable POIs and
+        // gets the same importance weight at query time.
+        PlaceType::Landmark
     } else {
         return None;
     };
@@ -974,6 +1088,10 @@ fn scan_way(way: &osmpbf::Way) -> Option<PendingWay> {
             } else if matches!(place_type, PlaceType::Street) {
                 // Notable named highway picked up via the highway-qualifies path.
                 highway_value.clone().map(|v| ("highway".to_owned(), v))
+            } else if building_qualifies {
+                // Notable named building — class=building, type=<value>
+                // (e.g. building=yes, building=hotel, building=castle).
+                building_value.clone().map(|v| ("building".to_owned(), v))
             } else {
                 None
             }
@@ -1600,10 +1718,13 @@ fn way_qualifies(way: &osmpbf::Way) -> bool {
         // Notable highway only — ~50–500 famous streets per country.
         return has_notability;
     }
-    // Buildings need a real qualifying tag (Vasamuseet =
-    // building=museum + tourism=museum). Pure building=yes is geometry only.
+    // Buildings qualify when they ALSO have a real POI tag (Vasamuseet =
+    // building=museum + tourism=museum, the tourism wins) OR carry a
+    // notability signal of their own (wikidata, wikipedia, alt/loc/short
+    // name, name:<lang>) — Empire State Building, Sagrada Família, etc.
+    // Pure building=yes with just a name stays out.
     if is_building {
-        return has_qualifying;
+        return has_qualifying || has_notability;
     }
     has_qualifying
 }
@@ -1627,6 +1748,277 @@ fn scan_addr_way_tags(way: &osmpbf::Way) -> Option<(String, String, Option<Strin
     }
 
     Some((street?, housenumber?, postcode, city))
+}
+
+// ---------------------------------------------------------------------------
+// Address interpolation (Phase 2.5 / audit #30)
+// ---------------------------------------------------------------------------
+
+/// `addr:interpolation` ways encode "houses 1–199 odd along this segment" —
+/// common for US/UK/AU rural addresses where individual house nodes aren't
+/// mapped. Endpoint nodes carry the bounding `addr:housenumber` values; the
+/// way fills in the gaps.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum InterpolationKind { Even, Odd, All }
+
+#[derive(Debug, Clone)]
+pub(crate) struct InterpolationSpec {
+    pub kind: InterpolationKind,
+    pub street: String,
+    pub postcode: Option<String>,
+    pub city: Option<String>,
+}
+
+/// Lightweight check for pre-pass 2: does this way carry `addr:interpolation=*`?
+fn is_interpolation_way(way: &osmpbf::Way) -> bool {
+    way.tags().any(|(k, _)| k == "addr:interpolation")
+}
+
+/// Parse the tags of an `addr:interpolation` way into an `InterpolationSpec`.
+/// Requires `addr:street` so the synthesised addresses can be FST-keyed;
+/// without a street the interpolation has nowhere to live in the address
+/// store. Skips `alphabetic` interpolation (1A, 1B, 1C…) — uncommon and
+/// not amenable to integer arithmetic.
+pub(crate) fn scan_interpolation_way(way: &osmpbf::Way) -> Option<InterpolationSpec> {
+    let mut interp: Option<InterpolationKind> = None;
+    let mut street: Option<String> = None;
+    let mut postcode: Option<String> = None;
+    let mut city: Option<String> = None;
+    for (k, v) in way.tags() {
+        match k {
+            "addr:interpolation" => {
+                interp = match v {
+                    "odd" => Some(InterpolationKind::Odd),
+                    "even" => Some(InterpolationKind::Even),
+                    "all" => Some(InterpolationKind::All),
+                    _ => None, // alphabetic / numeric-special — skip
+                };
+            }
+            "addr:street" => street = Some(v.to_owned()),
+            "addr:postcode" => postcode = Some(v.to_owned()),
+            "addr:city" => city = Some(v.to_owned()),
+            _ => {}
+        }
+    }
+    Some(InterpolationSpec { kind: interp?, street: street?, postcode, city })
+}
+
+/// Synthesise interpolated addresses along a way segment.
+///
+/// Walks the way's polyline using its segment lengths, computes the
+/// fractional position for each interpolated housenumber, and emits a
+/// `RawAddress` at the corresponding (lat, lon). Endpoints themselves are
+/// skipped — they're already in the address pipeline as standalone nodes.
+///
+/// Capped at `MAX_INTERPOLATIONS` per way as a safety net against
+/// pathological tags (e.g. `addr:interpolation=all` between 1 and 9999).
+fn synthesise_interpolated_addresses(
+    way_id: i64,
+    spec: &InterpolationSpec,
+    start_num: u32,
+    end_num: u32,
+    coords: &[(f64, f64)],
+    addresses: &mut Vec<RawAddress>,
+) -> usize {
+    const MAX_INTERPOLATIONS: u32 = 200;
+
+    if coords.len() < 2 || start_num == end_num {
+        return 0;
+    }
+    let (lo_num, hi_num, reversed) = if start_num < end_num {
+        (start_num, end_num, false)
+    } else {
+        (end_num, start_num, true)
+    };
+    let span = hi_num - lo_num;
+    if span < 2 {
+        // 1→2 or 1→3 odd has no intermediate housenumbers worth synthesising
+        // beyond the endpoints we already have.
+        return 0;
+    }
+
+    // Cumulative arc lengths along the polyline (cartesian, cos-corrected —
+    // good enough for sub-km segments). cum[0] = 0, cum[i] = arc length up
+    // to coords[i].
+    let mut cum: Vec<f64> = Vec::with_capacity(coords.len());
+    cum.push(0.0);
+    for w in coords.windows(2) {
+        let mid_lat = (w[0].0 + w[1].0) * 0.5;
+        let dlat = w[1].0 - w[0].0;
+        let dlon = (w[1].1 - w[0].1) * mid_lat.to_radians().cos();
+        let seg_len = (dlat * dlat + dlon * dlon).sqrt();
+        cum.push(cum.last().unwrap() + seg_len);
+    }
+    let total_len = *cum.last().unwrap();
+    if total_len <= 0.0 {
+        return 0;
+    }
+
+    // Direction of housenumber traversal vs. the way's node order: if the
+    // way goes from end_num to start_num (i.e. reversed), the housenumber
+    // increases as we walk the way backwards. We always emit in lo→hi
+    // numeric order, so the fractional position needs to be flipped when
+    // the way runs in the opposite direction.
+
+    let step: u32 = match spec.kind {
+        InterpolationKind::Even | InterpolationKind::Odd => 2,
+        InterpolationKind::All => 1,
+    };
+    // First housenumber strictly between lo and hi that matches the parity
+    // gate. We always skip the endpoints since they're real nodes.
+    let mut n = match spec.kind {
+        InterpolationKind::Even => {
+            if (lo_num + 1) % 2 == 0 { lo_num + 1 } else { lo_num + 2 }
+        }
+        InterpolationKind::Odd => {
+            if (lo_num + 1) % 2 == 1 { lo_num + 1 } else { lo_num + 2 }
+        }
+        InterpolationKind::All => lo_num + 1,
+    };
+
+    let mut emitted = 0usize;
+    let mut count = 0u32;
+    while n < hi_num && count < MAX_INTERPOLATIONS {
+        let frac_lo_to_hi = (n - lo_num) as f64 / span as f64;
+        let frac = if reversed { 1.0 - frac_lo_to_hi } else { frac_lo_to_hi };
+        let target = frac * total_len;
+        // Find the segment that contains `target`.
+        let mut seg_idx = 0usize;
+        for i in 1..cum.len() {
+            if cum[i] >= target { seg_idx = i - 1; break; }
+            // If we've reached the last segment without breaking, target
+            // is at or past the end — pin to the final segment.
+            seg_idx = i - 1;
+        }
+        let seg_start = cum[seg_idx];
+        let seg_end = cum[seg_idx + 1];
+        let seg_frac = if seg_end > seg_start {
+            ((target - seg_start) / (seg_end - seg_start)).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let (lat0, lon0) = coords[seg_idx];
+        let (lat1, lon1) = coords[seg_idx + 1];
+        let lat = lat0 + (lat1 - lat0) * seg_frac;
+        let lon = lon0 + (lon1 - lon0) * seg_frac;
+        addresses.push(RawAddress {
+            osm_id: way_id,
+            street: spec.street.clone(),
+            housenumber: n.to_string(),
+            postcode: spec.postcode.clone(),
+            city: spec.city.clone(),
+            state: None,
+            lat,
+            lon,
+        });
+        emitted += 1;
+        n += step;
+        count += 1;
+    }
+    emitted
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spec(kind: InterpolationKind) -> InterpolationSpec {
+        InterpolationSpec {
+            kind,
+            street: "Main St".to_owned(),
+            postcode: Some("12345".to_owned()),
+            city: Some("Springfield".to_owned()),
+        }
+    }
+
+    fn straight_line() -> Vec<(f64, f64)> {
+        // 1 km segment going east at 40°N
+        vec![(40.0, -100.0), (40.0, -100.0 + 0.0117)]
+    }
+
+    #[test]
+    fn interpolation_odd_emits_intermediate_only() {
+        let mut addrs = Vec::new();
+        let n = synthesise_interpolated_addresses(
+            42, &spec(InterpolationKind::Odd),
+            1, 11, &straight_line(), &mut addrs,
+        );
+        // 1 → 11 odd: intermediates are 3, 5, 7, 9
+        assert_eq!(n, 4);
+        let nums: Vec<&str> = addrs.iter().map(|a| a.housenumber.as_str()).collect();
+        assert_eq!(nums, vec!["3", "5", "7", "9"]);
+        for a in &addrs {
+            assert_eq!(a.osm_id, 42);
+            assert_eq!(a.street, "Main St");
+            assert_eq!(a.postcode.as_deref(), Some("12345"));
+            assert_eq!(a.city.as_deref(), Some("Springfield"));
+        }
+    }
+
+    #[test]
+    fn interpolation_even_skips_odd_endpoints() {
+        let mut addrs = Vec::new();
+        synthesise_interpolated_addresses(
+            1, &spec(InterpolationKind::Even),
+            2, 10, &straight_line(), &mut addrs,
+        );
+        let nums: Vec<&str> = addrs.iter().map(|a| a.housenumber.as_str()).collect();
+        assert_eq!(nums, vec!["4", "6", "8"]);
+    }
+
+    #[test]
+    fn interpolation_all_emits_every_intermediate() {
+        let mut addrs = Vec::new();
+        synthesise_interpolated_addresses(
+            1, &spec(InterpolationKind::All),
+            10, 14, &straight_line(), &mut addrs,
+        );
+        let nums: Vec<&str> = addrs.iter().map(|a| a.housenumber.as_str()).collect();
+        assert_eq!(nums, vec!["11", "12", "13"]);
+    }
+
+    #[test]
+    fn interpolation_handles_reversed_way_direction() {
+        // start_num > end_num — way drawn from house 11 to house 1.
+        let mut addrs = Vec::new();
+        synthesise_interpolated_addresses(
+            1, &spec(InterpolationKind::Odd),
+            11, 1, &straight_line(), &mut addrs,
+        );
+        let nums: Vec<&str> = addrs.iter().map(|a| a.housenumber.as_str()).collect();
+        // Same numeric output, but coords should mirror the way (house 3
+        // is now near the END of the polyline, not the start).
+        assert_eq!(nums, vec!["3", "5", "7", "9"]);
+        // House 3 should be near end of way (largest lon since way goes east).
+        let h3 = addrs.iter().find(|a| a.housenumber == "3").unwrap();
+        let h9 = addrs.iter().find(|a| a.housenumber == "9").unwrap();
+        // Way goes from (40, -100) to (40, -100+0.0117). House 3 is at
+        // 0.8 along the way (3 closer to the higher-numbered endpoint at
+        // the start, since reversed); house 9 is at 0.2.
+        assert!(h3.lon > h9.lon, "h3.lon={}, h9.lon={}", h3.lon, h9.lon);
+    }
+
+    #[test]
+    fn interpolation_caps_runaway_ranges() {
+        let mut addrs = Vec::new();
+        // 1 → 9999 all → would emit 9997 entries; cap at 200.
+        synthesise_interpolated_addresses(
+            1, &spec(InterpolationKind::All),
+            1, 9999, &straight_line(), &mut addrs,
+        );
+        assert_eq!(addrs.len(), 200);
+    }
+
+    #[test]
+    fn interpolation_skips_adjacent_endpoints() {
+        let mut addrs = Vec::new();
+        synthesise_interpolated_addresses(
+            1, &spec(InterpolationKind::Odd),
+            1, 3, &straight_line(), &mut addrs,
+        );
+        // Span < 2 → no intermediate houses to interpolate.
+        assert_eq!(addrs.len(), 0);
+    }
 }
 
 /// Extract an address from a node with addr:street + addr:housenumber tags.
