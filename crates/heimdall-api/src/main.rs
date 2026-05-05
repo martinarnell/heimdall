@@ -158,7 +158,6 @@ struct SearchParams {
     #[serde(default)]
     bounded: u8,
     #[serde(default = "default_format")]
-    #[allow(dead_code)]
     format: String,
     #[serde(default = "default_limit")]
     limit: usize,
@@ -285,7 +284,6 @@ struct LookupParams {
     /// Comma-separated OSM IDs with type prefix (e.g., "R54413,N123456")
     osm_ids: Option<String>,
     #[serde(default = "default_format")]
-    #[allow(dead_code)]
     format: String,
     #[serde(default)]
     addressdetails: u8,
@@ -770,7 +768,7 @@ fn split_postcode_city(s: &str) -> Option<(String, String)> {
 async fn search(
     Query(params): Query<SearchParams>,
     State(state): State<Arc<AppState>>,
-) -> Result<Json<Vec<NominatimResult>>, (StatusCode, String)> {
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let structured = has_structured_params(&params);
 
     // q= and structured params are mutually exclusive
@@ -784,17 +782,17 @@ async fn search(
     let query_text = if structured {
         match parse_structured_query(&params) {
             Some(q) => q,
-            None => return Ok(Json(vec![])),
+            None => return Ok(Json(format_search_response(&params.format, vec![]))),
         }
     } else {
         match &params.q {
             Some(q) => q.clone(),
-            None => return Ok(Json(vec![])),
+            None => return Ok(Json(format_search_response(&params.format, vec![]))),
         }
     };
 
     if query_text.trim().is_empty() {
-        return Ok(Json(vec![]));
+        return Ok(Json(format_search_response(&params.format, vec![])));
     }
 
     // Cap input length to prevent excessive FST automaton build times
@@ -891,7 +889,7 @@ async fn search(
                             } else { None },
                         internal: None,
                         });
-                        return Ok(Json(apply_search_filters(&params, response)));
+                        return Ok(Json(search_finalize(&params, response)));
                     }
                 }
             }
@@ -928,7 +926,7 @@ async fn search(
                         } else { None },
                     internal: None,
                     });
-                    return Ok(Json(apply_search_filters(&params, response)));
+                    return Ok(Json(search_finalize(&params, response)));
                 }
             }
         }
@@ -983,7 +981,7 @@ async fn search(
                         } else { None },
                     internal: None,
                     });
-                    return Ok(Json(apply_search_filters(&params, response)));
+                    return Ok(Json(search_finalize(&params, response)));
                 }
             }
         }
@@ -1046,7 +1044,7 @@ async fn search(
                     } else { None },
                 internal: None,
                 });
-                return Ok(Json(apply_search_filters(&params, response)));
+                return Ok(Json(search_finalize(&params, response)));
             }
         }
     }
@@ -1185,7 +1183,7 @@ async fn search(
             postcode_match_found = true;
         }
         if postcode_match_found {
-            return Ok(Json(apply_search_filters(&params, response)));
+            return Ok(Json(search_finalize(&params, response)));
         }
         // Postcode portion missed — could be a real-but-unindexed code
         // (we miss entire prefixes when the national address feed is broken,
@@ -1293,7 +1291,7 @@ async fn search(
         // place-name lookups for the same digit string will be useless —
         // short-circuit to keep the postcode result clean.
         if postcode_match_found {
-            return Ok(Json(apply_search_filters(&params, response)));
+            return Ok(Json(search_finalize(&params, response)));
         }
     }
 
@@ -1671,7 +1669,7 @@ async fn search(
                         } else { None },
                     internal: None,
                     });
-                    return Ok(Json(apply_search_filters(&params, response)));
+                    return Ok(Json(search_finalize(&params, response)));
                 }
             }
         }
@@ -2268,7 +2266,7 @@ async fn search(
     response.truncate(limit);
 
     metrics::record_result_count("search", response.len());
-    Ok(Json(response))
+    Ok(Json(format_search_response(&params.format, response)))
 }
 
 async fn autocomplete(
@@ -2426,7 +2424,6 @@ struct ReverseParams {
     #[serde(default = "default_zoom")]
     zoom: u8,
     #[serde(default = "default_format")]
-    #[allow(dead_code)]
     format: String,
     #[serde(default)]
     addressdetails: u8,
@@ -2565,7 +2562,7 @@ async fn reverse(
                     addr.insert("country_code".into(), serde_json::Value::String(cc));
                     result["address"] = serde_json::Value::Object(addr);
                 }
-                return Ok(Json(result));
+                return Ok(Json(format_single_response(&params.format, result)));
             }
         }
     }
@@ -2624,7 +2621,7 @@ async fn reverse(
         result["address"] = serde_json::Value::Object(addr);
     }
 
-    Ok(Json(result))
+    Ok(Json(format_single_response(&params.format, result)))
 }
 
 // ---------------------------------------------------------------------------
@@ -2634,7 +2631,7 @@ async fn reverse(
 async fn lookup(
     Query(params): Query<LookupParams>,
     State(state): State<Arc<AppState>>,
-) -> Result<Json<Vec<NominatimResult>>, (StatusCode, String)> {
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     if params.place_ids.is_none() && params.osm_ids.is_none() {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -2811,7 +2808,7 @@ async fn lookup(
         }
     }
 
-    Ok(Json(results))
+    Ok(Json(format_search_response(&params.format, results)))
 }
 
 // ---------------------------------------------------------------------------
@@ -3087,6 +3084,120 @@ fn to_nominatim_enriched(
         }
     }
     result
+}
+
+/// Map a `format!("{:?}", PlaceType).to_lowercase()` string to the
+/// Nominatim `addresstype` field emitted by `format=jsonv2` and
+/// `format=geojson`. Settlement / admin types pass through; streets,
+/// houses, and postcodes get their canonical Nominatim labels; POIs
+/// without a stored OSM `class` fall back to the place_type string
+/// (genuine class-based labelling needs audit item #2 / #28 — Phase 2.2).
+pub fn addresstype_from_str(s: &str) -> &str {
+    match s {
+        "country" | "state" | "county" | "city" | "town" | "village" | "hamlet"
+        | "suburb" | "quarter" | "neighbourhood" | "island" | "islet" => s,
+        "street" => "road",
+        "house" => "house",
+        "postcode" => "postcode",
+        // POI catch-all — keep the place_type string so clients can
+        // still discriminate landmark vs station vs airport. Nominatim
+        // would emit the OSM `class` here (e.g. "amenity", "tourism"),
+        // which we don't yet store on `PlaceRecord`.
+        other => other,
+    }
+}
+
+/// Wrap a single Nominatim-shaped JSON object for `format=geojson`:
+/// produce a one-feature `FeatureCollection` with the object's lat/lon
+/// promoted into a Point geometry and the rest of the fields kept as
+/// `properties`. Top-level `licence` is hoisted out of properties so
+/// it appears once on the FeatureCollection (Nominatim's contract).
+fn wrap_single_as_geojson(obj: serde_json::Value) -> serde_json::Value {
+    let lat = obj.get("lat").and_then(|v| v.as_str()).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+    let lon = obj.get("lon").and_then(|v| v.as_str()).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+    serde_json::json!({
+        "type": "FeatureCollection",
+        "licence": NOMINATIM_LICENCE,
+        "features": [{
+            "type": "Feature",
+            "properties": obj,
+            "geometry": {"type": "Point", "coordinates": [lon, lat]},
+        }],
+    })
+}
+
+/// Augment a NominatimResult-shaped object with the v2 fields
+/// (`addresstype`, `name`). `name` is the leading element of the
+/// composed display_name (`compose_display_name` puts the primary
+/// name first), so split-on-first-comma recovers it cheaply.
+fn enrich_jsonv2(mut obj: serde_json::Value) -> serde_json::Value {
+    if let Some(t) = obj.get("type").and_then(|v| v.as_str()) {
+        obj["addresstype"] = serde_json::Value::String(addresstype_from_str(t).to_owned());
+    }
+    let name = obj
+        .get("display_name")
+        .and_then(|v| v.as_str())
+        .map(|s| s.split(',').next().unwrap_or("").trim().to_owned())
+        .unwrap_or_default();
+    obj["name"] = serde_json::Value::String(name);
+    obj
+}
+
+/// Format a Vec<NominatimResult> for the requested response shape.
+/// `format=json` (default) returns a plain JSON array; `format=jsonv2`
+/// adds `addresstype` and `name` to each result; `format=geojson`
+/// wraps results in a `FeatureCollection`. Unknown formats fall back
+/// to `json` (mirrors Nominatim's lenient handling).
+fn format_search_response(format: &str, results: Vec<NominatimResult>) -> serde_json::Value {
+    let array: Vec<serde_json::Value> = results
+        .into_iter()
+        .map(|r| serde_json::to_value(r).unwrap_or(serde_json::Value::Null))
+        .collect();
+
+    match format {
+        "jsonv2" => {
+            let v2: Vec<serde_json::Value> = array.into_iter().map(enrich_jsonv2).collect();
+            serde_json::Value::Array(v2)
+        }
+        "geojson" => {
+            let features: Vec<serde_json::Value> = array
+                .into_iter()
+                .map(|v| {
+                    let lat = v.get("lat").and_then(|x| x.as_str()).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+                    let lon = v.get("lon").and_then(|x| x.as_str()).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+                    serde_json::json!({
+                        "type": "Feature",
+                        "properties": v,
+                        "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                    })
+                })
+                .collect();
+            serde_json::json!({
+                "type": "FeatureCollection",
+                "licence": NOMINATIM_LICENCE,
+                "features": features,
+            })
+        }
+        _ => serde_json::Value::Array(array),
+    }
+}
+
+/// Format a single Nominatim-shaped JSON object (e.g. /reverse output)
+/// for the requested response shape. `json` and `jsonv2` keep the
+/// object form; `geojson` wraps in a FeatureCollection.
+fn format_single_response(format: &str, obj: serde_json::Value) -> serde_json::Value {
+    match format {
+        "jsonv2" => enrich_jsonv2(obj),
+        "geojson" => wrap_single_as_geojson(obj),
+        _ => obj,
+    }
+}
+
+/// Run filters then format. Single helper called at every /search
+/// return site so all eight branches honour `format=` consistently.
+fn search_finalize(params: &SearchParams, results: Vec<NominatimResult>) -> serde_json::Value {
+    let filtered = apply_search_filters(params, results);
+    format_search_response(&params.format, filtered)
 }
 
 /// Parse a comma-separated `place_id` list (from `exclude_place_ids=`)
@@ -4822,6 +4933,121 @@ mod tests {
         );
         // Postcode "Sweden" (theoretical) is preserved, country dedups.
         assert_eq!(s, "Some Place, Sweden");
+    }
+
+    // -----------------------------------------------------------------------
+    // Output formats (TODO_NOMINATIM_PARITY Phase 1.4: #12 jsonv2, #13 geojson)
+    // -----------------------------------------------------------------------
+
+    fn mk_simple_result() -> NominatimResult {
+        NominatimResult {
+            place_id: 42,
+            osm_type: Some("node".into()),
+            osm_id: Some(123),
+            display_name: "Stockholm, Stockholms län, Sweden".into(),
+            lat: "59.3293".into(),
+            lon: "18.0686".into(),
+            place_type: "city".into(),
+            importance: 0.7,
+            match_type: None,
+            address: None,
+            internal: None,
+        }
+    }
+
+    #[test]
+    fn test_format_search_response_default_json_array() {
+        let v = format_search_response("json", vec![mk_simple_result()]);
+        assert!(v.is_array(), "format=json returns a JSON array");
+        let arr = v.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["type"], "city");
+        // No v2 fields on plain json:
+        assert!(arr[0].get("addresstype").is_none());
+        assert!(arr[0].get("name").is_none());
+    }
+
+    #[test]
+    fn test_format_search_response_jsonv2_adds_addresstype_and_name() {
+        let v = format_search_response("jsonv2", vec![mk_simple_result()]);
+        let arr = v.as_array().unwrap();
+        assert_eq!(arr[0]["addresstype"], "city");
+        assert_eq!(arr[0]["name"], "Stockholm");
+    }
+
+    #[test]
+    fn test_format_search_response_geojson_wraps_feature_collection() {
+        let v = format_search_response("geojson", vec![mk_simple_result()]);
+        assert_eq!(v["type"], "FeatureCollection");
+        assert_eq!(v["licence"], NOMINATIM_LICENCE);
+        let features = v["features"].as_array().unwrap();
+        assert_eq!(features.len(), 1);
+        assert_eq!(features[0]["type"], "Feature");
+        // Geometry coordinates are [lon, lat] per RFC 7946.
+        let coords = features[0]["geometry"]["coordinates"].as_array().unwrap();
+        assert!((coords[0].as_f64().unwrap() - 18.0686).abs() < 1e-6);
+        assert!((coords[1].as_f64().unwrap() - 59.3293).abs() < 1e-6);
+        // Properties carry the original Nominatim fields.
+        assert_eq!(features[0]["properties"]["place_id"], 42);
+    }
+
+    #[test]
+    fn test_format_search_response_unknown_format_falls_back_to_json() {
+        let v = format_search_response("xml", vec![mk_simple_result()]);
+        assert!(v.is_array(), "unknown format mirrors json");
+    }
+
+    #[test]
+    fn test_format_search_response_empty_results() {
+        // An empty vec must still produce the right *outer* shape so
+        // clients can rely on the contract.
+        assert!(format_search_response("json", vec![]).is_array());
+        assert!(format_search_response("jsonv2", vec![]).is_array());
+        let geo = format_search_response("geojson", vec![]);
+        assert_eq!(geo["type"], "FeatureCollection");
+        assert_eq!(geo["features"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_format_single_response_geojson_wraps_one_feature() {
+        let obj = serde_json::json!({
+            "place_id": 7,
+            "lat": "59.0",
+            "lon": "18.0",
+            "type": "city",
+            "display_name": "Test, Sweden",
+        });
+        let v = format_single_response("geojson", obj);
+        assert_eq!(v["type"], "FeatureCollection");
+        assert_eq!(v["features"].as_array().unwrap().len(), 1);
+        assert_eq!(v["features"][0]["properties"]["place_id"], 7);
+    }
+
+    #[test]
+    fn test_format_single_response_jsonv2_enriches_in_place() {
+        let obj = serde_json::json!({
+            "place_id": 7,
+            "lat": "59.0",
+            "lon": "18.0",
+            "type": "town",
+            "display_name": "Sigtuna, Stockholms län, Sweden",
+        });
+        let v = format_single_response("jsonv2", obj);
+        assert_eq!(v["addresstype"], "town");
+        assert_eq!(v["name"], "Sigtuna");
+        assert_eq!(v["place_id"], 7);
+    }
+
+    #[test]
+    fn test_addresstype_from_str() {
+        assert_eq!(addresstype_from_str("city"), "city");
+        assert_eq!(addresstype_from_str("country"), "country");
+        assert_eq!(addresstype_from_str("street"), "road");
+        assert_eq!(addresstype_from_str("house"), "house");
+        assert_eq!(addresstype_from_str("postcode"), "postcode");
+        // POI catch-all keeps the place_type label
+        assert_eq!(addresstype_from_str("landmark"), "landmark");
+        assert_eq!(addresstype_from_str("station"), "station");
     }
 
     // -----------------------------------------------------------------------
