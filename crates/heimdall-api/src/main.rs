@@ -33,6 +33,7 @@ mod auth;
 mod fetch;
 mod manifest;
 mod metrics;
+mod polygon_output;
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -227,6 +228,26 @@ struct SearchParams {
     #[serde(default)]
     #[allow(dead_code)]
     email: Option<String>,
+
+    /// Phase 3.1 (audit #17) — emit the record's polygon as GeoJSON
+    /// (`geojson` field, JSON object). Falls back to bbox-as-polygon
+    /// for records without a stored admin polygon.
+    #[serde(default)]
+    polygon_geojson: u8,
+    /// Phase 3.1 — KML output (`geokml` field, string).
+    #[serde(default)]
+    polygon_kml: u8,
+    /// Phase 3.1 — SVG path output (`svg` field, string `M…L…Z`).
+    #[serde(default)]
+    polygon_svg: u8,
+    /// Phase 3.1 — WKT output (`geotext` field, `POLYGON((…))` string).
+    #[serde(default)]
+    polygon_text: u8,
+    /// Phase 3.1 — Douglas-Peucker simplification epsilon in degrees.
+    /// `0.0` returns the original ring. Caller-tunable; typical values
+    /// 0.001–0.01 (≈100 m–1 km) for low-zoom display.
+    #[serde(default)]
+    polygon_threshold: Option<f64>,
 }
 
 fn default_format() -> String { "json".to_owned() }
@@ -333,6 +354,17 @@ struct LookupParams {
     namedetails: u8,
     #[serde(default, rename = "accept-language")]
     accept_language: Option<String>,
+    /// Phase 3.1 — polygon output flags (see `SearchParams`).
+    #[serde(default)]
+    polygon_geojson: u8,
+    #[serde(default)]
+    polygon_kml: u8,
+    #[serde(default)]
+    polygon_svg: u8,
+    #[serde(default)]
+    polygon_text: u8,
+    #[serde(default)]
+    polygon_threshold: Option<f64>,
 }
 
 #[derive(Debug, Default)]
@@ -373,6 +405,15 @@ struct NominatimResult {
     /// and the underlying record has a payload in the per-country sidecar.
     #[allow(dead_code)] // serialised via custom `Serialize`
     namedetails: Option<Vec<(String, String)>>,
+
+    /// Phase 3.1 — Nominatim `polygon_geojson` / `polygon_kml` /
+    /// `polygon_svg` / `polygon_text`. Populated when the client
+    /// requests at least one polygon format AND the record either has
+    /// a stored admin polygon (via the runtime PiP sidecar) or a bbox
+    /// to fall back on. Empty when the request flagged no formats —
+    /// this is the steady-state default and zero-cost.
+    #[allow(dead_code)] // serialised via custom `Serialize`
+    polygon_outputs: Option<crate::polygon_output::PolygonOutputs>,
 
     /// Internal: (country_index, record_id) for filters that need to
     /// re-fetch the underlying record (e.g. city-context tier). `None`
@@ -534,6 +575,9 @@ impl Serialize for NominatimResult {
                 .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
                 .collect();
             m.serialize_entry("namedetails", &map)?;
+        }
+        if let Some(ref po) = self.polygon_outputs {
+            po.serialize_into(&mut m)?;
         }
         m.end()
     }
@@ -1069,7 +1113,7 @@ async fn search(
                                     country_code: Some("us".to_owned()),
                                 })
                             } else { None },
-                        class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
+                        class: None, boundingbox: None, extratags: None, namedetails: None, polygon_outputs: None, internal: None,
                         });
                         return Ok(Json(search_finalize(&params, &state, &locales, response)));
                     }
@@ -1106,7 +1150,7 @@ async fn search(
                                 country_code: Some(cc),
                             })
                         } else { None },
-                    class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
+                    class: None, boundingbox: None, extratags: None, namedetails: None, polygon_outputs: None, internal: None,
                     });
                     return Ok(Json(search_finalize(&params, &state, &locales, response)));
                 }
@@ -1161,7 +1205,7 @@ async fn search(
                                 country_code: Some("us".to_owned()),
                             })
                         } else { None },
-                    class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
+                    class: None, boundingbox: None, extratags: None, namedetails: None, polygon_outputs: None, internal: None,
                     });
                     return Ok(Json(search_finalize(&params, &state, &locales, response)));
                 }
@@ -1224,7 +1268,7 @@ async fn search(
                             country_code: Some("us".to_owned()),
                         })
                     } else { None },
-                class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
+                class: None, boundingbox: None, extratags: None, namedetails: None, polygon_outputs: None, internal: None,
                 });
                 return Ok(Json(search_finalize(&params, &state, &locales, response)));
             }
@@ -1360,7 +1404,7 @@ async fn search(
                         country_code: Some(cc),
                     })
                 } else { None },
-            class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
+            class: None, boundingbox: None, extratags: None, namedetails: None, polygon_outputs: None, internal: None,
             });
             postcode_match_found = true;
         }
@@ -1462,7 +1506,7 @@ async fn search(
                                 country_code: Some(cc),
                             })
                         } else { None },
-                    class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
+                    class: None, boundingbox: None, extratags: None, namedetails: None, polygon_outputs: None, internal: None,
                     });
                     postcode_match_found = true;
                     break;
@@ -1849,7 +1893,7 @@ async fn search(
                                 country_code: Some(cc),
                             })
                         } else { None },
-                    class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
+                    class: None, boundingbox: None, extratags: None, namedetails: None, polygon_outputs: None, internal: None,
                     });
                     return Ok(Json(search_finalize(&params, &state, &locales, response)));
                 }
@@ -1945,7 +1989,7 @@ async fn search(
                                 &r, &addr_query, country, &cc,
                             ))
                         } else { None },
-                    class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
+                    class: None, boundingbox: None, extratags: None, namedetails: None, polygon_outputs: None, internal: None,
                     });
                 }
                 if response.iter().any(|r| r.match_type.as_deref() == Some("address")) {
@@ -2001,7 +2045,7 @@ async fn search(
                                     country_code: Some(cc.clone()),
                                 })
                             } else { None },
-                        class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
+                        class: None, boundingbox: None, extratags: None, namedetails: None, polygon_outputs: None, internal: None,
                         });
                         break;
                     }
@@ -2081,7 +2125,7 @@ async fn search(
                                         country_code: Some(cc.clone()),
                                     })
                                 } else { None },
-                            class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
+                            class: None, boundingbox: None, extratags: None, namedetails: None, polygon_outputs: None, internal: None,
                             });
                             break;
                         }
@@ -2453,6 +2497,17 @@ async fn search(
         params.extratags != 0,
         params.namedetails != 0,
     );
+    enrich_with_polygons(
+        &state,
+        &mut response,
+        crate::polygon_output::PolygonRequest::from_flags(
+            params.polygon_geojson,
+            params.polygon_kml,
+            params.polygon_svg,
+            params.polygon_text,
+            params.polygon_threshold,
+        ),
+    );
 
     metrics::record_result_count("search", response.len());
     Ok(Json(format_search_response(&params.format, response)))
@@ -2640,6 +2695,17 @@ struct ReverseParams {
     namedetails: u8,
     #[serde(default, rename = "accept-language")]
     accept_language: Option<String>,
+    /// Phase 3.1 — polygon output flags (see `SearchParams`).
+    #[serde(default)]
+    polygon_geojson: u8,
+    #[serde(default)]
+    polygon_kml: u8,
+    #[serde(default)]
+    polygon_svg: u8,
+    #[serde(default)]
+    polygon_text: u8,
+    #[serde(default)]
+    polygon_threshold: Option<f64>,
 }
 
 fn default_zoom() -> u8 { 16 }
@@ -2804,6 +2870,37 @@ async fn reverse(
                 if params.namedetails != 0 {
                     result["namedetails"] = serde_json::Value::Object(serde_json::Map::new());
                 }
+                // Phase 3.1 — synthetic address branch: fall back to the
+                // synthesised ~50 m bbox rendered as a polygon. Real
+                // building polygons aren't on disk for individual
+                // addresses, but emitting *something* keeps the response
+                // shape stable for clients that hard-code a polygon read.
+                let polygon_request = crate::polygon_output::PolygonRequest::from_flags(
+                    params.polygon_geojson,
+                    params.polygon_kml,
+                    params.polygon_svg,
+                    params.polygon_text,
+                    params.polygon_threshold,
+                );
+                if polygon_request.any() {
+                    let bb = synthetic_boundingbox(
+                        addr_result.coord.lat_f64(),
+                        addr_result.coord.lon_f64(),
+                    );
+                    if let (Ok(s), Ok(n), Ok(w), Ok(e)) = (
+                        bb[0].parse::<f64>(), bb[1].parse::<f64>(),
+                        bb[2].parse::<f64>(), bb[3].parse::<f64>(),
+                    ) {
+                        let ring = crate::polygon_output::bbox_as_ring(s, n, w, e);
+                        let outputs = crate::polygon_output::PolygonOutputs::render(
+                            &[ring], polygon_request,
+                        );
+                        if let Some(v) = outputs.geojson { result["geojson"] = v; }
+                        if let Some(v) = outputs.kml     { result["geokml"]  = serde_json::Value::String(v); }
+                        if let Some(v) = outputs.svg     { result["svg"]     = serde_json::Value::String(v); }
+                        if let Some(v) = outputs.text    { result["geotext"] = serde_json::Value::String(v); }
+                    }
+                }
                 return Ok(Json(format_single_response(&params.format, result)));
             }
         }
@@ -2896,6 +2993,24 @@ async fn reverse(
                 .collect::<serde_json::Map<_, _>>())
             .unwrap_or_default();
         result["namedetails"] = serde_json::Value::Object(map);
+    }
+
+    // Phase 3.1 — polygon outputs on the place branch. Admin records
+    // get the runtime PiP polygon; everything else falls back to bbox.
+    let polygon_request = crate::polygon_output::PolygonRequest::from_flags(
+        params.polygon_geojson,
+        params.polygon_kml,
+        params.polygon_svg,
+        params.polygon_text,
+        params.polygon_threshold,
+    );
+    if polygon_request.any() {
+        let rings = polygon_rings_for_record(country, &record, polygon_request.threshold);
+        let outputs = crate::polygon_output::PolygonOutputs::render(&rings, polygon_request);
+        if let Some(v) = outputs.geojson { result["geojson"] = v; }
+        if let Some(v) = outputs.kml     { result["geokml"]  = serde_json::Value::String(v); }
+        if let Some(v) = outputs.svg     { result["svg"]     = serde_json::Value::String(v); }
+        if let Some(v) = outputs.text    { result["geotext"] = serde_json::Value::String(v); }
     }
 
     Ok(Json(format_single_response(&params.format, result)))
@@ -3010,6 +3125,7 @@ async fn lookup(
                 address,
                 extratags: None,
                 namedetails: None,
+                polygon_outputs: None,
                 internal: Some((country_index as u16, record_id)),
             });
         }
@@ -3093,6 +3209,7 @@ async fn lookup(
                     address,
                     extratags: None,
                     namedetails: None,
+                    polygon_outputs: None,
                     internal: Some((country_index as u16, record_id)),
                 });
             }
@@ -3100,7 +3217,8 @@ async fn lookup(
         }
     }
 
-    // Phase 1.3 + 2.3 — locale overrides then sidecar enrichment.
+    // Phase 1.3 + 2.3 + 3.1 — locale overrides, sidecar enrichment,
+    // polygon outputs.
     let mut results = results;
     apply_locale_overrides(&state, &mut results, &locales);
     enrich_with_sidecars(
@@ -3108,6 +3226,17 @@ async fn lookup(
         &mut results,
         params.extratags != 0,
         params.namedetails != 0,
+    );
+    enrich_with_polygons(
+        &state,
+        &mut results,
+        crate::polygon_output::PolygonRequest::from_flags(
+            params.polygon_geojson,
+            params.polygon_kml,
+            params.polygon_svg,
+            params.polygon_text,
+            params.polygon_threshold,
+        ),
     );
 
     Ok(Json(format_search_response(&params.format, results)))
@@ -3142,9 +3271,20 @@ struct DetailsParams {
     #[serde(default)]
     #[allow(dead_code)]
     keywords: u8,
+    /// Phase 3.1 — polygon output flags. /details has always emitted a
+    /// `geometry` block (currently bbox-as-polygon); these flags add
+    /// the same Nominatim-shaped per-format payloads (`geojson`,
+    /// `geokml`, `svg`, `geotext`) that /search and /reverse expose.
     #[serde(default)]
-    #[allow(dead_code)]
     polygon_geojson: u8,
+    #[serde(default)]
+    polygon_kml: u8,
+    #[serde(default)]
+    polygon_svg: u8,
+    #[serde(default)]
+    polygon_text: u8,
+    #[serde(default)]
+    polygon_threshold: Option<f64>,
 }
 
 async fn details(
@@ -3257,7 +3397,22 @@ async fn details(
         .and_then(|v| v.as_str())
         .map(|s| s.to_owned());
 
-    let body = serde_json::json!({
+    // Phase 3.1 — geometry is the runtime admin polygon (rendered as
+    // GeoJSON Polygon / MultiPolygon) when the record maps to one of
+    // the stored admin tiers; otherwise the bbox four-corner fallback
+    // (Phase 3.2's original behaviour). The threshold parameter applies
+    // when the caller wants a simplified outline.
+    let polygon_request = crate::polygon_output::PolygonRequest::from_flags(
+        params.polygon_geojson,
+        params.polygon_kml,
+        params.polygon_svg,
+        params.polygon_text,
+        params.polygon_threshold,
+    );
+    let geometry_rings = polygon_rings_for_record(country, &record, polygon_request.threshold);
+    let geometry = crate::polygon_output::rings_to_geojson(&geometry_rings);
+
+    let mut body = serde_json::json!({
         "place_id": stable_place_id(&record),
         "parent_place_id": serde_json::Value::Null,
         "osm_type": osm_type_from_flags(record.flags),
@@ -3282,26 +3437,25 @@ async fn details(
             "type": "Point",
             "coordinates": [record.coord.lon_f64(), record.coord.lat_f64()],
         },
-        "geometry": {
-            // Phase 3.2 v1 ships the bbox as the geometry. Full polygon
-            // output is Phase 3.1 (#17). When that lands, swap in the
-            // real polygon for admin records (we have them via the
-            // runtime PiP sidecar) and the way bbox for non-admin.
-            "type": "Polygon",
-            "coordinates": [[
-                [west, south],
-                [east, south],
-                [east, north],
-                [west, north],
-                [west, south],
-            ]],
-        },
+        "geometry": geometry,
         "boundingbox": bbox,
         "extratags": extratags_map,
         "namedetails": namedetails_map,
         "display_name": display_name,
         "licence": NOMINATIM_LICENCE,
     });
+
+    // Phase 3.1 — when the caller asks for additional polygon formats
+    // (kml / svg / wkt), attach them alongside the GeoJSON `geometry`.
+    if polygon_request.any() {
+        let outputs = crate::polygon_output::PolygonOutputs::render(
+            &geometry_rings, polygon_request,
+        );
+        if let Some(v) = outputs.geojson { body["geojson"] = v; }
+        if let Some(v) = outputs.kml     { body["geokml"]  = serde_json::Value::String(v); }
+        if let Some(v) = outputs.svg     { body["svg"]     = serde_json::Value::String(v); }
+        if let Some(v) = outputs.text    { body["geotext"] = serde_json::Value::String(v); }
+    }
 
     let _ = params.format;
     Ok(Json(body))
@@ -3507,6 +3661,7 @@ fn posting_to_nominatim(
         address,
         extratags: None,
         namedetails: None,
+        polygon_outputs: None,
         internal: Some((country_idx as u16, posting.record_id)),
     })
 }
@@ -3572,7 +3727,7 @@ fn to_nominatim(
         importance: r.importance as f64 / 65535.0,
         match_type: Some(match_type_str.to_owned()),
         address,
-        class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
+        class: None, boundingbox: None, extratags: None, namedetails: None, polygon_outputs: None, internal: None,
     }
 }
 
@@ -3682,6 +3837,7 @@ fn qid_lookup(
             address,
             extratags: None,
             namedetails: None,
+            polygon_outputs: None,
             internal: Some((*country_index as u16, record_id)),
         });
     }
@@ -3961,6 +4117,17 @@ fn search_finalize(
         params.extratags != 0,
         params.namedetails != 0,
     );
+    enrich_with_polygons(
+        state,
+        &mut filtered,
+        crate::polygon_output::PolygonRequest::from_flags(
+            params.polygon_geojson,
+            params.polygon_kml,
+            params.polygon_svg,
+            params.polygon_text,
+            params.polygon_threshold,
+        ),
+    );
     format_search_response(&params.format, filtered)
 }
 
@@ -4134,6 +4301,87 @@ fn enrich_with_sidecars(
             );
         }
     }
+}
+
+/// Phase 3.1 (audit #17) — populate `polygon_outputs` on each result
+/// when at least one polygon format flag is set. Admin records (Country,
+/// State, County, City, Town) get their stored runtime polygon; everything
+/// else (POIs, suburbs, neighbourhoods, synthetic postcode rows) falls back
+/// to the record's bbox rendered as a four-corner polygon.
+fn enrich_with_polygons(
+    state: &AppState,
+    results: &mut [NominatimResult],
+    request: crate::polygon_output::PolygonRequest,
+) {
+    if !request.any() {
+        return;
+    }
+    for r in results.iter_mut() {
+        // Path A: record-backed result (search hit, lookup, /reverse place
+        // branch). Walk the country's runtime PiP sidecar by place_type +
+        // admin_id; fall through to bbox-as-ring when no polygon matches.
+        let rings: Vec<Vec<(f64, f64)>> = if let Some((c_idx, rec_id)) = r.internal {
+            let country = match state.countries.get(c_idx as usize) {
+                Some(c) => c,
+                None => continue,
+            };
+            let record = match country.index.record_store().get(rec_id) {
+                Ok(rec) => rec,
+                Err(_) => continue,
+            };
+            polygon_rings_for_record(country, &record, request.threshold)
+        } else if let Some(ref bb) = r.boundingbox {
+            // Path B: synthetic result (postcode / zip / address row).
+            // The boundingbox strings are already the polygon — parse and
+            // wrap so clients can opt in just like for record-backed hits.
+            match (
+                bb[0].parse::<f64>(), bb[1].parse::<f64>(),
+                bb[2].parse::<f64>(), bb[3].parse::<f64>(),
+            ) {
+                (Ok(s), Ok(n), Ok(w), Ok(e)) =>
+                    vec![crate::polygon_output::bbox_as_ring(s, n, w, e)],
+                _ => continue,
+            }
+        } else {
+            continue;
+        };
+        r.polygon_outputs = Some(
+            crate::polygon_output::PolygonOutputs::render(&rings, request)
+        );
+    }
+}
+
+/// Phase 3.1 — resolve the polygon rings that should represent a place
+/// record. Returns the runtime admin polygon when the record is an
+/// admin-class place_type that maps cleanly to one of the two stored
+/// tiers, otherwise falls back to the per-record bbox rendered as a
+/// closed four-corner ring.
+///
+/// `simplify_eps` (`polygon_threshold` in degrees) trims the ring via
+/// Douglas-Peucker before returning. `0.0` returns the original ring.
+fn polygon_rings_for_record(
+    country: &CountryIndex,
+    record: &heimdall_core::types::PlaceRecord,
+    simplify_eps: f64,
+) -> Vec<Vec<(f64, f64)>> {
+    if let Some(ref polys) = country.admin_polygons {
+        if let Some(tier) = crate::polygon_output::place_type_to_admin_tier(record.place_type) {
+            let admin_id = match tier {
+                heimdall_core::admin_polygons::AdminTier::Admin1 => record.admin1_id,
+                heimdall_core::admin_polygons::AdminTier::Admin2 => record.admin2_id,
+            };
+            if admin_id != 0 {
+                let rings = polys.rings_for(tier, admin_id, simplify_eps);
+                if !rings.is_empty() {
+                    return rings;
+                }
+            }
+        }
+    }
+    // Fallback: four-corner bbox polygon. Every record has a bbox via
+    // Phase 2.2 (small synthesised one for nodes, real one for ways).
+    let (s, n, w, e) = record.bbox.decode_f64(record.coord);
+    vec![crate::polygon_output::bbox_as_ring(s, n, w, e)]
 }
 
 /// Parse a comma-separated `place_id` list (from `exclude_place_ids=`)
@@ -5396,6 +5644,11 @@ mod tests {
             exclude_place_ids: None,
             featuretype: None,
             email: None,
+            polygon_geojson: 0,
+            polygon_kml: 0,
+            polygon_svg: 0,
+            polygon_text: 0,
+            polygon_threshold: None,
         }
     }
 
@@ -5533,7 +5786,7 @@ mod tests {
             importance: 0.5,
             match_type: None,
             address: None,
-        class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
+        class: None, boundingbox: None, extratags: None, namedetails: None, polygon_outputs: None, internal: None,
         };
         assert!(result_in_bbox(&r, &bb));
     }
@@ -5555,7 +5808,7 @@ mod tests {
             importance: 0.5,
             match_type: None,
             address: None,
-        class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
+        class: None, boundingbox: None, extratags: None, namedetails: None, polygon_outputs: None, internal: None,
         };
         assert!(!result_in_bbox(&r, &bb));
     }
@@ -5577,7 +5830,7 @@ mod tests {
             importance: 0.5,
             match_type: None,
             address: None,
-        class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
+        class: None, boundingbox: None, extratags: None, namedetails: None, polygon_outputs: None, internal: None,
         };
         assert!(result_in_bbox(&r, &bb));
     }
@@ -5599,7 +5852,7 @@ mod tests {
             importance: 0.5,
             match_type: None,
             address: None,
-        class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
+        class: None, boundingbox: None, extratags: None, namedetails: None, polygon_outputs: None, internal: None,
         };
         assert!(!result_in_bbox(&r, &bb));
     }
@@ -5799,7 +6052,7 @@ mod tests {
             importance: 0.5,
             match_type: None,
             address: None,
-        class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
+        class: None, boundingbox: None, extratags: None, namedetails: None, polygon_outputs: None, internal: None,
         };
         let json = serde_json::to_string(&r).unwrap();
         assert!(!json.contains("address"));
@@ -5833,7 +6086,7 @@ mod tests {
                 country: Some("Sweden".into()),
                 country_code: Some("se".into()),
             }),
-        class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
+        class: None, boundingbox: None, extratags: None, namedetails: None, polygon_outputs: None, internal: None,
         };
         let json = serde_json::to_string(&r).unwrap();
         assert!(json.contains("\"address\""));
@@ -5851,7 +6104,7 @@ mod tests {
             display_name: "Test".into(),
             lat: "0".into(), lon: "0".into(),
             place_type: "city".into(),
-            importance: 0.5, match_type: None, address: None, class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
+            importance: 0.5, match_type: None, address: None, class: None, boundingbox: None, extratags: None, namedetails: None, polygon_outputs: None, internal: None,
         };
         let v: serde_json::Value = serde_json::to_value(&r).unwrap();
         assert_eq!(v["licence"], NOMINATIM_LICENCE);
@@ -5884,7 +6137,7 @@ mod tests {
             display_name: "Test".into(),
             lat: "0".into(), lon: "0".into(),
             place_type: "city".into(),
-            importance: 0.5, match_type: None, address: None, class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
+            importance: 0.5, match_type: None, address: None, class: None, boundingbox: None, extratags: None, namedetails: None, polygon_outputs: None, internal: None,
         };
         let v: serde_json::Value = serde_json::to_value(&r).unwrap();
         assert_eq!(v["place_rank"], 16);
@@ -5963,7 +6216,7 @@ mod tests {
             importance: 0.7,
             match_type: None,
             address: None,
-            class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
+            class: None, boundingbox: None, extratags: None, namedetails: None, polygon_outputs: None, internal: None,
         }
     }
 
@@ -6241,7 +6494,7 @@ mod tests {
             importance: 0.5,
             match_type: None,
             address: None,
-            class: None, boundingbox: None, extratags: None, namedetails: None, internal: None,
+            class: None, boundingbox: None, extratags: None, namedetails: None, polygon_outputs: None, internal: None,
         }
     }
 

@@ -1078,6 +1078,67 @@ coverage is the headline win.
 
 ---
 
+## Phase 3.1 — shipped (polygon outputs)
+
+Audit item #17. Wires `polygon_geojson`, `polygon_kml`, `polygon_svg`,
+`polygon_text`, `polygon_threshold` query params on /search, /reverse,
+/lookup, /details. No schema break, no new sidecars — uses the
+`runtime_polygons.bin` already shipped by Phase 2.1 plus a bbox
+fallback for non-admin records.
+
+### What's on the wire
+
+* New optional query flags on every results-bearing endpoint:
+  `polygon_geojson=1` (object — `{type:"Polygon"|"MultiPolygon", coordinates:…}`),
+  `polygon_kml=1` (`<Polygon>…</Polygon>` string), `polygon_svg=1`
+  (SVG `M…L…Z` path string), `polygon_text=1` (WKT
+  `POLYGON((…))` / `MULTIPOLYGON(((…)))` string).
+* Field names mirror Nominatim: `geojson`, `geokml`, `svg`, `geotext`.
+* `polygon_threshold=<degrees>` runs Douglas-Peucker simplification
+  on each ring before rendering. `0.0` (default) returns the
+  unsimplified ring. Typical values: 0.001–0.01 (≈100 m–1 km) for
+  low-zoom display.
+* Admin records (`Country`, `State`, `County`, `City`, `Town`) get
+  their stored runtime polygon via the per-country
+  `AdminPolygonIndex.rings_for(tier, admin_id, eps)` lookup.
+  Multi-ring admin regions (island municipalities, archipelago
+  states) render as `MultiPolygon` / multi-WKT.
+* Non-admin records (POIs, suburbs, neighbourhoods, synthetic
+  postcode/address rows) fall back to the record's bbox rendered as
+  a four-corner polygon. Always emits something so clients can
+  hard-code a polygon read.
+* /details previously emitted a synthesised four-corner polygon as
+  `geometry`; it now emits the real admin polygon (or bbox fallback)
+  via the same code path. The polygon flags additionally attach
+  per-format payloads alongside.
+
+### What's on disk
+
+Nothing new. `runtime_polygons.bin` was already shipped by Phase 2.1.
+The `simplify` algorithm runs on demand via `geo::algorithm::simplify::Simplify`.
+
+### Caveats
+
+* The admin polygon mapping uses `place_type → admin tier` as a
+  proxy: `Country/State` → admin1, `County/City/Town` → admin2.
+  `Suburb/Quarter/Neighbourhood/Village/Hamlet` fall to bbox because
+  their `admin2_id` points at the containing kommun (which would
+  mislead). This matches the practical user expectation that
+  /details on Stockholm returns the kommun polygon, not the
+  containing län.
+* SVG output is a raw geographic `M lon lat L … Z` path — consumers
+  apply their own viewport / transform. Nominatim historically
+  renders to a fixed viewbox; we keep coordinates in geographic
+  space so the path round-trips through any tooling that expects
+  `(lon, lat)` ordering.
+* No way / building / POI polygons yet — only admin geometry is
+  persisted in `runtime_polygons.bin`. Building polygons (Phase
+  2.4 added their *records* as places but not their polygons)
+  would need a parallel non-admin polygon sidecar — out of scope
+  for 3.1.
+
+---
+
 ## Phase 2 — done
 
 All eight items from the Phase 2 plan are now shipped:

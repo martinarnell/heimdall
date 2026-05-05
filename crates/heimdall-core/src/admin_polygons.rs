@@ -28,9 +28,18 @@
 use std::path::Path;
 
 use geo::{Contains, Coord as GeoCoord, LineString, Point, Polygon};
+use geo::algorithm::simplify::Simplify;
 use serde::{Deserialize, Serialize};
 
 use crate::error::HeimdallError;
+
+/// Which admin tier a record's polygon should be looked up against —
+/// admin1 for state/country-level records, admin2 for muni/city-level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdminTier {
+    Admin1,
+    Admin2,
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct RuntimePolygon {
@@ -122,6 +131,53 @@ impl AdminPolygonIndex {
     /// county but in a coverage gap between munis), or vice versa.
     pub fn containing(&self, lat: f64, lon: f64) -> (Option<u16>, Option<u16>) {
         (self.admin1_at(lat, lon), self.admin2_at(lat, lon))
+    }
+
+    /// Look up every ring sharing the given `admin_id` on the requested
+    /// tier. Multi-ring admin regions (island municipalities, archipelago
+    /// states) appear as multiple entries — the caller decides whether
+    /// to render them as separate `Polygon` features or as a single
+    /// `MultiPolygon`. Coordinates are returned as `(lat, lon)` to match
+    /// the on-disk format; format converters flip to `(lon, lat)` for
+    /// GeoJSON / WKT output.
+    ///
+    /// Optional `simplify_eps` applies Douglas-Peucker simplification with
+    /// the given epsilon (in degrees). Mirrors Nominatim's
+    /// `polygon_threshold=` parameter — 0.0 returns the original ring.
+    pub fn rings_for(
+        &self,
+        tier: AdminTier,
+        admin_id: u16,
+        simplify_eps: f64,
+    ) -> Vec<Vec<(f64, f64)>> {
+        let polys = match tier {
+            AdminTier::Admin1 => &self.admin1,
+            AdminTier::Admin2 => &self.admin2,
+        };
+        polys.iter()
+            .filter(|p| p.admin_id == admin_id)
+            .map(|p| {
+                let poly = if simplify_eps > 0.0 {
+                    p.polygon.simplify(&simplify_eps)
+                } else {
+                    p.polygon.clone()
+                };
+                poly.exterior().0.iter()
+                    .map(|c| (c.y, c.x)) // geo (x=lon, y=lat) → (lat, lon)
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// True when at least one ring is registered for `(tier, admin_id)`.
+    /// Cheap pre-flight to skip the rings_for allocation when nothing
+    /// matches.
+    pub fn has_rings_for(&self, tier: AdminTier, admin_id: u16) -> bool {
+        let polys = match tier {
+            AdminTier::Admin1 => &self.admin1,
+            AdminTier::Admin2 => &self.admin2,
+        };
+        polys.iter().any(|p| p.admin_id == admin_id)
     }
 }
 
@@ -251,6 +307,67 @@ mod tests {
         assert_eq!(idx.admin2_count(), 1);
         assert_eq!(idx.admin1_at(0.5, 0.5), Some(1));
         assert_eq!(idx.admin2_at(0.5, 0.5), Some(20));
+    }
+
+    #[test]
+    fn rings_for_returns_matching_admin() {
+        let idx = idx_from(
+            vec![unit_square(7, 0.0, 0.0), unit_square(8, 5.0, 5.0)],
+            vec![],
+        );
+        let rings = idx.rings_for(AdminTier::Admin1, 7, 0.0);
+        assert_eq!(rings.len(), 1);
+        assert_eq!(rings[0].len(), 5); // closed ring
+        assert!(rings[0].contains(&(0.0, 0.0)));
+        assert!(rings[0].contains(&(1.0, 1.0)));
+    }
+
+    #[test]
+    fn rings_for_returns_empty_for_unknown_admin() {
+        let idx = idx_from(vec![unit_square(7, 0.0, 0.0)], vec![]);
+        let rings = idx.rings_for(AdminTier::Admin1, 99, 0.0);
+        assert!(rings.is_empty());
+        assert!(!idx.has_rings_for(AdminTier::Admin1, 99));
+        assert!(idx.has_rings_for(AdminTier::Admin1, 7));
+    }
+
+    #[test]
+    fn rings_for_collects_multi_ring_admins() {
+        // Two separate squares with the same admin_id (island muni model).
+        let idx = idx_from(
+            vec![],
+            vec![
+                unit_square(42, 0.0, 0.0),
+                unit_square(42, 10.0, 10.0),
+            ],
+        );
+        let rings = idx.rings_for(AdminTier::Admin2, 42, 0.0);
+        assert_eq!(rings.len(), 2);
+    }
+
+    #[test]
+    fn rings_for_simplification_reduces_vertex_count() {
+        // 5-vertex axis-aligned square with a redundant point along one
+        // edge — Douglas-Peucker drops the colinear vertex when eps > 0.
+        let admin_id = 11;
+        let ring = vec![
+            (0.0, 0.0),
+            (0.0, 0.5), // redundant — colinear with (0,0)→(0,1)
+            (0.0, 1.0),
+            (1.0, 1.0),
+            (1.0, 0.0),
+            (0.0, 0.0),
+        ];
+        let raw = RuntimePolygon {
+            admin_id,
+            min_lat: 0.0, max_lat: 1.0, min_lon: 0.0, max_lon: 1.0,
+            ring,
+        };
+        let idx = idx_from(vec![raw], vec![]);
+        let unsimplified = idx.rings_for(AdminTier::Admin1, admin_id, 0.0);
+        let simplified = idx.rings_for(AdminTier::Admin1, admin_id, 0.001);
+        assert!(simplified[0].len() < unsimplified[0].len(),
+            "simplification should drop redundant points");
     }
 
     #[test]
