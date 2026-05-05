@@ -861,6 +861,43 @@ Phase 2.3 namedetails sidecar; this PR just consumes it.
 
 ---
 
+## Phase 3.2 — shipped (/details endpoint)
+
+Audit item #25. Place introspection endpoint. Sidecar-only — no schema
+break, leverages everything Phase 2.x already built.
+
+### What's on the wire
+
+* `GET /details?place_id=<u64>` — resolves via the same sidecar map
+  /lookup uses (`StablePlaceIdMap`, lazy-built on first hit). Stable
+  place_id required; synthetic records (postcodes, address rows) have
+  `place_id=0` and aren't introspectable.
+* `GET /details?osm_type=N|W|R&osm_id=<u64>` — alternative route via
+  the OSM identity. Useful for clients that round-tripped from
+  /search but stashed the OSM identifier rather than the place_id.
+* Response carries the introspection bundle Nominatim emits:
+  `place_id`, `osm_type`, `osm_id`, `category` (= class), `type`,
+  `localname` (Accept-Language honoured), `names` (= namedetails),
+  `addresstags` (admin1/admin2/country/country_code), `centroid`,
+  `geometry` (currently the bbox as a polygon — full polygon output
+  is Phase 3.1), `boundingbox`, `extratags`, `namedetails`,
+  `display_name`, `licence`. Empty maps emit as `{}` so clients can
+  key without length checks.
+* `place_id`/`osm_type`+`osm_id` are mutually accepted; place_id wins
+  when both are supplied. 400 on missing identifier; 404 when the
+  resolver doesn't find a record.
+
+### Deferred to Phase 3.1 (polygon outputs, audit #17)
+
+* Real polygon output for admin records (we have them in
+  `runtime_polygons.bin` from Phase 2.1) and for ways with stored
+  geometry.
+* `polygon_geojson=1` / `polygon_kml=1` / `polygon_svg=1` /
+  `polygon_text=1` query flags. Currently accepted-and-ignored (the
+  `keywords`/`polygon_geojson` params are silent no-ops).
+
+---
+
 ## Phase 2.6 — shipped (postcodes as searchable places)
 
 Audit item #31. Adds a new `PlaceType::Postcode` enum variant (slot 9,
