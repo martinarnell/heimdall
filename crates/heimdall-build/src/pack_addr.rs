@@ -23,6 +23,7 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use tracing::info;
 
 use heimdall_core::addr_store::AddrStoreBuilder;
+use heimdall_core::reverse::GeohashIndexBuilder;
 use heimdall_normalize::Normalizer;
 
 use crate::sort_buffer::PackOptions;
@@ -258,6 +259,13 @@ pub fn pack_addresses(
     let mut fst_keys: Vec<(Vec<u8>, u32)> = Vec::with_capacity(sorted_groups.len() * 2);
     let street_count = sorted_groups.len();
 
+    // TODO_NOMINATIM_PARITY Phase 1.1: collect (street_id, lat, lon) tuples to
+    // build a parallel geohash sidecar over street centroids. Reverse geocoding
+    // currently only walks the place-side geohash and never returns a road or
+    // house number — this index lets `/reverse` resolve "nearest street" the
+    // same way it resolves "nearest place".
+    let mut addr_gh = GeohashIndexBuilder::new();
+
     for (key, mut group) in sorted_groups {
         if group.houses.is_empty() { continue; }
         if group.display_name.len() >= 255 { continue; }
@@ -270,6 +278,17 @@ pub fn pack_addresses(
         let base_lat = group.houses[mid].lat;
         let base_lon = group.houses[mid].lon;
 
+        // Centroid for the addr-geohash sidecar — the geometric mean of the
+        // street's house coords. The 3×3 grid scan at query time only needs
+        // the centroid to fall in the right cell; the per-candidate distance
+        // score is computed against actual house coords later, so a slightly
+        // off-centre centroid still finds the correct street.
+        let house_count = group.houses.len() as i64;
+        let sum_lat: i64 = group.houses.iter().map(|h| h.lat as i64).sum();
+        let sum_lon: i64 = group.houses.iter().map(|h| h.lon as i64).sum();
+        let centroid_lat = (sum_lat / house_count) as f64 / 1_000_000.0;
+        let centroid_lon = (sum_lon / house_count) as f64 / 1_000_000.0;
+
         let house_entries: Vec<(u16, u8, i32, i32)> = group.houses.iter()
             .map(|h| (h.number, h.suffix, h.lat, h.lon))
             .collect();
@@ -281,6 +300,8 @@ pub fn pack_addresses(
             group.postcode,
             &house_entries,
         );
+
+        addr_gh.add(centroid_lat, centroid_lon, street_id);
 
         // Municipality-specific key
         let fst_key = format!("{}:{}", key.norm_street, group.muni_id);
@@ -299,6 +320,18 @@ pub fn pack_addresses(
         record_bytes as f64 / 1e6,
         street_count,
         total_addresses,
+    );
+
+    // Address-side spatial sidecar (TODO_NOMINATIM_PARITY Phase 1.1).
+    // Optional: AddressIndex::open() degrades gracefully when this file is
+    // missing, so old indices keep working until they're reindexed.
+    let addr_gh_path = output_dir.join("addr_geohash_index.bin");
+    let addr_gh_bytes = addr_gh.write(&addr_gh_path)
+        .map_err(|e| anyhow::anyhow!("addr_geohash_index.bin: {}", e))?;
+    info!(
+        "Address geohash index: {:.1} MB ({} streets indexed)",
+        addr_gh_bytes as f64 / 1e6,
+        street_count,
     );
 
     // Stable sort by raw key bytes — same order the FST builder expects

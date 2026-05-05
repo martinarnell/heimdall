@@ -265,6 +265,34 @@ impl GeohashIndex {
         ids
     }
 
+    /// Collect every record id in the 3×3 geohash grid surrounding (lat, lon).
+    /// No PlaceRecord lookups, no sorting — pure cell-level candidate gathering.
+    /// Used by callers that store something other than `PlaceRecord` (e.g.
+    /// the address-side index keys cells by `street_id` and resolves the
+    /// actual coord by walking the street's house list itself).
+    pub fn nearest_raw(&self, lat: f64, lon: f64) -> Vec<u32> {
+        let coord = geo::Coord { x: lon, y: lat };
+        let gh = match geohash::encode(coord, GEOHASH_PRECISION) {
+            Ok(h) => h,
+            Err(_) => return vec![],
+        };
+        let center_hash = geohash_to_u64(&gh);
+        let mut cell_hashes = vec![center_hash];
+        if let Ok(neighbors) = geohash::neighbors(&gh) {
+            for n in [
+                &neighbors.n, &neighbors.ne, &neighbors.e, &neighbors.se,
+                &neighbors.s, &neighbors.sw, &neighbors.w, &neighbors.nw,
+            ] {
+                cell_hashes.push(geohash_to_u64(n));
+            }
+        }
+        let mut ids: Vec<u32> = Vec::new();
+        for h in &cell_hashes {
+            ids.extend(self.records_in_cell(*h));
+        }
+        ids
+    }
+
     /// Reverse geocode: find nearest places to (lat, lon).
     /// Returns (record_id, distance_m) pairs sorted by distance.
     pub fn nearest(
