@@ -13,6 +13,7 @@ pub mod ngram;
 pub mod admin_polygons;
 pub mod class_type;
 pub mod sidecar_kv;
+pub mod wikidata_index;
 
 pub use types::*;
 pub use error::HeimdallError;

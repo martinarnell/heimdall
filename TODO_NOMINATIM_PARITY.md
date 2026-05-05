@@ -858,3 +858,32 @@ Phase 2.3 namedetails sidecar; this PR just consumes it.
 * The rest of the address pyramid (admin chain, country) stays
   unchanged for now — per-admin localisation needs a separate sidecar
   to ship.
+
+---
+
+## Phase 2.8 — shipped (Wikidata QID lookup)
+
+Audit item #33. Sidecar-only — no schema break, no global reindex.
+Old indices return no QID hits, but everything else keeps working.
+
+### What's on disk
+
+* New `wikidata_qids.bin` per index, postcard-encoded
+  `Vec<(String, u32)>` sorted by QID. One entry per QID — collisions
+  (same `wikidata=` tag on admin relation + admin node) are resolved
+  at build time by keeping the highest-importance record.
+* Built by `pack.rs` from the parquet `wikidata` column. Garbage values
+  (multi-QIDs, lowercase typos, non-Q prefixes) are silently dropped
+  by `WikidataIndexBuilder::add` via the `normalise_qid` validator.
+
+### What's on the wire
+
+* `/search?q=Qxxx` short-circuits the FST pipeline and resolves the
+  QID directly across every loaded country (countrycodes filter
+  honoured). Returns matches sorted by importance; falls through to
+  normal search if nothing matches, so a literal "Q1428" can still
+  hit a name FST entry.
+* Result shape is identical to a normal /search hit (stable place_id,
+  full Phase 2.2 class/type/bbox, Phase 2.3 sidecars work
+  end-to-end). `match_type` is set to `"qid"` so consumers can spot
+  QID-matched results.
