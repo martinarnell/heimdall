@@ -24,6 +24,7 @@ use heimdall_core::types::*;
 use heimdall_core::record_store::RecordStoreBuilder;
 use heimdall_core::reverse::GeohashIndexBuilder;
 use heimdall_core::class_type::ClassTypeBuilder;
+use heimdall_core::sidecar_kv::KvSidecarBuilder;
 use heimdall_normalize::Normalizer;
 use crate::enrich::EnrichResult;
 
@@ -216,6 +217,13 @@ pub fn pack(
 
     let mut class_type_builder = ClassTypeBuilder::new();
 
+    // Phase 2.3 — per-record sidecars for Nominatim `extratags` and
+    // `namedetails`. Sparse: only records with non-empty payloads are
+    // stored. Both surface in the API behind `?extratags=1` /
+    // `?namedetails=1` query flags.
+    let mut extratags_builder = KvSidecarBuilder::new();
+    let mut namedetails_builder = KvSidecarBuilder::new();
+
     // Stream parquet batch-by-batch — never holds all RawPlace in memory.
     // Only the key HashMaps + RecordStoreBuilder grow with data.
     {
@@ -268,6 +276,11 @@ pub fn pack(
                 .and_then(|c| c.as_any().downcast_ref::<Int32Array>().cloned());
             let bbox_east_arr = batch.column_by_name("bbox_east")
                 .and_then(|c| c.as_any().downcast_ref::<Int32Array>().cloned());
+            // Phase 2.3 — `extratags` column is optional (legacy parquet
+            // files predate it; non-OSM importers may not populate it).
+            // Missing column → empty extratags across the batch.
+            let extratags_arr = batch.column_by_name("extratags")
+                .and_then(|c| c.as_any().downcast_ref::<StringArray>().cloned());
 
             for i in 0..n {
                 let name = names.value(i);
@@ -418,6 +431,57 @@ pub fn pack(
 
                 let id = record_builder.add(record, name, &all_alts);
                 records_added += 1;
+
+                // Phase 2.3 — sidecar payloads for this record.
+                //
+                // `namedetails` always carries `name` plus whichever of the
+                // optional name flavours were tagged. `name:xx` keys come
+                // from `name_intl`; the merged-into-alt-name flavours
+                // (`short_name`, `loc_name`, `official_name`, …) are
+                // surfaced under the catch-all `alt_name=…;…` key since
+                // we don't preserve the original OSM tag in alt_names.
+                let mut namedetails: Vec<(String, String)> =
+                    Vec::with_capacity(1 + name_intl_arr.len());
+                namedetails.push(("name".to_owned(), name.to_owned()));
+                if !name_intl_arr.is_null(i) {
+                    for pair in name_intl_arr.value(i).split(';') {
+                        if let Some((lang, value)) = pair.split_once('=') {
+                            if !lang.is_empty() && !value.is_empty() {
+                                namedetails.push((format!("name:{}", lang), value.to_owned()));
+                            }
+                        }
+                    }
+                }
+                if !alt_strs.is_empty() {
+                    namedetails.push(("alt_name".to_owned(), alt_strs.join(";")));
+                }
+                if !old_strs.is_empty() {
+                    namedetails.push(("old_name".to_owned(), old_strs.join(";")));
+                }
+                namedetails_builder.add(id, namedetails);
+
+                // `extratags` from the parquet column (curated allowlist;
+                // see `extract::EXTRATAG_KEYS`). Empty for records sourced
+                // from non-OSM importers (Photon JSON, govt feeds) until
+                // those grow their own equivalents.
+                if let Some(ref col) = extratags_arr {
+                    if !col.is_null(i) {
+                        let pairs: Vec<(String, String)> = col.value(i)
+                            .split(';')
+                            .filter_map(|kv| {
+                                let mut sp = kv.splitn(2, '=');
+                                let k = sp.next()?;
+                                let v = sp.next()?;
+                                if k.is_empty() || v.is_empty() {
+                                    None
+                                } else {
+                                    Some((k.to_owned(), v.to_owned()))
+                                }
+                            })
+                            .collect();
+                        extratags_builder.add(id, pairs);
+                    }
+                }
 
                 geohash_builder.add(lat, lon, id);
 
@@ -592,6 +656,26 @@ pub fn pack(
     class_type_builder.write(&class_types_path)
         .map_err(|e| anyhow::anyhow!("write class_types.bin: {}", e))?;
     info!("class_types.bin: {} interned (class, type) pairs", class_type_builder.len() - 1);
+
+    // Phase 2.3 — per-record extratags + namedetails sidecars. Both files
+    // are optional from the API side: a missing file just means the
+    // corresponding `?extratags=1` / `?namedetails=1` flag yields no
+    // payload, so older indices keep working.
+    let extratags_path = output_dir.join("extratags.bin");
+    let extratags_count = extratags_builder.len();
+    extratags_builder.write(&extratags_path)
+        .map_err(|e| anyhow::anyhow!("write extratags.bin: {}", e))?;
+    let namedetails_path = output_dir.join("namedetails.bin");
+    let namedetails_count = namedetails_builder.len();
+    namedetails_builder.write(&namedetails_path)
+        .map_err(|e| anyhow::anyhow!("write namedetails.bin: {}", e))?;
+    info!(
+        "Phase 2.3 sidecars: extratags.bin {} records ({:.1} MB), namedetails.bin {} records ({:.1} MB)",
+        extratags_count,
+        std::fs::metadata(&extratags_path).map(|m| m.len() as f64 / 1e6).unwrap_or(0.0),
+        namedetails_count,
+        std::fs::metadata(&namedetails_path).map(|m| m.len() as f64 / 1e6).unwrap_or(0.0),
+    );
 
     // Write record store
     let record_store_path = output_dir.join("records.bin");
@@ -1277,6 +1361,7 @@ fn read_parquet(path: &Path) -> Result<Vec<RawPlace>> {
                 class: None,
                 class_value: None,
                 bbox: None,
+                extratags: vec![],
             });
         }
     }

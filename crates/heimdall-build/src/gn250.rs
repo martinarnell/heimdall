@@ -316,6 +316,7 @@ pub fn read_gn250_places(csv_path: &Path) -> Result<Vec<RawPlace>> {
             class: Some("place".to_owned()),
             class_value: None,
             bbox: None,
+            extratags: vec![],
         });
     }
 

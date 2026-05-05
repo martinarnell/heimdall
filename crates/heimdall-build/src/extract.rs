@@ -54,6 +54,38 @@ pub(crate) const MEANINGFUL_NODE_TAGS: &[&str] = &[
     "man_made",
 ];
 
+/// OSM tag keys surfaced by the API as Nominatim's `extratags` (Phase 2.3).
+/// Curated allowlist — captures the same tags Nominatim emits without
+/// dragging the long tail of OSM noise into the index.
+///
+/// `wikidata` and `population` are also stored in `RawPlace`'s typed fields
+/// (used for ranking and `/lookup` resolution); we still echo them into
+/// `extratags` so the API response shape exactly matches Nominatim.
+pub(crate) const EXTRATAG_KEYS: &[&str] = &[
+    "wikidata",
+    "wikipedia",
+    "population",
+    "capital",
+    "ele",
+    "opening_hours",
+    "phone",
+    "website",
+    "email",
+    "wheelchair",
+    "iata",
+    "icao",
+    "ref",
+    "operator",
+    "brand",
+    "cuisine",
+    "denomination",
+    "religion",
+];
+
+pub(crate) fn is_extratag_key(k: &str) -> bool {
+    EXTRATAG_KEYS.iter().any(|&t| t == k)
+}
+
 /// Tags that make a way worth indexing (with name)
 pub(crate) const MEANINGFUL_WAY_TAGS: &[&str] = &[
     "natural",
@@ -178,6 +210,9 @@ struct PendingWay {
     /// `("place","city")`, `("tourism","museum")`). Phase 2.2 — surfaces
     /// in the API as Nominatim-style `class` / `type`.
     osm_class_value: Option<(String, String)>,
+    /// Phase 2.3 — Nominatim `extratags`. Curated allowlist captured during
+    /// scan; surfaces verbatim in the API when `?extratags=1`.
+    extratags: Vec<(String, String)>,
     node_refs: Vec<i64>,
 }
 
@@ -193,6 +228,7 @@ struct PendingRelation {
     wikidata: Option<String>,
     place_type: PlaceType,
     osm_class_value: Option<(String, String)>,
+    extratags: Vec<(String, String)>,
     node_member_ids: Vec<i64>,
     way_members: Vec<(i64, String)>, // (way_id, role)
 }
@@ -566,6 +602,7 @@ pub fn extract_places(
                                             class: cls,
                                             class_value: cls_val,
                                             bbox,
+                                            extratags: pending.extratags.clone(),
                                         });
                                     }
                                 }
@@ -584,6 +621,7 @@ pub fn extract_places(
                                     alt_names: vec![], old_names: vec![], population: None,
                                     admin_level: None, wikidata: None, place_type: PlaceType::Unknown,
                                     osm_class_value: None,
+                                    extratags: vec![],
                                     node_refs,
                                 });
                             }
@@ -648,6 +686,7 @@ pub fn extract_places(
                                 admin1: None, admin2: None,
                                 population: pending.population, wikidata: pending.wikidata.clone(),
                                 class: cls, class_value: cls_val, bbox,
+                                extratags: pending.extratags.clone(),
                             });
                         }
                     }
@@ -666,6 +705,7 @@ pub fn extract_places(
                         alt_names: vec![], old_names: vec![], population: None,
                         admin_level: None, wikidata: None, place_type: PlaceType::Unknown,
                         osm_class_value: None,
+                        extratags: vec![],
                         node_refs,
                     });
                 }
@@ -730,6 +770,7 @@ pub fn extract_places(
                 admin1: None,
                 admin2: None,
                 population: pr.population,
+                extratags: pr.extratags.clone(),
                 wikidata: pr.wikidata.clone(),
                 class: cls,
                 class_value: cls_val,
@@ -826,8 +867,12 @@ fn scan_way(way: &osmpbf::Way) -> Option<PendingWay> {
     let mut has_wikipedia = false;
     let mut highway_value: Option<String> = None;
     let mut is_area = false;
+    let mut extratags: Vec<(String, String)> = vec![];
 
     for (k, v) in way.tags() {
+        if is_extratag_key(k) {
+            extratags.push((k.to_owned(), v.to_owned()));
+        }
         match k {
             "name" => name = Some(v.to_owned()),
             "place" => place_tag = Some(v.to_owned()),
@@ -945,6 +990,7 @@ fn scan_way(way: &osmpbf::Way) -> Option<PendingWay> {
         wikidata,
         place_type,
         osm_class_value,
+        extratags,
         node_refs,
     })
 }
@@ -962,8 +1008,12 @@ fn scan_relation(relation: &osmpbf::Relation) -> Option<PendingRelation> {
     let mut boundary_tag: Option<String> = None;
     let mut rel_type: Option<String> = None;
     let mut qualifying_tag: Option<(String, String)> = None;
+    let mut extratags: Vec<(String, String)> = vec![];
 
     for (k, v) in relation.tags() {
+        if is_extratag_key(k) {
+            extratags.push((k.to_owned(), v.to_owned()));
+        }
         match k {
             "name" => name = Some(v.to_owned()),
             "admin_level" => admin_level = v.parse().ok(),
@@ -1078,6 +1128,7 @@ fn scan_relation(relation: &osmpbf::Relation) -> Option<PendingRelation> {
         wikidata,
         place_type,
         osm_class_value,
+        extratags,
         node_member_ids,
         way_members,
     })
@@ -1146,6 +1197,7 @@ fn extract_named_node<'a>(
         admin1: None,
         admin2: None,
         population: parsed.population,
+        extratags: parsed.extratags,
         wikidata: parsed.wikidata,
         class: cls,
         class_value: cls_val,
@@ -1167,6 +1219,7 @@ pub(crate) struct ParsedTags {
     pub(crate) admin_level: Option<u8>,
     pub(crate) wikidata: Option<String>,
     pub(crate) qualifying_tag: Option<(String, String)>,
+    pub(crate) extratags: Vec<(String, String)>,
 }
 
 pub(crate) fn parse_tags<'a>(tags: impl Iterator<Item = (&'a str, &'a str)>) -> ParsedTags {
@@ -1180,9 +1233,13 @@ pub(crate) fn parse_tags<'a>(tags: impl Iterator<Item = (&'a str, &'a str)>) -> 
         admin_level: None,
         wikidata: None,
         qualifying_tag: None,
+        extratags: vec![],
     };
 
     for (k, v) in tags {
+        if is_extratag_key(k) {
+            parsed.extratags.push((k.to_owned(), v.to_owned()));
+        }
         match k {
             "name" => parsed.name = Some(v.to_owned()),
             "place" => parsed.place_tag = Some(v.to_owned()),
@@ -1630,6 +1687,7 @@ fn extract_addr_node<'a>(
                 admin1: None,
                 admin2: None,
                 population: None,
+                extratags: vec![],
                 wikidata: None,
                 class: Some("building".to_owned()),
                 class_value: Some("yes".to_owned()),
@@ -2617,6 +2675,10 @@ fn make_place_schema() -> std::sync::Arc<arrow::datatypes::Schema> {
         Field::new("bbox_north", DataType::Int32, true),
         Field::new("bbox_west",  DataType::Int32, true),
         Field::new("bbox_east",  DataType::Int32, true),
+        // Phase 2.3 — Nominatim `extratags` allowlist captured at extract.
+        // Encoded as semicolon-delimited "key=value;..." strings (same shape
+        // as `name_intl`). Pack reads it back, builds the per-record sidecar.
+        Field::new("extratags", DataType::Utf8, true),
     ]))
 }
 
@@ -2665,6 +2727,7 @@ fn flush_place_batch(
     let mut bbox_north_col: Vec<Option<i32>> = Vec::with_capacity(count);
     let mut bbox_west_col:  Vec<Option<i32>> = Vec::with_capacity(count);
     let mut bbox_east_col:  Vec<Option<i32>> = Vec::with_capacity(count);
+    let mut extratags_col: Vec<Option<String>> = Vec::with_capacity(count);
 
     for p in places.iter() {
         osm_ids.push(p.osm_id);
@@ -2706,6 +2769,17 @@ fn flush_place_batch(
         bbox_north_col.push(bn);
         bbox_west_col.push(bw);
         bbox_east_col.push(be);
+        extratags_col.push(if p.extratags.is_empty() {
+            None
+        } else {
+            Some(
+                p.extratags
+                    .iter()
+                    .map(|(k, v)| format!("{}={}", k, v))
+                    .collect::<Vec<_>>()
+                    .join(";"),
+            )
+        });
     }
 
     let batch = arrow::record_batch::RecordBatch::try_new(
@@ -2728,6 +2802,7 @@ fn flush_place_batch(
             Arc::new(Int32Array::from(bbox_north_col)),
             Arc::new(Int32Array::from(bbox_west_col)),
             Arc::new(Int32Array::from(bbox_east_col)),
+            Arc::new(StringArray::from(extratags_col)),
         ],
     )?;
 

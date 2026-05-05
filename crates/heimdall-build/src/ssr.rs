@@ -348,6 +348,7 @@ pub fn read_ssr_places(gml_path: &Path) -> Result<Vec<RawPlace>> {
                         class: Some("place".to_owned()),
                         class_value: None, // pack synthesises from place_type
                         bbox: None,
+                        extratags: vec![],
                     });
                 }
             }

@@ -772,8 +772,6 @@ when not backed by a real record.
 
 ### What's still open from the audit
 
-* **Items #18 / #19** (extratags + namedetails sidecars) — Phase 2.3.
-  Don't need a schema break; build a sidecar map keyed by `record_id`.
 * **Item #29** (buildings as places), **#30** (address interpolation),
   **#31** (postcode synthetic places), **#33** (Wikidata QID lookup) —
   Phases 2.4–2.8.
@@ -789,3 +787,49 @@ when not backed by a real record.
 * The pinned 190-query US baseline (`benchmarks/baseline-pre-parity.sqlite`)
   pre-dates this PR's response shape; expect drift on the `class` /
   `type` axes when the next compare run lands.
+
+---
+
+## Phase 2.3 — shipped (extratags + namedetails sidecars)
+
+Audit items #18 (`extratags=1`) and #19 (`namedetails=1`). Sidecar-only
+— no schema break, no global reindex. Records built before this PR
+keep working; they just respond with empty payloads when the new flags
+are set, since the sidecar files are absent.
+
+### What's on disk
+
+* New `extratags.bin` and `namedetails.bin` per index, postcard-encoded
+  `Vec<(record_id, Vec<(String, String)>)>` sorted by `record_id`. Both
+  are sparse — only records with non-empty payloads are stored. Sub-MB
+  for typical countries; capped at ~tens of MB even on dense countries
+  with rich Wikidata/Wikipedia coverage.
+* Built by `pack.rs` from a curated extract-time allowlist
+  (`extract::EXTRATAG_KEYS`: `wikidata`, `wikipedia`, `population`,
+  `capital`, `ele`, `opening_hours`, `phone`, `website`, `email`,
+  `wheelchair`, `iata`, `icao`, `ref`, `operator`, `brand`, `cuisine`,
+  `denomination`, `religion`).
+* `places.parquet` schema gains a nullable `extratags` column (semicolon-
+  delimited `key=value;…`, same encoding as `name_intl`). The merge
+  writer in `photon::write_places_parquet` was rounded out to carry the
+  new column too, so photon-merged countries preserve their extratags
+  through the merge step.
+
+### What's on the wire
+
+* New optional flags: `?extratags=1` and `?namedetails=1` on /search,
+  /reverse, /lookup. When set, every record-backed result carries an
+  `"extratags": {…}` and/or `"namedetails": {…}` JSON object. Empty
+  records emit `{}` — Nominatim does the same.
+* `namedetails` is composed at pack time from `name`, `name:xx`,
+  `alt_name` (semicolon-joined), `old_name` (semicolon-joined). The
+  finer flavours (`short_name`, `loc_name`, `official_name`, …) are
+  collapsed into `alt_name` because extract.rs doesn't yet preserve
+  the original tag key for those — separately tracked.
+* Synthetic /reverse results (address branch, postcode rows) emit
+  empty `{}` objects when the flag is set so the response shape stays
+  stable across record-backed and synthetic hits.
+
+### What's still open from the audit
+
+Same list as before, minus #18/#19.

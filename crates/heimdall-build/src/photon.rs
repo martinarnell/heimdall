@@ -257,6 +257,7 @@ pub fn parse_es_documents(docs: &[serde_json::Value]) -> PhotonParseResult {
                 class: (!osm_key.is_empty()).then(|| osm_key.to_owned()),
                 class_value: (!osm_value.is_empty()).then(|| osm_value.to_owned()),
                 bbox: None,
+                extratags: vec![],
             });
         }
 
@@ -412,6 +413,7 @@ pub fn parse_single_es_document(doc: &serde_json::Value) -> (Option<RawPlace>, O
             class: (!osm_key.is_empty()).then(|| osm_key.to_owned()),
             class_value: (!osm_value.is_empty()).then(|| osm_value.to_owned()),
             bbox: None,
+            extratags: vec![],
         })
     } else {
         None
@@ -627,6 +629,7 @@ pub fn parse(input: &Path) -> Result<PhotonParseResult> {
                 class: (!osm_key.is_empty()).then(|| osm_key.to_owned()),
                 class_value: (!osm_value.is_empty()).then(|| osm_value.to_owned()),
                 bbox: None,
+                extratags: vec![],
             });
         }
 
@@ -901,6 +904,7 @@ pub fn import(input: &Path, output: &Path) -> Result<PhotonImportResult> {
                 class: (!osm_key.is_empty()).then(|| osm_key.to_owned()),
                 class_value: (!osm_value.is_empty()).then(|| osm_value.to_owned()),
                 bbox: None,
+                extratags: vec![],
             });
         }
 
@@ -1146,6 +1150,12 @@ pub fn write_places_parquet(places: &[RawPlace], path: &Path) -> Result<()> {
         Field::new("alt_names", DataType::Utf8, true),
         Field::new("old_names", DataType::Utf8, true),
         Field::new("name_intl", DataType::Utf8, true),
+        // Phase 2.3 — Nominatim `extratags` allowlist captured at extract,
+        // serialised here as semicolon-delimited "key=value;..." (mirrors
+        // `name_intl`). Round-tripping through the merge writer keeps the
+        // post-merge parquet schema-compatible with pack.rs's reader so
+        // photon-merged countries preserve their extratags too.
+        Field::new("extratags", DataType::Utf8, true),
     ]));
 
     let chunk_size = 500_000;
@@ -1216,6 +1226,26 @@ pub fn write_places_parquet(places: &[RawPlace], path: &Path) -> Result<()> {
         let name_intl_refs: Vec<Option<&str>> =
             name_intl_strings.iter().map(|s| s.as_deref()).collect();
 
+        // Phase 2.3 extratags — identical "key=value;..." encoding.
+        let extratags_strings: Vec<Option<String>> = chunk
+            .iter()
+            .map(|p| {
+                if p.extratags.is_empty() {
+                    None
+                } else {
+                    Some(
+                        p.extratags
+                            .iter()
+                            .map(|(k, v)| format!("{}={}", k, v))
+                            .collect::<Vec<_>>()
+                            .join(";"),
+                    )
+                }
+            })
+            .collect();
+        let extratags_refs: Vec<Option<&str>> =
+            extratags_strings.iter().map(|s| s.as_deref()).collect();
+
         let batch = arrow::record_batch::RecordBatch::try_new(
             schema.clone(),
             vec![
@@ -1230,6 +1260,7 @@ pub fn write_places_parquet(places: &[RawPlace], path: &Path) -> Result<()> {
                 Arc::new(StringArray::from(alt_names)),
                 Arc::new(StringArray::from(old_names)),
                 Arc::new(StringArray::from(name_intl_refs)),
+                Arc::new(StringArray::from(extratags_refs)),
             ],
         )?;
         writer.write(&batch)?;

@@ -2373,6 +2373,11 @@ pub(crate) fn read_osm_places(parquet_path: &Path) -> Result<Vec<heimdall_core::
             .as_any()
             .downcast_ref::<StringArray>()
             .unwrap();
+        // Phase 2.3 — `extratags` is optional. Missing on legacy parquet files
+        // (pre-2.3 extracts) and on synthetic feeds that don't carry a tag map.
+        let extratags_col = batch
+            .column_by_name("extratags")
+            .and_then(|c| c.as_any().downcast_ref::<StringArray>().cloned());
 
         for i in 0..batch.num_rows() {
             let place_type = place_type_from_u8(place_types.value(i));
@@ -2416,6 +2421,22 @@ pub(crate) fn read_osm_places(parquet_path: &Path) -> Result<Vec<heimdall_core::
                     .collect()
             };
 
+            let extratags: Vec<(String, String)> = match extratags_col.as_ref() {
+                Some(col) if !col.is_null(i) => col
+                    .value(i)
+                    .split(';')
+                    .filter_map(|pair| {
+                        let parts: Vec<&str> = pair.splitn(2, '=').collect();
+                        if parts.len() == 2 {
+                            Some((parts[0].to_owned(), parts[1].to_owned()))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect(),
+                _ => vec![],
+            };
+
             places.push(RawPlace {
                 osm_id: osm_ids.value(i),
                 osm_type: OsmType::Node,
@@ -2446,6 +2467,7 @@ pub(crate) fn read_osm_places(parquet_path: &Path) -> Result<Vec<heimdall_core::
                 class: None,
                 class_value: None,
                 bbox: None,
+                extratags,
             });
         }
     }
