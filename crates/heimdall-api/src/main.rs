@@ -266,30 +266,90 @@ struct LookupParams {
     addressdetails: u8,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug)]
 struct NominatimResult {
     place_id: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
     osm_type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     osm_id: Option<u32>,
     display_name: String,
     lat: String,
     lon: String,
-    #[serde(rename = "type")]
     place_type: String,
     importance: f64,
-    #[serde(skip_serializing_if = "Option::is_none")]
     match_type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     address: Option<AddressDetails>,
 
     /// Internal: (country_index, record_id) for filters that need to
     /// re-fetch the underlying record (e.g. city-context tier). `None`
     /// for synthetic results (address rows, street rows) that aren't
     /// bound to a record. Not serialised.
-    #[serde(skip)]
     internal: Option<(u16, u32)>,
+}
+
+/// Nominatim's standard data-licence string. Emitted on every result
+/// (search / reverse / lookup) to match the upstream contract — some
+/// clients lint for the exact value.
+pub const NOMINATIM_LICENCE: &str =
+    "Data © OpenStreetMap contributors, ODbL 1.0. https://osm.org/copyright";
+
+/// Map a `format!("{:?}", PlaceType).to_lowercase()` string back to a
+/// Nominatim-style `place_rank` (4 = country, 8 = state, 12 = county,
+/// 16 = city, 21 = village, 26 = street, 30 = building/POI). Strings
+/// also cover synthetic result types ("postcode", "house") emitted by
+/// the address branch and zip-index lookups.
+///
+/// Source: https://nominatim.org/release-docs/develop/customize/Ranking/
+/// — values approximate Nominatim's table; exact parity isn't required
+/// since clients use rank for sort/dedupe, not equality.
+pub fn place_rank_from_str(s: &str) -> u16 {
+    match s {
+        "country" => 4,
+        "state" => 8,
+        "county" => 12,
+        "city" => 16,
+        "town" => 19,
+        "village" => 21,
+        "hamlet" | "farm" | "locality" => 22,
+        "suburb" | "quarter" | "neighbourhood" => 22,
+        "island" | "islet" => 17,
+        "square" => 25,
+        "street" => 26,
+        "lake" | "river" | "mountain" | "forest" | "bay" | "cape" => 22,
+        "airport" => 22,
+        "station" => 26,
+        "landmark" | "university" | "hospital" | "publicbuilding" | "park" => 30,
+        "postcode" => 21,
+        "house" => 30,
+        _ => 30,
+    }
+}
+
+impl Serialize for NominatimResult {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut m = s.serialize_map(None)?;
+        m.serialize_entry("place_id", &self.place_id)?;
+        m.serialize_entry("licence", NOMINATIM_LICENCE)?;
+        if let Some(ref v) = self.osm_type {
+            m.serialize_entry("osm_type", v)?;
+        }
+        if let Some(v) = self.osm_id {
+            m.serialize_entry("osm_id", &v)?;
+        }
+        m.serialize_entry("place_rank", &place_rank_from_str(&self.place_type))?;
+        m.serialize_entry("display_name", &self.display_name)?;
+        m.serialize_entry("lat", &self.lat)?;
+        m.serialize_entry("lon", &self.lon)?;
+        m.serialize_entry("type", &self.place_type)?;
+        m.serialize_entry("importance", &self.importance)?;
+        if let Some(ref v) = self.match_type {
+            m.serialize_entry("match_type", v)?;
+        }
+        if let Some(ref v) = self.address {
+            m.serialize_entry("address", v)?;
+        }
+        m.end()
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -2428,31 +2488,30 @@ async fn reverse(
                     Some(format!("{}", addr_result.postcode))
                 } else { None };
 
-                // Compose display_name as Nominatim does for an address hit.
-                // Skip empty parts so we don't emit "Hamngatan, , Stockholm"
-                // when (e.g.) suburb is missing.
-                let mut parts: Vec<String> = Vec::with_capacity(8);
-                if !addr_result.housenumber.is_empty() && !addr_result.street.is_empty() {
-                    parts.push(format!("{} {}", addr_result.housenumber, addr_result.street));
-                } else if !addr_result.street.is_empty() {
-                    parts.push(addr_result.street.clone());
-                }
-                let pick_settle = suburb.as_ref().or(city.as_ref()).or(town.as_ref()).or(village.as_ref());
-                if let Some(s) = suburb.as_ref() { parts.push(s.clone()); }
-                if let Some(s) = city.as_ref().or(town.as_ref()).or(village.as_ref()) {
-                    if Some(s) != suburb.as_ref() { parts.push(s.clone()); }
-                }
-                if let Some(s) = place_admin2.as_ref() { parts.push(s.clone()); }
-                if let Some(s) = place_admin1.as_ref() { parts.push(s.clone()); }
-                if let Some(s) = postcode_str.as_ref() { parts.push(s.clone()); }
-                parts.push(addr_country.name.clone());
-                let _ = pick_settle; // tiered selection lives in addr/parts above
-                let display_name = parts.join(", ");
+                // Compose primary "house_number road" string, then defer
+                // to compose_display_name for the rest of the pyramid.
+                let primary = if !addr_result.housenumber.is_empty() && !addr_result.street.is_empty() {
+                    format!("{} {}", addr_result.housenumber, addr_result.street)
+                } else {
+                    addr_result.street.clone()
+                };
+                let settlement = city.as_deref().or(town.as_deref()).or(village.as_deref());
+                let display_name = compose_display_name(
+                    if primary.is_empty() { None } else { Some(&primary) },
+                    suburb.as_deref(),
+                    settlement,
+                    place_admin2.as_deref(),
+                    place_admin1.as_deref(),
+                    postcode_str.as_deref(),
+                    Some(&addr_country.name),
+                );
 
                 let mut result = serde_json::json!({
                     "place_id": 0,
+                    "licence": NOMINATIM_LICENCE,
                     "osm_type": "way",
                     "osm_id": serde_json::Value::Null,
+                    "place_rank": place_rank_from_str("house"),
                     "display_name": display_name,
                     "lat": format!("{:.7}", addr_result.coord.lat_f64()),
                     "lon": format!("{:.7}", addr_result.coord.lon_f64()),
@@ -2498,22 +2557,29 @@ async fn reverse(
     let admin1 = country.index.admin_entry(record.admin1_id).map(|a| a.name.clone());
     let admin2 = country.index.admin_entry(record.admin2_id).map(|a| a.name.clone());
 
-    let display_name = match (&admin2, &admin1) {
-        (Some(a2), Some(a1)) => format!("{}, {}, {}", name, a2, a1),
-        (None, Some(a1)) => format!("{}, {}", name, a1),
-        _ => name.clone(),
-    };
+    let display_name = compose_display_name(
+        Some(&name),
+        None,
+        None,
+        admin2.as_deref(),
+        admin1.as_deref(),
+        None,
+        Some(&country.name),
+    );
 
     let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
 
+    let place_type_str = format!("{:?}", record.place_type).to_lowercase();
     let mut result = serde_json::json!({
         "place_id": stable_place_id(&record),
+        "licence": NOMINATIM_LICENCE,
         "osm_type": osm_type_from_flags(record.flags),
         "osm_id": if record.osm_id != 0 { Some(record.osm_id) } else { None::<u32> },
+        "place_rank": place_rank_from_str(&place_type_str),
         "display_name": display_name,
         "lat": format!("{:.7}", record.coord.lat_f64()),
         "lon": format!("{:.7}", record.coord.lon_f64()),
-        "type": format!("{:?}", record.place_type).to_lowercase(),
+        "type": place_type_str,
         "importance": record.importance as f64 / 65535.0,
         "distance_m": format!("{:.0}", distance_m),
     });
@@ -2594,11 +2660,15 @@ async fn lookup(
             let admin2 = country.index.admin_entry(record.admin2_id).map(|a| a.name.clone());
             let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
 
-            let display_name = match (&admin2, &admin1) {
-                (Some(a2), Some(a1)) => format!("{}, {}, {}", name, a2, a1),
-                (None, Some(a1)) => format!("{}, {}", name, a1),
-                _ => name.clone(),
-            };
+            let display_name = compose_display_name(
+                Some(&name),
+                None,
+                None,
+                admin2.as_deref(),
+                admin1.as_deref(),
+                None,
+                Some(&country.name),
+            );
 
             let address = if params.addressdetails > 0 {
                 let (city, town, village, suburb) = place_type_to_settlement(&record.place_type, &name);
@@ -2668,11 +2738,15 @@ async fn lookup(
                 let admin2 = country.index.admin_entry(record.admin2_id).map(|a| a.name.clone());
                 let cc = std::str::from_utf8(&country.code).unwrap_or("??").to_lowercase();
 
-                let display_name = match (&admin2, &admin1) {
-                    (Some(a2), Some(a1)) => format!("{}, {}, {}", name, a2, a1),
-                    (None, Some(a1)) => format!("{}, {}", name, a1),
-                    _ => name.clone(),
-                };
+                let display_name = compose_display_name(
+                    Some(&name),
+                    None,
+                    None,
+                    admin2.as_deref(),
+                    admin1.as_deref(),
+                    None,
+                    Some(&country.name),
+                );
 
                 let address = if params.addressdetails > 0 {
                     let (city, town, village, suburb) = place_type_to_settlement(&record.place_type, &name);
@@ -2908,11 +2982,15 @@ fn to_nominatim(
     country_code: &str,
     country_name: &str,
 ) -> NominatimResult {
-    let display_name = match (&r.admin2, &r.admin1) {
-        (Some(a2), Some(a1)) => format!("{}, {}, {}", r.name, a2, a1),
-        (None, Some(a1)) => format!("{}, {}", r.name, a1),
-        _ => r.name.clone(),
-    };
+    let display_name = compose_display_name(
+        Some(&r.name),
+        None,
+        None,
+        r.admin2.as_deref(),
+        r.admin1.as_deref(),
+        None,
+        Some(country_name),
+    );
 
     let match_type_str = match r.match_type {
         MatchType::Exact => "exact",
@@ -2983,6 +3061,48 @@ fn to_nominatim_enriched(
         }
     }
     result
+}
+
+/// Compose a Nominatim-style `display_name` from address pyramid parts.
+///
+/// Walks: primary → suburb → settlement (city/town/village picked by
+/// caller) → admin2 (county) → admin1 (state) → postcode → country.
+/// Empty parts are skipped. Duplicate parts are skipped — a city record
+/// shouldn't repeat itself when its admin2 name matches the city, and
+/// a record whose primary name *is* the suburb shouldn't list the
+/// suburb twice.
+///
+/// Postcode is the only field that bypasses dedup, since postal codes
+/// can legitimately collide with admin names in some places.
+fn compose_display_name(
+    primary: Option<&str>,
+    suburb: Option<&str>,
+    settlement: Option<&str>,
+    admin2: Option<&str>,
+    admin1: Option<&str>,
+    postcode: Option<&str>,
+    country: Option<&str>,
+) -> String {
+    fn push_dedup(parts: &mut Vec<String>, s: Option<&str>) {
+        if let Some(v) = s {
+            if !v.is_empty() && !parts.iter().any(|p| p == v) {
+                parts.push(v.to_owned());
+            }
+        }
+    }
+    let mut parts: Vec<String> = Vec::with_capacity(7);
+    push_dedup(&mut parts, primary);
+    push_dedup(&mut parts, suburb);
+    push_dedup(&mut parts, settlement);
+    push_dedup(&mut parts, admin2);
+    push_dedup(&mut parts, admin1);
+    if let Some(s) = postcode {
+        if !s.is_empty() {
+            parts.push(s.to_owned());
+        }
+    }
+    push_dedup(&mut parts, country);
+    parts.join(", ")
 }
 
 /// Map a PlaceType to the appropriate Nominatim settlement field.
@@ -4486,6 +4606,113 @@ mod tests {
         let json = serde_json::to_string(&r).unwrap();
         assert!(json.contains("\"address\""));
         assert!(json.contains("Stockholm"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Tier 1 response shape (TODO_NOMINATIM_PARITY Phase 1.2)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_nominatim_result_emits_licence() {
+        let r = NominatimResult {
+            place_id: 1, osm_type: None, osm_id: None,
+            display_name: "Test".into(),
+            lat: "0".into(), lon: "0".into(),
+            place_type: "city".into(),
+            importance: 0.5, match_type: None, address: None, internal: None,
+        };
+        let v: serde_json::Value = serde_json::to_value(&r).unwrap();
+        assert_eq!(v["licence"], NOMINATIM_LICENCE);
+    }
+
+    #[test]
+    fn test_nominatim_result_emits_place_rank() {
+        let cases = [
+            ("country", 4u16),
+            ("state", 8),
+            ("county", 12),
+            ("city", 16),
+            ("town", 19),
+            ("village", 21),
+            ("postcode", 21),
+            ("street", 26),
+            ("house", 30),
+            ("landmark", 30),
+            ("unknown", 30),
+        ];
+        for (s, expected) in cases {
+            assert_eq!(place_rank_from_str(s), expected, "rank for {s}");
+        }
+    }
+
+    #[test]
+    fn test_nominatim_result_place_rank_in_json() {
+        let r = NominatimResult {
+            place_id: 1, osm_type: None, osm_id: None,
+            display_name: "Test".into(),
+            lat: "0".into(), lon: "0".into(),
+            place_type: "city".into(),
+            importance: 0.5, match_type: None, address: None, internal: None,
+        };
+        let v: serde_json::Value = serde_json::to_value(&r).unwrap();
+        assert_eq!(v["place_rank"], 16);
+    }
+
+    #[test]
+    fn test_compose_display_name_appends_country() {
+        let s = compose_display_name(
+            Some("Stockholm"),
+            None, None,
+            Some("Stockholm"),
+            Some("Stockholms län"),
+            None,
+            Some("Sweden"),
+        );
+        // "Stockholm" admin2 dedups against the primary, so the chain is
+        // primary, admin1, country.
+        assert_eq!(s, "Stockholm, Stockholms län, Sweden");
+    }
+
+    #[test]
+    fn test_compose_display_name_full_pyramid() {
+        let s = compose_display_name(
+            Some("12 Hamngatan"),
+            Some("Norrmalm"),
+            Some("Stockholm"),
+            Some("Stockholm"),
+            Some("Stockholms län"),
+            Some("111 51"),
+            Some("Sweden"),
+        );
+        // settlement and admin2 share name "Stockholm" — only one appears.
+        assert_eq!(s, "12 Hamngatan, Norrmalm, Stockholm, Stockholms län, 111 51, Sweden");
+    }
+
+    #[test]
+    fn test_compose_display_name_skips_empty_and_duplicates() {
+        let s = compose_display_name(
+            Some("Lund"),
+            None, None,
+            Some(""),
+            Some("Skåne"),
+            None,
+            Some("Sweden"),
+        );
+        assert_eq!(s, "Lund, Skåne, Sweden");
+    }
+
+    #[test]
+    fn test_compose_display_name_postcode_can_collide() {
+        // Postcode bypasses dedup — it can legitimately equal an admin name.
+        let s = compose_display_name(
+            Some("Some Place"),
+            None, None,
+            None, None,
+            Some("Sweden"),
+            Some("Sweden"),
+        );
+        // Postcode "Sweden" (theoretical) is preserved, country dedups.
+        assert_eq!(s, "Some Place, Sweden");
     }
 
     // -----------------------------------------------------------------------
